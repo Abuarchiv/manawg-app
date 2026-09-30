@@ -191,13 +191,13 @@ export function ImportWizard() {
 		heading.scrollIntoView({ block: 'start', behavior: 'auto' });
 	}, [step]);
 
-	const conflicts = useMemo(() => preview?.conflicts ?? [], [preview]);
 	// Import assigns expenses to a member ("aus Listen raus": moved-out members are
 	// not offered as targets). Historic names in the CSV still resolve by name.
 	const memberOptions = useMemo(
 		() => members.filter((m) => m.active).map((m) => ({ id: m.id, name: m.name })),
 		[members],
 	);
+	const activeMemberIds = useMemo(() => new Set(memberOptions.map((m) => m.id)), [memberOptions]);
 	const namesNeedingMapping = useMemo(() => {
 		if (!preview) return [];
 		const names = new Set<string>();
@@ -209,6 +209,21 @@ export function ImportWizard() {
 		}
 		return Array.from(names);
 	}, [preview]);
+	// What the commit would reject right now: a name that is unmapped or points
+	// at a member who is not (or no longer) active. Derived from the current
+	// mapping instead of the preview response so fixing a name in the mapping
+	// step clears it immediately, and re-checked on every commit because a
+	// member can be deactivated between preview and commit.
+	const invalidNames = useMemo(
+		() =>
+			new Set(
+				namesNeedingMapping.filter((name) => {
+					const id = mapping[name];
+					return !id || !activeMemberIds.has(id);
+				}),
+			),
+		[namesNeedingMapping, mapping, activeMemberIds],
+	);
 	const commitRecoveryAction = useMemo(() => {
 		if (!commitResult) return null;
 		for (const item of commitResult.errors) {
@@ -447,7 +462,7 @@ export function ImportWizard() {
 		setStep('preview');
 	}
 
-	const allMapped = namesNeedingMapping.every((name) => Boolean(mapping[name]));
+	const allMapped = invalidNames.size === 0;
 
 	const stepNumber = ['source', 'input', 'mapping', 'preview', 'commit'].indexOf(step) + 1;
 	const selectedCount = (preview?.parsed.length ?? 0) - skipIndexes.size;
@@ -647,7 +662,7 @@ export function ImportWizard() {
 						Namen WG-Mitgliedern zuordnen
 					</h2>
 					<p className="text-sm text-muted-foreground">
-						{conflicts.length > 0
+						{invalidNames.size > 0
 							? 'Ordne die markierten Namen zu.'
 							: 'Alle Namen automatisch erkannt. Bitte prüfen.'}
 					</p>
@@ -684,10 +699,25 @@ export function ImportWizard() {
 						Prüfe Betrag, Zahler:in und alle Anteile. Wähle Einträge ab, die du nicht übernehmen
 						möchtest.
 					</p>
+					{invalidNames.size > 0 && (
+						<Alert variant="destructive">
+							<AlertTitle>Zuordnung prüfen</AlertTitle>
+							<AlertDescription className="flex flex-col items-start gap-2">
+								<span>
+									{Array.from(invalidNames).join(', ')} {invalidNames.size === 1 ? 'ist' : 'sind'}{' '}
+									keinem aktiven Mitglied zugeordnet.
+								</span>
+								<Button variant="outline" disabled={busy} onClick={() => setStep('mapping')}>
+									Zuordnung prüfen
+								</Button>
+							</AlertDescription>
+						</Alert>
+					)}
 					<ImportPreviewTable
 						expenses={preview.parsed}
 						mapping={mapping}
 						members={memberOptions}
+						conflicts={invalidNames}
 						skipIndexes={skipIndexes}
 						onToggleSkip={toggleSkip}
 						disabled={busy}
@@ -711,7 +741,7 @@ export function ImportWizard() {
 					<div className="sticky bottom-[calc(var(--app-nav-height,5rem)+env(safe-area-inset-bottom))] flex gap-2 bg-background py-3">
 						<Button
 							className="flex-1"
-							disabled={busy || selectedCount === 0}
+							disabled={busy || selectedCount === 0 || invalidNames.size > 0}
 							onClick={() => void submitCommit()}
 						>
 							{busy && <Spinner data-icon="inline-start" />}Importieren ({selectedCount})

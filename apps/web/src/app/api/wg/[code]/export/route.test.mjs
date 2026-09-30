@@ -20,7 +20,19 @@ function loadTs(file, overrides = {}) {
 	return module.exports;
 }
 
-function exportRoute(failedTable) {
+function expenseRows(count) {
+	return Array.from({ length: count }, (_unused, index) => ({
+		id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+		description: `expense ${index}`,
+		amountCents: 1000,
+		currency: 'EUR',
+		paidByMemberId: 'member',
+		imageUrl: null,
+		occurredAt: new Date('2026-09-01T10:00:00.000Z'),
+	}));
+}
+
+function exportRoute(failedTable, { expenses: expenseFixture = [] } = {}) {
 	const tables = Object.fromEntries(
 		[
 			'announcements',
@@ -35,13 +47,14 @@ function exportRoute(failedTable) {
 		].map((name) => [name, {}]),
 	);
 	const limits = [];
+	const inArraySizes = [];
 	const db = {
 		select: () => ({
 			from: (table) => {
 				const rows =
 					table === tables[failedTable]
 						? Promise.reject(new Error('section unavailable'))
-						: Promise.resolve([]);
+						: Promise.resolve(table === tables.expenses ? expenseFixture : []);
 				const query = Object.assign(rows, {
 					where: () => query,
 					orderBy: () => query,
@@ -76,11 +89,23 @@ function exportRoute(failedTable) {
 		'@/core/infra/observability': { logApiError: () => undefined },
 		'@/core/rate-limit': { checkRateLimit: async () => ({ success: true }) },
 		'@/core/reads/export': loadTs('src/core/reads/export.ts'),
-		'drizzle-orm': { asc: () => null, desc: () => null, eq: () => null, inArray: () => null },
+		'drizzle-orm': {
+			asc: () => null,
+			desc: () => null,
+			eq: () => null,
+			inArray: (_column, ids) => {
+				inArraySizes.push(ids.length);
+				// Postgres refuses a statement with more than 65,535 bind
+				// parameters — model that so an unchunked fetch fails the section.
+				if (ids.length > 65_535) throw new Error('bind parameters exceed 65535');
+				return null;
+			},
+		},
 		'next/server': { NextResponse: Response },
 	});
 	return {
 		limits,
+		inArraySizes,
 		get: (search = '') => GET({ nextUrl: new URL(`https://example.invalid/export${search}`) }, {}),
 	};
 }
@@ -107,4 +132,31 @@ test('one failed JSON section rejects the incomplete backup', async (t) => {
 	const response = await exportRoute('expenses').get('?limit=20');
 	assert.equal(response.status, 500);
 	assert.equal((await response.json()).error, 'export_incomplete');
+});
+
+test("expense split fetches stay under Postgres' 65,535 bind limit on every path", async () => {
+	// 66,000 expenses exceed the parameter cap if their ids reach one inArray.
+	const rows = expenseRows(66_000);
+	for (const search of [
+		'',
+		'?sections=expenses',
+		'?format=csv&section=expenses',
+		'?format=csv&section=expenses&limit=100000',
+	]) {
+		const route = exportRoute(undefined, { expenses: rows });
+		const response = await route.get(search);
+		assert.equal(response.status, 200, `${search}: ${await response.text()}`);
+		assert.ok(route.inArraySizes.length > 0, `${search}: splits must be fetched`);
+		assert.ok(
+			Math.max(...route.inArraySizes) <= 10_000,
+			`${search}: chunk size ${Math.max(...route.inArraySizes)} must stay far below 65,535`,
+		);
+	}
+});
+
+test('an explicit limit at the declared maximum still returns 200', async () => {
+	const route = exportRoute(undefined, { expenses: expenseRows(5) });
+	const response = await route.get('?limit=100000&offset=0');
+	assert.equal(response.status, 200, await response.text());
+	assert.ok(route.limits.every((limit) => limit === 100_000));
 });

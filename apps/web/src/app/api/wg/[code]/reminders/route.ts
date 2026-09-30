@@ -22,7 +22,7 @@ import {
 	canSendReminder,
 	formatReminderMessage,
 } from '@/features/expenses/reminders';
-import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -83,6 +83,10 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 	const denied = await requireOwnerOrAdmin(wg.id, auth.member, creditorMemberId, 'not_creditor');
 	if (denied) return denied;
 
+	// Active members only: `expenses/settle-batch` requires the same
+	// `isNull(deactivatedAt)` guard, so a reminder can never be dispatched for
+	// someone who has moved out of the WG.
+	const memberIds = [debtorMemberId, creditorMemberId];
 	const memberRows = await db
 		.select({
 			id: wgMembers.id,
@@ -91,9 +95,23 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 		})
 		.from(wgMembers)
 		.where(
-			and(eq(wgMembers.wgId, wg.id), inArray(wgMembers.id, [debtorMemberId, creditorMemberId])),
+			and(
+				eq(wgMembers.wgId, wg.id),
+				inArray(wgMembers.id, memberIds),
+				isNull(wgMembers.deactivatedAt),
+			),
 		);
-	if (memberRows.length !== 2) return badRequest('member_not_in_wg');
+	if (memberRows.length !== 2) {
+		// Keep the existing copy: someone who left the WG is
+		// `member_deactivated` (what settle-batch answers), a member that never
+		// belonged here is `member_not_in_wg`.
+		const known = await db
+			.select({ id: wgMembers.id })
+			.from(wgMembers)
+			.where(and(eq(wgMembers.wgId, wg.id), inArray(wgMembers.id, memberIds)))
+			.limit(2);
+		return badRequest(known.length === 2 ? 'member_deactivated' : 'member_not_in_wg');
+	}
 
 	const debtor = memberRows.find((row) => row.id === debtorMemberId);
 	const creditor = memberRows.find((row) => row.id === creditorMemberId);

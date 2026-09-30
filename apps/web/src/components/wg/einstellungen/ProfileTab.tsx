@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { MemberAvatar } from '@/components/wg/MemberAvatar';
+import { LinkRow } from '@/components/wg/einstellungen/LinkRow';
 import { Section } from '@/components/wg/einstellungen/Section';
 import { apiFetch } from '@/core/infra/api-client';
 import { InstallButton } from '@/shared/components/install-button';
@@ -197,6 +198,18 @@ export function ProfileTab({
 						</Alert>
 					)}
 				</div>
+			</Section>
+
+			<Section
+				title="Hilfe"
+				hint="Beschreibe, was passiert ist und wie wir den Fehler nachstellen können."
+			>
+				<ul>
+					<LinkRow
+						href="mailto:info@manawg.com?subject=Fehler%20in%20ManaWG"
+						label="Fehler per E-Mail melden"
+					/>
+				</ul>
 			</Section>
 		</>
 	);

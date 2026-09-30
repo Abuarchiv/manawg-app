@@ -18,7 +18,7 @@ import {
 import type { RouteCtx } from '@/core/infra/api-types';
 import { logApiError } from '@/core/infra/observability';
 import type { NotificationDispatchWarning } from '@/core/notifications/notification-dispatch';
-import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
+import { checkRateLimit, wgReadLimiter, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
 import { imageUrlSchema, isAllowedImageUrlForWg } from '@/core/validators/image-url';
 import { AMOUNT_MAX_CENTS, AMOUNT_MIN_CENTS } from '@/features/expenses/expense-constants';
@@ -34,7 +34,7 @@ import {
 	resolveExpensePayer,
 } from '@/features/expenses/expenses';
 import { splitValidationErrorCode, validateSplits } from '@/features/expenses/split-math';
-import { and, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -42,6 +42,26 @@ const DESCRIPTION_MIN = 1;
 const DESCRIPTION_MAX = 200;
 const MAX_SPLITS = 50;
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
+
+// GET pagination, mirroring `members`: the default keeps the historic
+// full-history payload (the ausgaben/mahnungen pages compute net balances
+// from this list), while the hard ceiling is what bounds the read — it keeps
+// the `inArray(expenseId, ids)` below Postgres' 65,535 bind-parameter cap
+// (a WG past that row count answered 500 instead of data) and lets clients
+// page with limit/offset.
+const EXPENSES_PAGE_LIMIT_DEFAULT = 50_000;
+const EXPENSES_PAGE_LIMIT_MAX = 50_000;
+
+function readPageParams(req: NextRequest): { limit: number; offset: number } {
+	const params = req.nextUrl.searchParams;
+	const rawLimit = Number.parseInt(params.get('limit') ?? '', 10);
+	const rawOffset = Number.parseInt(params.get('offset') ?? '', 10);
+	const limit = Number.isFinite(rawLimit)
+		? Math.min(Math.max(rawLimit, 1), EXPENSES_PAGE_LIMIT_MAX)
+		: EXPENSES_PAGE_LIMIT_DEFAULT;
+	const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
+	return { limit, offset };
+}
 
 type ExpenseCreateResponseBody = { expense: unknown; warning: NotificationDispatchWarning };
 
@@ -97,14 +117,29 @@ export const GET = withWgRoute(
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;
 
-		const rows = await db
-			.select()
-			.from(expenses)
-			.where(eq(expenses.wgId, wgId))
-			.orderBy(desc(expenses.occurredAt));
+		// Route-level read budget on top of the middleware's per-IP limit: keyed
+		// per member so flatmates behind one NAT share neither the scrape budget
+		// nor the lockout (same rationale as the dashboard throttle).
+		const limited = await checkRateLimit(wgReadLimiter, `expenses:${wgId}:${auth.member.memberId}`);
+		if (!limited.success) return tooMany();
 
-		if (rows.length === 0) return NextResponse.json({ expenses: [] });
+		const { limit, offset } = readPageParams(req);
+		const [rows, totalRows] = await Promise.all([
+			db
+				.select()
+				.from(expenses)
+				.where(eq(expenses.wgId, wgId))
+				.orderBy(desc(expenses.occurredAt), desc(expenses.id))
+				.limit(limit)
+				.offset(offset),
+			db.select({ total: count() }).from(expenses).where(eq(expenses.wgId, wgId)),
+		]);
 
+		const pagination = { total: totalRows[0]?.total ?? 0, limit, offset };
+		if (rows.length === 0) return NextResponse.json({ expenses: [], pagination });
+
+		// Bounded by the page limit above (≤ EXPENSES_PAGE_LIMIT_MAX < 65,535),
+		// so this inArray can never exceed Postgres' bind-parameter cap.
 		const expenseIds = rows.map((r) => r.id);
 		const [splits, payments] = await Promise.all([
 			db.select().from(expenseSplits).where(inArray(expenseSplits.expenseId, expenseIds)),
@@ -124,6 +159,7 @@ export const GET = withWgRoute(
 				splits: splitsByExpense.get(e.id) ?? [],
 			})),
 			payments,
+			pagination,
 		});
 	},
 	{

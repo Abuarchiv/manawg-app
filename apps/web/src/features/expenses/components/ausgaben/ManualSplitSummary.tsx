@@ -2,9 +2,10 @@
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
+import { parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { formatEuroCents } from '@/core/utils/money';
+import { distributeRemainderSplits } from '@/features/expenses/manual-split-remainder';
 import type { Dispatch, SetStateAction } from 'react';
 
 interface ManualSplitSummaryProps {
@@ -34,29 +35,10 @@ export function ManualSplitSummary({
 
 	function distributeRemainder(): void {
 		if (totalCents <= 0 || remainderCents === 0) return;
-		const emptyMembers = members.filter((m) => {
-			const v = manualSplits[m.id];
-			if (!v) return true;
-			const n = parseEuroAmount(v);
-			return n === null || n === 0;
-		});
-		const targets = emptyMembers.length > 0 ? emptyMembers : members;
-		if (targets.length === 0) return;
-		const perCent = Math.floor(remainderCents / targets.length);
-		let leftover = remainderCents - perCent * targets.length;
-		setManualSplits((prev) => {
-			const next = { ...prev };
-			for (const t of targets) {
-				const curEuros = parseEuroAmount(next[t.id] ?? '') ?? 0;
-				const curCents = Math.round(curEuros * CENTS_PER_EURO);
-				const addCents = perCent + (leftover > 0 ? 1 : leftover < 0 ? -1 : 0);
-				if (leftover > 0) leftover--;
-				else if (leftover < 0) leftover++;
-				const nextCents = curCents + addCents;
-				next[t.id] = formatEuroInput(nextCents / CENTS_PER_EURO);
-			}
-			return next;
-		});
+		// Computed outside the updater: a pure result is handed to the state
+		// setter, so StrictMode's second invocation cannot lose cents.
+		const next = distributeRemainderSplits(members, manualSplits, remainderCents);
+		if (next !== null) setManualSplits(next);
 	}
 
 	return (
@@ -89,7 +71,7 @@ export function ManualSplitSummary({
 					variant="outline"
 					size="lg"
 					onClick={distributeRemainder}
-					disabled={disabled}
+					disabled={disabled || remainderCents < 0}
 				>
 					Rest aufteilen
 				</Button>

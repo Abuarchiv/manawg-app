@@ -118,7 +118,11 @@ async function advanceTemplate(template: DueRecurring): Promise<CreatedAdvance[]
 				nextDueAt,
 				lastCreatedAt: now,
 				updatedAt: now,
-				...(template.anchorAt ? {} : { anchorAt: nextDueAt }),
+				// Legacy rows adopt the PRE-advance due date as anchor (same as
+				// buildRecurringAdvance). Storing `nextDueAt` here would freeze the
+				// clamped successor — a template due on the 31st would drift to the
+				// 28th forever instead of staying at month end.
+				...(template.anchorAt ? {} : { anchorAt: template.nextDueAt }),
 			})
 			.where(eq(recurringExpenses.id, template.id));
 	}

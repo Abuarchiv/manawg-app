@@ -47,6 +47,7 @@ import {
 	createOfflineIdempotencyKey,
 	createQueuedShoppingItem,
 	createQueuedShoppingUpdate,
+	resolveLocalRowRemoval,
 } from '@/core/offline/offline-queue';
 import { useOfflineQueueSync } from '@/core/offline/useOfflineQueueSync';
 import { useVisibilityPausedInterval } from '@/core/utils/use-visibility-paused-interval';
@@ -139,6 +140,7 @@ export default function EinkaufPage() {
 	const [toggleNotice, setToggleNotice] = useState<string | null>(null);
 	const [removeError, setRemoveError] = useState<string | null>(null);
 	const [removeErrorId, setRemoveErrorId] = useState<string | null>(null);
+	const [removeNotice, setRemoveNotice] = useState<string | null>(null);
 	const [adding, setAdding] = useState(false);
 	const [clearingBought, setClearingBought] = useState(false);
 	const [clearConfirmOpen, setClearConfirmOpen] = useState(false);
@@ -541,6 +543,32 @@ export default function EinkaufPage() {
 			start(id);
 			setRemoveError(null);
 			setRemoveErrorId(null);
+			setRemoveNotice(null);
+			// Offline angelegte Zeilen tragen eine synthetische ID, die der Server
+			// nie vergeben hat: hier lokal entfernen statt mit 400 id_invalid zu
+			// scheitern — dasselbe Muster wie in toggleBought.
+			const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
+			if (localRemoval) {
+				if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
+					setRemoveErrorId(id);
+					setRemoveError(
+						'Offline-Speicher ist blockiert. Der Eintrag konnte nicht entfernt werden.',
+					);
+					end(id);
+					return;
+				}
+				setQueueEditId((current) => (current === id ? null : current));
+				commitItems((prev) =>
+					keepItems(
+						prev,
+						prev.filter((item) => item.id !== id),
+					),
+				);
+				refreshCount();
+				setRemoveNotice('Der offline angelegte Eintrag wurde aus deiner Liste entfernt.');
+				end(id);
+				return;
+			}
 			const res = await apiFetch<unknown>(
 				`/api/wg/${encodedShareCode}/shopping/${encodeURIComponent(id)}`,
 				{
@@ -587,7 +615,9 @@ export default function EinkaufPage() {
 			identity.memberToken,
 			isPending,
 			load,
+			refreshCount,
 			start,
+			wg.shareCode,
 		],
 	);
 
@@ -774,6 +804,11 @@ export default function EinkaufPage() {
 			{toggleNotice && (
 				<Alert>
 					<AlertDescription>{toggleNotice}</AlertDescription>
+				</Alert>
+			)}
+			{removeNotice && (
+				<Alert>
+					<AlertDescription>{removeNotice}</AlertDescription>
 				</Alert>
 			)}
 			{myFreshBought.length > 0 && (

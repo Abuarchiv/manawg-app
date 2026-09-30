@@ -11,6 +11,7 @@ import {
 	getCachedResponse,
 	persistImportReplayWarning,
 	readIdempotencyKey,
+	releaseResponseSlot,
 } from '@/core/idempotency';
 import type { RouteCtx } from '@/core/infra/api-types';
 import { logApiError } from '@/core/infra/observability';
@@ -64,6 +65,11 @@ export async function POST(
 	const { code } = codeResult;
 	const idemKey = readIdempotencyKey(req);
 	let replayReservation: Extract<ReplayReservation<CommitResult>, { owned: true }> | null = null;
+	// Set once this request owns the Postgres claim. A failure after that point
+	// must release it, otherwise the claim's 15-minute lease turns the caller's
+	// immediate retry (same Idempotency-Key, unchanged body) into
+	// `idempotency_response_pending` instead of the original error.
+	let claimedSlot: { scope: string; key: string } | null = null;
 
 	const raw = await readImportJsonBody(req);
 	if (!raw.ok) return badRequest(raw.error);
@@ -158,6 +164,7 @@ export async function POST(
 				replayReservation?.resolve(slot.cached);
 				return NextResponse.json(slot.cached);
 			}
+			claimedSlot = { scope: idemScope, key: idemKey };
 		}
 
 		const dbSource = source === 'ocr_text' ? ('ocr_screenshot' as const) : source;
@@ -200,6 +207,13 @@ export async function POST(
 		if (replayReservation?.owned) replayReservation.resolve(result);
 		return NextResponse.json(result);
 	} catch (err) {
+		// Free the Postgres claim before answering: the client reuses the same
+		// Idempotency-Key for an unchanged body, and a claim left behind for its
+		// 15-minute lease makes that retry poll for a response that will never
+		// arrive (`idempotency_response_pending` → 503 instead of this status).
+		// `releaseResponseSlot` only deletes a still-unfilled claim, so a
+		// response persisted by a completed commit is left untouched.
+		if (claimedSlot) await releaseResponseSlot(claimedSlot.scope, claimedSlot.key);
 		replayReservation?.reject(err);
 		if (err instanceof Error && err.message === 'member_not_in_wg') {
 			return badRequest('member_not_in_wg');

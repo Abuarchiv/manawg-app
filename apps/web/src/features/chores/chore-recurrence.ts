@@ -20,11 +20,24 @@
  * on the exact same calendar day each year. Month-end is clamped (Jan 31 + 1
  * month → Feb 28/29, NOT March 3) the same way JS clamps natively after the
  * overflow-detection step.
+ *
+ * Bug history #3: the 'days' branch advanced with `interval * MS_PER_DAY`, an
+ * absolute duration. Across Berlin's DST transitions that shifts the wall clock
+ * of the due date by an hour and — for due times near midnight — lands on the
+ * wrong calendar day (due 00:00, interval 7 → 25.10 23:00 instead of 26.10
+ * 00:00). It now adds calendar days in Europe/Berlin, the same wall-clock
+ * re-alignment the events feature uses for recurrence occurrences.
+ *
+ * Bug history #4: lateness was measured against the due *timestamp*, so a
+ * completion on the due day at 18:00 (due 09:00) counted as "late" and
+ * re-anchored the monthly cycle on `completedAt` — the normal case, which made
+ * the stored anchor unusable. Lateness is now a Berlin calendar-day comparison
+ * (`isLateCompletion`): only a completion after the due *day* has passed
+ * re-anchors the cycle.
  */
 
 import type { ChoreRecurrenceType } from '@/core/db/schema';
-
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+import { addBerlinDays, berlinDayKey } from '@/core/utils/berlin-day';
 
 /**
  * Compute the next due date for a recurring chore after completion.
@@ -33,11 +46,13 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * @param interval       cadence in days OR months (see `recurrenceType`);
  *                       `0` keeps the previous due (one-shot)
  * @param completedAt    timestamp at which the chore was completed
- * @param recurrenceType `'days'` (ms arithmetic, legacy default) or
+ * @param recurrenceType `'days'` (calendar days in Berlin, legacy default) or
  *                       `'months'` (calendar-accurate via `setMonth`)
  * @param anchorAt       original cadence anchor; keeps the month-end
  *                       day-of-month stable across clamps (31.01 → 28.02 →
  *                       31.03). Null on legacy rows — adopted from prevDueAt.
+ *                       Store the *intended* day (the creation/requested date),
+ *                       never a clamped first due date.
  */
 export function computeNextDueAt(
 	prevDueAt: Date,
@@ -54,10 +69,11 @@ export function computeNextDueAt(
 	}
 	const anchorMs = Math.max(prevDueAt.getTime(), completedAt.getTime());
 	if (recurrenceType === 'months') {
-		// A LATE completion re-anchors the cycle on completedAt (documented
-		// behavior). Otherwise keep the stored anchor so a month-end clamp
-		// (31.01 → 28.02) does not chain into a permanent day-of-month drift.
-		const late = completedAt.getTime() > prevDueAt.getTime();
+		// A genuinely late completion (after the due *day* in Berlin) re-anchors
+		// the cycle on completedAt (documented behavior). Otherwise keep the
+		// stored anchor so a month-end clamp (31.01 → 28.02) does not chain into
+		// a permanent day-of-month drift.
+		const late = isLateCompletion(prevDueAt, completedAt);
 		const anchor = late ? completedAt : (anchorAt ?? prevDueAt);
 		const anchorDay = anchor.getUTCDate();
 		const next = addCalendarMonths(new Date(anchorMs), interval);
@@ -67,7 +83,47 @@ export function computeNextDueAt(
 		next.setUTCDate(Math.min(anchorDay, lastDay));
 		return next;
 	}
-	return new Date(anchorMs + interval * MS_PER_DAY);
+	// Calendar days in Berlin: raw 24h arithmetic drifts by an hour across DST
+	// and can move the due to the neighbouring Berlin day near midnight.
+	return addBerlinDays(new Date(anchorMs), interval);
+}
+
+/**
+ * Whether a completion belongs to a later Berlin day than the due date.
+ *
+ * Compared against the due *day* (Europe/Berlin), not the due timestamp: a
+ * chore due 09:00 and completed the same day at 18:00 is on time, and must
+ * not re-anchor the cadence — otherwise every normal completion throws the
+ * stored anchor away and month-end days drift one step at a time.
+ */
+export function isLateCompletion(prevDueAt: Date, completedAt: Date): boolean {
+	return berlinDayKey(completedAt) > berlinDayKey(prevDueAt);
+}
+
+/**
+ * First due date and cadence anchor for a newly created chore (#507).
+ *
+ * The two are deliberately not the same value: an explicitly requested due
+ * date is stored verbatim (the server never clamps it, so its day-of-month is
+ * the day the member asked for), while the computed first due is the
+ * *clamped* result — a monthly chore created on 31.01 is first due 28.02.
+ * Storing that clamp as the anchor would freeze the day-of-month at 28
+ * (28.02 → 28.03 → 28.04) instead of the intended 31.01 → 28.02 → 31.03, so
+ * the anchor for a computed due is the un-clamped creation date.
+ */
+export function computeInitialDue(
+	createdAt: Date,
+	interval: number,
+	recurrenceType: ChoreRecurrenceType,
+	requestedDueAt: Date | null,
+): { nextDueAt: Date; anchorAt: Date } {
+	if (requestedDueAt) {
+		return { nextDueAt: new Date(requestedDueAt), anchorAt: requestedDueAt };
+	}
+	return {
+		nextDueAt: computeNextDueAt(createdAt, interval, createdAt, recurrenceType),
+		anchorAt: createdAt,
+	};
 }
 
 /**

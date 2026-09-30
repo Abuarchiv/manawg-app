@@ -33,11 +33,65 @@ const IMPORT_COMMIT = path.join(ROOT, 'src/features/expenses/import-commit.ts');
 const IMPORT_PARSERS = path.join(ROOT, 'src/features/expenses/import-parsers.ts');
 const RECURRING_HELPERS = path.join(ROOT, 'src/features/expenses/recurring-expenses.ts');
 const SPLIT_MATH = path.join(ROOT, 'src/features/expenses/split-math.ts');
+const SPLIT_INPUT = path.join(ROOT, 'src/features/expenses/expense-split-input.ts');
 
 const WG_ID = '989ac820-58b7-431f-9c65-28721264f333';
 const EXPENSE_ID = '550e8400-e29b-41d4-a716-446655440000';
 const CALLER_ID = '7d898f9e-5ad7-4f5d-abed-8c3e99a76973';
 const PAYER_ID = '0ab8c8f2-5d03-4a84-aadc-4c5d7e8abf55';
+
+test('expense edit keeps departed historical shares in manual splits', () => {
+	const splitInput = loadTs<{
+		isEqualExpenseSplit: (
+			amountCents: number,
+			splits: readonly { debtorMemberId: string; amountCents: number }[],
+			members: readonly { id: string; active?: boolean }[],
+		) => boolean;
+		buildSplitsFromForm: (input: {
+			splitMode: 'equal' | 'manual';
+			members: readonly { id: string; active?: boolean }[];
+			manualSplits: Record<string, string>;
+			amountCents: number;
+			rotationOffset: number;
+		}) => unknown;
+	}>(SPLIT_INPUT, {
+		'@/core/utils/amount': {
+			parseEuroAmount: (value: string) => Number(value.replace(',', '.')),
+		},
+		'@/core/utils/money': { CENTS_PER_EURO: 100 },
+		'@/features/expenses/split-math': loadTs(SPLIT_MATH),
+	});
+	const departedId = 'f2e2a748-3888-44fc-8c3c-6badfcad5690';
+	const members = [
+		{ id: CALLER_ID, active: true },
+		{ id: departedId, active: false },
+	];
+	const historicalSplits = [
+		{ debtorMemberId: CALLER_ID, amountCents: 500 },
+		{ debtorMemberId: departedId, amountCents: 500 },
+	];
+	const splitMode = splitInput.isEqualExpenseSplit(1000, historicalSplits, members)
+		? 'equal'
+		: 'manual';
+
+	expect(splitMode).toBe('manual');
+	expect(
+		splitInput.buildSplitsFromForm({
+			splitMode,
+			members,
+			manualSplits: { [CALLER_ID]: '5', [departedId]: '5' },
+			amountCents: 1000,
+			rotationOffset: 0,
+		}),
+	).toEqual({ ok: true, splits: historicalSplits });
+	expect(
+		splitInput.isEqualExpenseSplit(
+			1000,
+			[{ debtorMemberId: CALLER_ID, amountCents: 1000 }],
+			members,
+		),
+	).toBe(true);
+});
 
 function responseError(code: string, status: number): Response {
 	return Response.json({ error: code }, { status });
@@ -322,6 +376,7 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 		deactivatedAt: { table: 'wgMembers', name: 'deactivatedAt' },
 	};
 	const debtorId = 'f2e2a748-3888-44fc-8c3c-6badfcad5690';
+	const departedId = '9f2f0a21-b135-4d08-b1bd-846b034e7e90';
 	const initialUpdatedAt = new Date('2026-09-20T00:00:00.123Z');
 	const concurrentUpdatedAt = new Date('2026-09-20T00:00:00.123Z');
 	let mutateAtLock = true;
@@ -347,7 +402,11 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 		sql: (strings: TemplateStringsArray, _column: unknown, value: unknown): Predicate =>
 			strings[0]?.includes('greatest') ? { kind: 'nextVersion' } : { kind: 'millisEq', value },
 	};
-	const members = [{ id: debtorId, wgId: WG_ID, deactivatedAt: null }];
+	const members = [
+		{ id: debtorId, wgId: WG_ID, deactivatedAt: null },
+		{ id: CALLER_ID, wgId: WG_ID, deactivatedAt: null },
+		{ id: departedId, wgId: WG_ID, deactivatedAt: new Date('2026-09-01T00:00:00.000Z') },
+	];
 	const makeSelect = () => {
 		let table: unknown;
 		let condition: Predicate | undefined;
@@ -550,6 +609,73 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 	expect(currentExpense.amountCents).toBe(2000);
 	expect(currentSplits).toEqual([
 		{ expenseId: EXPENSE_ID, debtorMemberId: debtorId, amountCents: 2000, settledAt: null },
+	]);
+
+	const historicalSplits = [
+		{
+			expenseId: EXPENSE_ID,
+			debtorMemberId: CALLER_ID,
+			amountCents: 1000,
+			settledAt: new Date('2026-09-10T00:00:00.000Z'),
+		},
+		{ expenseId: EXPENSE_ID, debtorMemberId: departedId, amountCents: 1000, settledAt: null },
+	];
+	currentSplits = historicalSplits;
+	const unchangedHistoricalResponse = await route.PATCH(
+		new Request('http://localhost', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				description: 'Historischer Einkauf',
+				splits: [
+					{ debtorMemberId: CALLER_ID, amountCents: 1000 },
+					{ debtorMemberId: departedId, amountCents: 1000 },
+				],
+			}),
+		}),
+		{ code: 'MTE8PZAT', id: EXPENSE_ID },
+	);
+	expect(unchangedHistoricalResponse.status).toBe(200);
+	expect(currentSplits).toEqual(historicalSplits);
+
+	const removedHistoricalResponse = await route.PATCH(
+		new Request('http://localhost', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				description: 'Versucht den historischen Anteil zu entfernen',
+				splits: [{ debtorMemberId: CALLER_ID, amountCents: 2000 }],
+			}),
+		}),
+		{ code: 'MTE8PZAT', id: EXPENSE_ID },
+	);
+	expect(removedHistoricalResponse.status).toBe(400);
+	expect(await removedHistoricalResponse.json()).toEqual({ error: 'member_not_in_wg' });
+	expect(currentExpense.description).toBe('Historischer Einkauf');
+	expect(currentSplits).toEqual(historicalSplits);
+
+	currentSplits = [
+		{ expenseId: EXPENSE_ID, debtorMemberId: CALLER_ID, amountCents: 2000, settledAt: null },
+	];
+	const newlyIntroducedResponse = await route.PATCH(
+		new Request('http://localhost', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({
+				description: 'Darf keinen neuen inaktiven Anteil anlegen',
+				splits: [
+					{ debtorMemberId: CALLER_ID, amountCents: 1000 },
+					{ debtorMemberId: departedId, amountCents: 1000 },
+				],
+			}),
+		}),
+		{ code: 'MTE8PZAT', id: EXPENSE_ID },
+	);
+	expect(newlyIntroducedResponse.status).toBe(400);
+	expect(await newlyIntroducedResponse.json()).toEqual({ error: 'member_not_in_wg' });
+	expect(currentExpense.description).toBe('Historischer Einkauf');
+	expect(currentSplits).toEqual([
+		{ expenseId: EXPENSE_ID, debtorMemberId: CALLER_ID, amountCents: 2000, settledAt: null },
 	]);
 });
 

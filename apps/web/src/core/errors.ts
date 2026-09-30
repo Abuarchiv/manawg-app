@@ -41,6 +41,22 @@ const IDEMPOTENCY_RETRYABLE_CODES = new Set([
 	'idempotency_response_pending',
 ]);
 
+/**
+ * A transient Supabase Auth failure while resolving the caller.
+ *
+ * `getAuthenticatedUser` throws instead of returning `null` so an Auth outage
+ * can never be read as "not signed in". Handlers that call it outside a
+ * try/catch map that throw to this response — the same structured
+ * `503 db_error` that `requireWgMember`/`requireMember`/`requireWgAdmin`
+ * already return for it — plus `Retry-After`, so clients retry instead of
+ * getting a bare 500 with an unhandled error in the logs.
+ */
+export function authUnavailable(): NextResponse<ApiErrorBody> {
+	const response = apiError('db_error', HTTP_SERVICE_UNAVAILABLE);
+	response.headers.set('Retry-After', '1');
+	return response;
+}
+
 function isIdempotencyRetryable(value: unknown): boolean {
 	const message = typeof value === 'string' ? value : value instanceof Error ? value.message : null;
 	return message !== null && IDEMPOTENCY_RETRYABLE_CODES.has(message);

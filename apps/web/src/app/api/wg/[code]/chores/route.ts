@@ -28,7 +28,7 @@ import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { berlinDayKey, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { MS_PER_DAY } from '@/core/utils/time';
 import { computeOpenGapsByMember } from '@/features/chores/chore-fairness';
-import { computeNextDueAt } from '@/features/chores/chore-recurrence';
+import { computeInitialDue } from '@/features/chores/chore-recurrence';
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -203,12 +203,18 @@ export const POST = withWgRoute('chores POST', async (req, { code }) => {
 		assignedMemberId = null,
 		nextDueAt: nextDueAtStr,
 	} = parsed.data;
-	const nextDueAt = nextDueAtStr
-		? new Date(nextDueAtStr)
-		: // Calendar-aware initial due: months-based chores anchor on
-			// today + N months (not today + 30N days), matching the cadence the
-			// completion handler will use later. See chore-recurrence.ts.
-			computeNextDueAt(new Date(), intervalDays, new Date(), recurrenceType);
+	// First due and cadence anchor are computed together: the first due is the
+	// clamped result (calendar-aware — a monthly chore created on 31.01 is
+	// first due 28.02, not 30 days later), while the anchor keeps the intended
+	// day so the cycle comes back to 31.03 / 30.04 instead of freezing on 28.
+	// See computeInitialDue in chore-recurrence.ts (#507).
+	const requestedDueAt = nextDueAtStr ? new Date(nextDueAtStr) : null;
+	const { nextDueAt, anchorAt } = computeInitialDue(
+		new Date(),
+		intervalDays,
+		recurrenceType,
+		requestedDueAt,
+	);
 	const idemKey = readIdempotencyKey(req);
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
@@ -294,7 +300,7 @@ export const POST = withWgRoute('chores POST', async (req, { code }) => {
 					recurrenceType,
 					assignedMemberId,
 					nextDueAt,
-					anchorAt: nextDueAt,
+					anchorAt,
 				})
 				.returning();
 			if (!chore) throw new TransactionAbort('insert_failed');

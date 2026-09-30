@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { chooseNextAvailableMember } from '../src/features/chores/chore-fairness';
+import { MEMBER_TOKEN_HEADER } from '../src/shared/lib/member-header';
 import { FIXTURE_WG, dismissOnboarding, navigateToFeature, setupMember } from './_helpers';
 
 test.skip(process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true', 'requires local fixture server');
@@ -47,11 +48,14 @@ async function openPutzen(
 	members: FixtureMember[],
 	chores: ReturnType<typeof chore>[],
 	absences: FixtureAbsence[],
+	viewerIsAdmin = false,
 ) {
 	await setupMember(page);
-	await page.route(`**/api/wg/${SHARE_CODE}/members`, (route) =>
-		route.fulfill({ json: { members, viewerIsAdmin: false } }),
-	);
+	const memberTokens: Array<string | undefined> = [];
+	await page.route(`**/api/wg/${SHARE_CODE}/members`, (route) => {
+		memberTokens.push(route.request().headers()[MEMBER_TOKEN_HEADER]);
+		return route.fulfill({ json: { members, viewerIsAdmin } });
+	});
 	await page.route(`**/api/wg/${SHARE_CODE}/chores`, (route) =>
 		route.fulfill({ json: { chores, monthCompletions: {} } }),
 	);
@@ -68,11 +72,33 @@ async function openPutzen(
 	);
 	await navigateToFeature(page, `/wg/${SHARE_CODE}/putzen`);
 	await dismissOnboarding(page);
+	await expect.poll(() => memberTokens.length, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+	expect(memberTokens.every((token) => token === 'fixture-member-token')).toBe(true);
 	const household = page.getByRole('navigation', { name: 'Haushalt' });
 	const shopping = household.getByRole('link', { name: 'Einkäufe, 123 offen' });
 	await expect(shopping).toBeVisible();
 	await expect(shopping).toHaveText('Einkäufe99+');
 }
+
+test('hides permanent chore removal from non-admin members', async ({ page }) => {
+	const viewer: FixtureMember = { id: CURRENT_MEMBER, name: 'Abu', color: null, active: true };
+	const title = 'Aufgabe delete-permission';
+	const rows = [chore('delete-permission', viewer.id)];
+
+	await openPutzen(page, [viewer], rows, []);
+	await page.getByRole('button', { name: `Aufgabenaktionen: ${title}` }).click();
+	await expect(page.getByRole('button', { name: `Aufgabe entfernen: ${title}` })).toHaveCount(0);
+});
+
+test('shows permanent chore removal to WG admins', async ({ page }) => {
+	const viewer: FixtureMember = { id: CURRENT_MEMBER, name: 'Abu', color: null, active: true };
+	const title = 'Aufgabe delete-permission';
+	const rows = [chore('delete-permission', viewer.id)];
+
+	await openPutzen(page, [viewer], rows, [], true);
+	await page.getByRole('button', { name: `Aufgabenaktionen: ${title}` }).click();
+	await expect(page.getByRole('button', { name: `Aufgabe entfernen: ${title}` })).toBeVisible();
+});
 
 test('shows the authoritative next member and labels the viewer as du', async ({ page }) => {
 	const viewer: FixtureMember = { id: CURRENT_MEMBER, name: 'Abu', color: null, active: true };

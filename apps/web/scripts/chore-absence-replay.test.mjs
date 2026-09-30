@@ -208,7 +208,16 @@ function harness(kind) {
 		},
 		'@/core/utils/time': { MS_PER_DAY: 86_400_000 },
 		'@/features/chores/chore-fairness': { computeOpenGapsByMember: () => new Map() },
-		'@/features/chores/chore-recurrence': { computeNextDueAt: () => new Date() },
+		// The harness always posts an explicit `nextDueAt`, so only the
+		// requested-due branch runs here; the computed branch (clamped first
+		// due + intended anchor) is covered by scripts/chore-recurrence.test.mjs.
+		'@/features/chores/chore-recurrence': {
+			computeNextDueAt: () => new Date(),
+			computeInitialDue: (_createdAt, _interval, _recurrenceType, requestedDueAt) => ({
+				nextDueAt: requestedDueAt ?? new Date(),
+				anchorAt: requestedDueAt ?? new Date(),
+			}),
+		},
 		'drizzle-orm': {
 			and: (...parts) => parts,
 			asc: (value) => value,

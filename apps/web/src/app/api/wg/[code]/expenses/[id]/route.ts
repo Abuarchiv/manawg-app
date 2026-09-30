@@ -202,19 +202,6 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 		if (!splitCheck.ok) {
 			return badRequest(splitValidationErrorCode(splitCheck.reason));
 		}
-
-		const debtorIds = Array.from(new Set(splits.map((split) => split.debtorMemberId)));
-		const memberRows = await db
-			.select({ id: wgMembers.id })
-			.from(wgMembers)
-			.where(
-				and(
-					eq(wgMembers.wgId, wgId),
-					inArray(wgMembers.id, debtorIds),
-					isNull(wgMembers.deactivatedAt),
-				),
-			);
-		if (memberRows.length !== debtorIds.length) return badRequest('member_not_in_wg');
 	}
 
 	const updates: Partial<typeof expenses.$inferInsert> = {};
@@ -230,6 +217,54 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 	// and every balance wrong, whenever it failed itself.
 	try {
 		await withExpensePaymentLock(wgId, async (tx) => {
+			const previousSplits = splits
+				? await tx
+						.select({
+							debtorMemberId: expenseSplits.debtorMemberId,
+							amountCents: expenseSplits.amountCents,
+							settledAt: expenseSplits.settledAt,
+						})
+						.from(expenseSplits)
+						.where(eq(expenseSplits.expenseId, id))
+				: [];
+			if (splits) {
+				const relevantDebtorIds = Array.from(
+					new Set([
+						...previousSplits.map((split) => split.debtorMemberId),
+						...splits.map((split) => split.debtorMemberId),
+					]),
+				);
+				const activeMembers = await tx
+					.select({ id: wgMembers.id })
+					.from(wgMembers)
+					.where(
+						and(
+							eq(wgMembers.wgId, wgId),
+							inArray(wgMembers.id, relevantDebtorIds),
+							isNull(wgMembers.deactivatedAt),
+						),
+					);
+				const activeDebtorIds = new Set(activeMembers.map((member) => member.id));
+				const previousAmounts = new Map(
+					previousSplits.map((split) => [split.debtorMemberId, split.amountCents]),
+				);
+				const nextAmounts = new Map(
+					splits.map((split) => [split.debtorMemberId, split.amountCents]),
+				);
+				const changedInactiveSplit =
+					splits.some(
+						(split) =>
+							!activeDebtorIds.has(split.debtorMemberId) &&
+							previousAmounts.get(split.debtorMemberId) !== split.amountCents,
+					) ||
+					previousSplits.some(
+						(split) =>
+							!activeDebtorIds.has(split.debtorMemberId) &&
+							nextAmounts.get(split.debtorMemberId) !== split.amountCents,
+					);
+				if (changedInactiveSplit) throw new TransactionAbort('member_not_in_wg');
+			}
+
 			const updateConditions = [eq(expenses.id, id), eq(expenses.wgId, wgId)];
 			if (expectedVersion) {
 				updateConditions.push(
@@ -262,14 +297,6 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 			// Read before deleting: a split that stays the same keeps the
 			// settled flag it already had, so paying members are not asked
 			// to pay again after an unrelated edit.
-			const previousSplits = await tx
-				.select({
-					debtorMemberId: expenseSplits.debtorMemberId,
-					amountCents: expenseSplits.amountCents,
-					settledAt: expenseSplits.settledAt,
-				})
-				.from(expenseSplits)
-				.where(eq(expenseSplits.expenseId, id));
 			const settledAtByUnchangedSplit = new Map(
 				previousSplits.map((s) => [`${s.debtorMemberId}:${s.amountCents}`, s.settledAt] as const),
 			);
@@ -295,6 +322,7 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 			if (writeErr.code === 'expense_not_found') return notFound('expense_not_found');
 			if (writeErr.code === 'expense_changed')
 				return conflict('expense_changed', 'expense_conflict');
+			if (writeErr.code === 'member_not_in_wg') return badRequest('member_not_in_wg');
 			return serverError(writeErr.code);
 		}
 		logApiError('[expense PATCH] update failed', writeErr);

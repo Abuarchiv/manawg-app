@@ -389,3 +389,30 @@ test('a coalesced request still respects successful mutation invalidation', asyn
 	assert.deepEqual(scope.messages, [deleted]);
 	assert.equal(scope.refreshPromiseRef.current, null);
 });
+
+test('#502: stored edit drafts are only reused when they still match the message', () => {
+	assert.deepEqual(chat.resolveStoredEditDraft(null, 'Hallo'), { text: null, discard: false });
+	assert.deepEqual(
+		chat.resolveStoredEditDraft({ body: 'Hallo' }, 'Hallo'),
+		{ text: null, discard: true },
+		'an unchanged draft is what a bare Abbrechen leaves behind and must not reopen',
+	);
+	assert.deepEqual(
+		chat.resolveStoredEditDraft({ body: 'Entwurf' }, 'Hallo'),
+		{ text: 'Entwurf', discard: false },
+		'legacy drafts without a base are kept for backward compatibility',
+	);
+	assert.deepEqual(chat.resolveStoredEditDraft({ body: 'Entwurf', base: 'Hallo' }, 'Hallo'), {
+		text: 'Entwurf',
+		discard: false,
+	});
+	assert.deepEqual(
+		chat.resolveStoredEditDraft({ body: 'Entwurf', base: 'Hallo' }, 'Neu'),
+		{ text: null, discard: true },
+		'a message edited elsewhere invalidates the draft instead of resurrecting it',
+	);
+	assert.deepEqual(chat.resolveStoredEditDraft({ body: 42 }, 'Hallo'), {
+		text: null,
+		discard: false,
+	});
+});

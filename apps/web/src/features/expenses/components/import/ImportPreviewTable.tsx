@@ -29,10 +29,13 @@ interface Props {
 	expenses: ReadonlyArray<ParsedExpense>;
 	mapping: Readonly<Record<string, string | null>>;
 	members: readonly MemberOption[];
+	conflicts?: ReadonlySet<string>;
 	skipIndexes: ReadonlySet<number>;
 	onToggleSkip: (index: number) => void;
 	disabled?: boolean;
 }
+
+const NO_CONFLICTS: ReadonlySet<string> = new Set();
 
 function formatDate(iso: string): string {
 	const date = new Date(iso);
@@ -52,13 +55,17 @@ function resolveName(
 	const id = mapping[parsedName];
 	if (!id) return `${parsedName} (nicht zugeordnet)`;
 	const member = members.find((m) => m.id === id);
-	return member?.name ?? parsedName;
+	// An id that is not among the offered members (moved-out member, foreign
+	// id) must not render as if the row were fine — the row alert below names
+	// it as a conflict.
+	return member?.name ?? `${parsedName} (Zuordnung ungültig)`;
 }
 
 export function ImportPreviewTable({
 	expenses,
 	mapping,
 	members,
+	conflicts = NO_CONFLICTS,
 	skipIndexes,
 	onToggleSkip,
 	disabled = false,
@@ -75,6 +82,11 @@ export function ImportPreviewTable({
 		<ItemGroup aria-label="Import-Vorschau">
 			{expenses.map((parsed, index) => {
 				const skipped = skipIndexes.has(index);
+				const conflictNames = new Set<string>();
+				if (conflicts.has(parsed.paidByName)) conflictNames.add(parsed.paidByName);
+				for (const split of parsed.splits) {
+					if (conflicts.has(split.memberName)) conflictNames.add(split.memberName);
+				}
 				return (
 					<Item
 						key={`${parsed.date}-${index}`}
@@ -107,6 +119,15 @@ export function ImportPreviewTable({
 									</li>
 								))}
 							</ul>
+							{conflictNames.size > 0 && (
+								<Alert variant="destructive">
+									<AlertDescription>
+										{Array.from(conflictNames).join(', ')}{' '}
+										{conflictNames.size === 1 ? 'ist' : 'sind'} keinem aktiven Mitglied zugeordnet.
+										Diese Zeile kann erst importiert werden, wenn die Zuordnung korrekt ist.
+									</AlertDescription>
+								</Alert>
+							)}
 							{parsed.warnings.length > 0 && (
 								<Alert>
 									<AlertDescription>

@@ -2,10 +2,11 @@
 
 import { ErrorBox } from '@/components/neu/ErrorBox';
 import { Button } from '@/components/ui/button';
-import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { WEAK_PASSWORD_MESSAGE, isWeakPasswordError } from '@/core/auth/password-errors';
 import { type ReactElement, useEffect, useState } from 'react';
 
 /** Minimum for passwords chosen now (sign-up, reset); Supabase enforces the same value. */
@@ -111,8 +112,8 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 						: 'Die Anmeldung ist noch nicht abgeschlossen. Prüfe deine E-Mail und versuche es erneut.',
 				);
 			}
-		} catch {
-			setEmailError('generic');
+		} catch (error) {
+			setEmailError(mode === 'sign-up' && isWeakPasswordError(error) ? 'weak-password' : 'generic');
 		} finally {
 			setBusy(null);
 		}
@@ -245,10 +246,20 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 								autoComplete="current-password"
 								minLength={6}
 								required
-								aria-describedby={passwordFieldInvalid ? 'auth-email-error' : undefined}
+								aria-describedby={[
+									passwordFieldInvalid ? 'auth-email-error' : null,
+									'auth-password-hint',
+								]
+									.filter(Boolean)
+									.join(' ')}
 								aria-invalid={passwordFieldInvalid || undefined}
 								className="text-base"
 							/>
+							{/* The 8-character rule has to be visible before the request is
+							    rejected, not only inside the error that follows it. */}
+							<FieldDescription id="auth-password-hint" data-testid="auth-password-hint">
+								Neue Konten brauchen mindestens {NEW_PASSWORD_MIN_LENGTH} Zeichen.
+							</FieldDescription>
 						</Field>
 						<Button
 							type="button"
@@ -274,10 +285,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 						)}
 						{emailError === 'weak-password' && (
 							<div id="auth-email-error">
-								<ErrorBox>
-									Wähle für dein neues Konto ein Passwort mit mindestens {NEW_PASSWORD_MIN_LENGTH}{' '}
-									Zeichen.
-								</ErrorBox>
+								<ErrorBox>{WEAK_PASSWORD_MESSAGE}</ErrorBox>
 							</div>
 						)}
 

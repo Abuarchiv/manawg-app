@@ -10,8 +10,8 @@ import { apiFetch } from '@/core/infra/api-client';
 import {
 	type QueueEditDraft,
 	buildDraftKey,
+	buildQueueEditActionHref,
 	buildQueueEditDraft,
-	buildQueueEditHref,
 	isEmptyModuleDraft,
 	readDraft,
 	writeDraft,
@@ -99,18 +99,7 @@ export function OfflineQueueSection({
 		refresh();
 	}
 
-	function editHref(item: OfflineAction): string {
-		if (item.type === 'shopping.create') return buildQueueEditHref(shareCode, 'shopping');
-		if (item.type === 'announcement.create') return buildQueueEditHref(shareCode, 'announcement');
-		if (item.type === 'expense.create') return buildQueueEditHref(shareCode, 'expense');
-		if (item.type === 'recurring.create') return buildQueueEditHref(shareCode, 'expense');
-		if (item.type === 'absence.create') {
-			return buildQueueEditHref(shareCode, 'chore', { openAbsencesPanel: true });
-		}
-		return buildQueueEditHref(shareCode, 'chore');
-	}
-
-	function edit(item: OfflineAction, draft: QueueEditDraft): void {
+	function edit(item: OfflineAction, draft: QueueEditDraft, href: string): void {
 		const key = buildDraftKey(shareCode, memberId, draft.module);
 		// Never clobber an unsaved form draft with queue-edit data — it would
 		// be lost without any hint. Ask the user to resolve the form first.
@@ -136,7 +125,7 @@ export function OfflineQueueSection({
 			}));
 			return;
 		}
-		window.location.assign(editHref(item));
+		window.location.assign(href);
 	}
 
 	function setConflictNote(id: string, note: string): void {
@@ -416,6 +405,9 @@ export function OfflineQueueSection({
 							const fallback = explainOfflineActionFailure(0);
 							const risk = getOfflineActionRisk(item);
 							const editDraft = buildQueueEditDraft(item);
+							// Null → no page owns this draft; the button stays visible but
+							// disabled instead of routing to an unrelated form.
+							const editHref = buildQueueEditActionHref(shareCode, item.type);
 							const serverCheckLabel = `Server prüfen: ${summary.detail || summary.title}`;
 							const actionLabel = summary.detail || summary.title;
 							const rowBusy = syncing || checkingServerIds.has(item.id);
@@ -460,8 +452,15 @@ export function OfflineQueueSection({
 													variant="ghost"
 													size="sm"
 													aria-label={`Offline-Aktion bearbeiten: ${actionLabel}`}
-													onClick={() => edit(item, editDraft)}
-													disabled={rowBusy}
+													onClick={() => {
+														if (editHref) edit(item, editDraft, editHref);
+													}}
+													disabled={rowBusy || editHref === null}
+													title={
+														editHref === null
+															? 'Für diese Aktion gibt es kein Formular zum Bearbeiten.'
+															: undefined
+													}
 												>
 													Bearbeiten
 												</Button>

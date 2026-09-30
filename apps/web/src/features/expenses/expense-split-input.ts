@@ -1,6 +1,10 @@
 import { parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
-import { type DebtorShare, buildEqualSplits } from '@/features/expenses/split-math';
+import {
+	type DebtorShare,
+	buildEqualSplits,
+	distributeCentsEqually,
+} from '@/features/expenses/split-math';
 
 /**
  * Turns the expense form's state into the splits array the API expects.
@@ -36,6 +40,35 @@ interface BuildSplitsInput {
 	 * The page passes its current expense count.
 	 */
 	rotationOffset: number;
+}
+
+export function isEqualExpenseSplit(
+	amountCents: number,
+	splits: readonly DebtorShare[],
+	members: readonly SplitMemberLike[],
+): boolean {
+	if (splits.length === 0) return true;
+	const inactiveIds = new Set(
+		members.filter((member) => member.active === false).map((member) => member.id),
+	);
+	if (splits.some((split) => inactiveIds.has(split.debtorMemberId))) return false;
+
+	const activeIds = members.filter((member) => member.active !== false).map((member) => member.id);
+	if (splits.length !== activeIds.length) return false;
+	const debtorIds = new Set(splits.map((split) => split.debtorMemberId));
+	if (debtorIds.size !== activeIds.length || !activeIds.every((id) => debtorIds.has(id))) {
+		return false;
+	}
+	// The page builds equal splits with a rotation seed (ausgaben/page.tsx),
+	// so on an uneven amount the "+1 cent" lands on a different member than an
+	// unrotated expectation. Compare the shares as a multiset over exactly the
+	// active members: "equal" means one Hamilton share per active member, not
+	// a particular member holding a particular cent.
+	const expected = distributeCentsEqually(amountCents, activeIds).sort(
+		(left, right) => left - right,
+	);
+	const actual = splits.map((split) => split.amountCents).sort((left, right) => left - right);
+	return actual.every((value, index) => value === expected[index]);
 }
 
 export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {
@@ -94,4 +127,24 @@ export function splitCandidates<T extends SplitMemberLike>(
 ): T[] {
 	if (splitMode !== 'manual') return members.filter((m) => m.active);
 	return members.filter((m) => m.active || (manualSplits[m.id] ?? '').trim().length > 0);
+}
+
+/**
+ * Who "Rest aufteilen" may hand cents to.
+ *
+ * While editing, a departed member's share is locked, so only active members
+ * take the remainder. In create and recurring-template mode the remainder
+ * follows the rows the user actually sees (`splitCandidates`): active members
+ * plus a moved-out one who already carries a value. It must never introduce a
+ * new amount for someone who left — the create endpoint filters departed
+ * members and answers `member_not_in_wg`, so that save could never succeed.
+ */
+export function remainderCandidates<T extends SplitMemberLike>(
+	members: readonly T[],
+	splitMode: SplitMode,
+	manualSplits: Record<string, string>,
+	isEditingExpense: boolean,
+): T[] {
+	if (isEditingExpense) return members.filter((m) => m.active);
+	return splitCandidates(members, splitMode, manualSplits);
 }

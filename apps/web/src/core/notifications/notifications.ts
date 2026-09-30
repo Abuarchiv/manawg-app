@@ -100,11 +100,15 @@ function formatEventTime(value: unknown): string {
 	if (typeof value !== 'string' || value.length === 0) return 'demnächst';
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return 'demnächst';
+	// Server-side Intl falls back to the runtime zone (UTC on Vercel), which
+	// would announce Berlin events 1-2 h early and shift the rendered date for
+	// everything between 00:00 and 02:00 Berlin time.
 	return new Intl.DateTimeFormat('de-DE', {
 		day: '2-digit',
 		month: '2-digit',
 		hour: '2-digit',
 		minute: '2-digit',
+		timeZone: 'Europe/Berlin',
 	}).format(date);
 }
 

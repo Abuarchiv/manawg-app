@@ -10,12 +10,21 @@ import {
 	isCalendarFeedToken,
 	verifyCalendarFeedToken,
 } from '@/features/events/calendar-subscription';
+import {
+	buildEventsWindowFilter,
+	withEventWindowCandidates,
+} from '@/features/events/event-reminder-window';
 import { type EventInput, expandRecurrence } from '@/features/events/events';
 import { type CalendarFeedOccurrence, calendarFeedToIcs } from '@/features/events/ics';
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 
 const FEED_HORIZON_DAYS = 365;
+// Candidates are capped the same way the events API caps them: expanding
+// recurring roots costs O(366) per series, so an unbounded row set from the
+// WG's whole history would blow the function budget on every calendar poll.
+const FEED_CANDIDATE_LIMIT = 5_000;
+const FEED_OVERFLOW = 'calendar_feed_window_too_large';
 
 function eventToInput(row: typeof wgEvents.$inferSelect): EventInput {
 	return {
@@ -43,7 +52,10 @@ export async function GET(
 	if (!limit.success) return tooMany('rate_limited');
 
 	try {
-		const events = await withTransaction(async (tx) => {
+		const from = new Date();
+		const to = new Date(from.getTime() + FEED_HORIZON_DAYS * MS_PER_DAY);
+
+		const scan = await withTransaction(async (tx) => {
 			const [beforeLock] = await tx
 				.select({ wgId: calendarSubscriptions.wgId })
 				.from(calendarSubscriptions)
@@ -75,17 +87,40 @@ export async function GET(
 				)
 				.limit(1);
 			if (!subscription || !verifyCalendarFeedToken(id, subscription.tokenSeed, token)) return null;
-			return tx
-				.select()
-				.from(wgEvents)
-				.where(eq(wgEvents.wgId, subscription.wgId))
-				.orderBy(asc(wgEvents.startsAt));
-		});
-		if (!events) return notFound('calendar_feed_not_found');
 
-		const from = new Date();
-		const to = new Date(from.getTime() + FEED_HORIZON_DAYS * MS_PER_DAY);
-		const occurrences: CalendarFeedOccurrence[] = events.flatMap((row) =>
+			// The feed only ever renders the next FEED_HORIZON_DAYS, so the SQL
+			// itself excludes the WG's history; without it every poll loads the
+			// whole event log and expands each row over the horizon.
+			const windowFilter = buildEventsWindowFilter(from, to);
+			return withEventWindowCandidates(
+				from,
+				async (cursor, pageLimit) => {
+					const wgFilter = eq(wgEvents.wgId, subscription.wgId);
+					const baseFilter = windowFilter ? and(wgFilter, windowFilter) : wgFilter;
+					const cursorFilter = cursor
+						? or(
+								gt(wgEvents.startsAt, cursor.startsAt),
+								and(eq(wgEvents.startsAt, cursor.startsAt), gt(wgEvents.id, cursor.id)),
+							)
+						: undefined;
+					return tx
+						.select()
+						.from(wgEvents)
+						.where(cursorFilter ? and(baseFilter, cursorFilter) : baseFilter)
+						.orderBy(asc(wgEvents.startsAt), asc(wgEvents.id))
+						.limit(pageLimit);
+				},
+				() => FEED_OVERFLOW,
+				(rows) => rows,
+				FEED_CANDIDATE_LIMIT,
+			);
+		});
+		if (scan === null) return notFound('calendar_feed_not_found');
+		if (scan === FEED_OVERFLOW) {
+			return NextResponse.json({ error: FEED_OVERFLOW }, { status: 503 });
+		}
+
+		const occurrences: CalendarFeedOccurrence[] = scan.flatMap((row) =>
 			expandRecurrence(eventToInput(row), from, to),
 		);
 		const body = calendarFeedToIcs(occurrences, 'ManaWG');

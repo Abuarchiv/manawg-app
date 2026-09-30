@@ -296,3 +296,28 @@ export function mergePagedReactions<
 	const fresh = older.filter((r) => !seen.has(key(r)));
 	return [...fresh, ...existing];
 }
+
+export interface EditDraftResolution {
+	/** Text to load into the editor, or null when there is no usable draft. */
+	text: string | null;
+	/** True when the stored draft must be removed from storage. */
+	discard: boolean;
+}
+
+/**
+ * A persisted edit draft is only usable while it still starts from the message
+ * body currently shown: identical text is no draft at all, and a draft started
+ * before someone else changed the message would silently overwrite their edit.
+ * Drafts written before `base` existed are kept — there is no way to tell what
+ * they were based on, and dropping a user's text is the worse failure.
+ */
+export function resolveStoredEditDraft(stored: unknown, messageBody: string): EditDraftResolution {
+	if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+		return { text: null, discard: false };
+	}
+	const { body, base } = stored as { body?: unknown; base?: unknown };
+	if (typeof body !== 'string') return { text: null, discard: false };
+	if (body === messageBody) return { text: null, discard: true };
+	if (typeof base === 'string' && base !== messageBody) return { text: null, discard: true };
+	return { text: body, discard: false };
+}

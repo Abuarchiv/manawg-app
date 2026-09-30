@@ -75,8 +75,9 @@ export default async function WgLayout({ children, params }: Props) {
 	const user = await getAuthenticatedUserFromCookies();
 	if (!user) redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
 
-	const [wg] = await db
+	const [membership] = await db
 		.select({
+			role: wgMembers.role,
 			id: wgs.id,
 			name: wgs.name,
 			shareCode: wgs.shareCode,
@@ -93,9 +94,14 @@ export default async function WgLayout({ children, params }: Props) {
 			),
 		)
 		.limit(1);
-	if (!wg) {
+	if (!membership) {
 		redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
 	}
+	const { role, ...wg } = membership;
+	// Seed the admin flag from the server: the client still refreshes it with
+	// the roster, but one failed members fetch must not hide admin actions for
+	// the whole session. UI gating only — every mutation re-checks server-side.
+	const viewerIsAdmin = role === 'admin';
 
 	// Load the full roster including deactivated members: history and balances
 	// need every name. Choice UIs filter on `active` downstream (see
@@ -116,7 +122,7 @@ export default async function WgLayout({ children, params }: Props) {
 	}));
 
 	return (
-		<WgShell code={code} wg={wg} members={members}>
+		<WgShell code={code} wg={wg} members={members} viewerIsAdmin={viewerIsAdmin}>
 			{children}
 		</WgShell>
 	);
@@ -126,6 +132,7 @@ function WgShell({
 	code,
 	wg,
 	members,
+	viewerIsAdmin,
 	children,
 }: {
 	code: string;
@@ -143,12 +150,13 @@ function WgShell({
 		paypalMerchantId?: string | null;
 		active: boolean;
 	}>;
+	viewerIsAdmin?: boolean;
 	children: ReactNode;
 }) {
 	const wgBaseHref = `/wg/${encodeURIComponent(code)}`;
 
 	return (
-		<WgContextProvider wg={wg} members={members}>
+		<WgContextProvider wg={wg} members={members} viewerIsAdmin={viewerIsAdmin}>
 			<ToastContainer />
 			<div
 				className="group/wg-shell min-h-svh bg-background"
