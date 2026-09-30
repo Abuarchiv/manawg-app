@@ -14,13 +14,36 @@ import { getWgLoadErrorMessage } from '@/core/guards/load-errors';
 import { useCachedFetch } from '@/core/hooks/useCachedFetch';
 import { useVisibilityPausedInterval } from '@/core/utils/use-visibility-paused-interval';
 import { InventoryList } from '@/features/inventory/components/InventoryList';
-import type { InventoryCategory, InventoryItemDto } from '@/features/inventory/inventory';
+import {
+	type InventoryCategory,
+	type InventoryItemDto,
+	type InventoryMutationItemDto,
+	groupItemsByCategory,
+} from '@/features/inventory/inventory';
 import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface InventoryResponse {
 	items: InventoryItemDto[];
 	grouped: Record<InventoryCategory, InventoryItemDto[]>;
+}
+
+function applyInventoryMutation(
+	items: InventoryItemDto[],
+	updated?: InventoryMutationItemDto,
+	deletedId?: string,
+): InventoryItemDto[] {
+	if (deletedId) return items.filter((item) => item.id !== deletedId);
+	if (!updated) return items;
+	const existing = items.find((item) => item.id === updated.id);
+	const merged: InventoryItemDto = {
+		...(existing ?? {}),
+		...updated,
+		decrementCount30d: updated.decrementCount30d ?? existing?.decrementCount30d ?? 0,
+	};
+	return existing
+		? items.map((item) => (item.id === updated.id ? merged : item))
+		: [...items, merged];
 }
 
 // craftsman-ignore: TS002 — Next.js App Router requires default export from page.tsx
@@ -33,6 +56,7 @@ export default function VorraetePage() {
 		error: inventoryError,
 		isLoading: inventoryLoading,
 		refresh: refreshInventory,
+		setData: setInventoryData,
 	} = useCachedFetch<InventoryResponse>(inventoryUrl, {
 		memberId: identity.memberId,
 	});
@@ -82,13 +106,14 @@ export default function VorraetePage() {
 	return (
 		<div data-household-content className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
 			<SubNav />
-			<header className="flex items-center gap-3">
+			{/* Der aktive Tab benennt die Seite schon; Titel und Zähler bleiben für Screenreader. */}
+			<header className="sr-only">
 				<div className="min-w-0 flex-1">
 					<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight text-foreground">
 						Vorräte
 					</h1>
 					<p
-						className="mt-0.5 text-[13px] text-muted-foreground tabular-nums"
+						className="mt-0.5 text-[12px] text-muted-foreground tabular-nums"
 						aria-live="polite"
 						aria-atomic="true"
 					>
@@ -152,9 +177,17 @@ export default function VorraetePage() {
 					shareCode={wg.shareCode}
 					memberId={identity.memberId}
 					memberToken={identity.memberToken}
-					onChanged={(updated) => {
-						if (updated) {
-							setItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+					onChanged={(updated, deletedId) => {
+						if (updated || deletedId) {
+							setItems((prev) => applyInventoryMutation(prev, updated, deletedId));
+							setInventoryData((current) => {
+								if (!current && !updated) return current;
+								const nextItems = applyInventoryMutation(current?.items ?? [], updated, deletedId);
+								return {
+									items: nextItems,
+									grouped: groupItemsByCategory(nextItems),
+								};
+							});
 						}
 						void load(true);
 					}}

@@ -22,7 +22,13 @@ Module._extensions['.ts'] = (loadedModule, filename) => {
 	loadedModule._compile(compiled, filename);
 };
 
-const tables = { expenses: {}, expenseSplits: {}, recurringExpenses: {}, wgs: {} };
+const tables = {
+	expenses: {},
+	expenseSplits: {},
+	recurringExpenses: {},
+	wgMembers: {},
+	wgs: {},
+};
 const state = { template: null, charges: [] };
 
 function dueTemplates() {
@@ -40,42 +46,52 @@ const db = {
 	}),
 	update: () => ({
 		set: (values) => ({
-			where: async () => {
-				Object.assign(state.template, values);
-			},
+			where: () => ({
+				returning: async () => {
+					Object.assign(state.template, values);
+					return [{ id: state.template.id }];
+				},
+			}),
 		}),
 	}),
 };
 
 const tx = {
-	insert: (table) => ({
-		values: (rows) => ({
-			returning: async () => {
-				assert.equal(table, tables.expenses);
-				const dueAt = rows.recurringDueAt.toISOString();
-				const duplicate = state.charges.some(
-					(charge) =>
-						charge.recurringExpenseId === rows.recurringExpenseId && charge.dueAt === dueAt,
-				);
-				if (duplicate) throw Object.assign(new Error('duplicate'), { code: '23505' });
-				const id = `expense-${state.charges.length + 1}`;
-				state.charges.push({
-					id,
-					recurringExpenseId: rows.recurringExpenseId,
-					dueAt,
-					occurredAt: rows.occurredAt.toISOString(),
-				});
-				return [{ id }];
-			},
-			// The splits insert is awaited without calling .returning().
-			then: (resolve, reject) => {
-				try {
-					resolve(undefined);
-				} catch (error) {
-					reject(error);
+	select: () => ({
+		from: (table) => ({
+			where: () => {
+				if (table === tables.wgs) {
+					return { for: async () => [{ id: state.template.wgId }] };
 				}
+				if (table === tables.recurringExpenses) {
+					return { for: async () => [state.template] };
+				}
+				if (table === tables.wgMembers) return Promise.resolve([{ id: 'member-1' }]);
+				return Promise.resolve([]);
 			},
 		}),
+	}),
+	insert: (table) => ({
+		values: (rows) =>
+			Object.assign(Promise.resolve(undefined), {
+				returning: async () => {
+					assert.equal(table, tables.expenses);
+					const dueAt = rows.recurringDueAt.toISOString();
+					const duplicate = state.charges.some(
+						(charge) =>
+							charge.recurringExpenseId === rows.recurringExpenseId && charge.dueAt === dueAt,
+					);
+					if (duplicate) throw Object.assign(new Error('duplicate'), { code: '23505' });
+					const id = `expense-${state.charges.length + 1}`;
+					state.charges.push({
+						id,
+						recurringExpenseId: rows.recurringExpenseId,
+						dueAt,
+						occurredAt: rows.occurredAt.toISOString(),
+					});
+					return [{ id }];
+				},
+			}),
 	}),
 };
 
@@ -87,6 +103,7 @@ const mocks = new Map([
 			expenses: tables.expenses,
 			expenseSplits: tables.expenseSplits,
 			recurringExpenses: tables.recurringExpenses,
+			wgMembers: tables.wgMembers,
 			wgs: tables.wgs,
 		},
 	],
@@ -116,13 +133,17 @@ const mocks = new Map([
 	],
 	[
 		'@/features/expenses/expense-payments',
-		{ withExpensePaymentLock: (_wgId, run) => run(tx) },
+		{
+			hasCapturingExpensePayment: async () => false,
+			withExpensePaymentLock: (_wgId, run) => run(tx),
+		},
 	],
 	[
 		'drizzle-orm',
 		{
 			and: (...parts) => ({ kind: 'and', parts }),
 			eq: () => ({}),
+			inArray: () => ({}),
 			isNull: () => ({}),
 			lte: () => ({}),
 		},

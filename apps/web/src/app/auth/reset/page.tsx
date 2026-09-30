@@ -2,9 +2,15 @@ import { PasswordResetForm } from '@/components/auth/PasswordResetForm';
 import { EntryFrame } from '@/components/entry/EntryFrame';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getAuthenticatedUserFromCookies } from '@/core/auth/server';
+import type { Metadata } from 'next';
 import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = {
+	title: 'Passwort zurücksetzen — ManaWG',
+	robots: { index: false, follow: false },
+};
 
 export default async function PasswordResetPage() {
 	const [cookieStore, user] = await Promise.all([cookies(), getAuthenticatedUserFromCookies()]);

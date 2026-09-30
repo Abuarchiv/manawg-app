@@ -20,6 +20,23 @@ const NAME_MAX = 80;
 const TEXT_MAX = 2000;
 const URL_MAX = 500;
 
+export const privateImageDeletions = pgTable(
+	'private_image_deletions',
+	{
+		objectKey: text('object_key').primaryKey(),
+		requestedAt: timestamp('requested_at', { withTimezone: true }).notNull().defaultNow(),
+		lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+		storageDeletedAt: timestamp('storage_deleted_at', { withTimezone: true }),
+	},
+	(t) => ({
+		cleanupIdx: index('private_image_deletions_cleanup_idx').on(
+			t.requestedAt,
+			t.lastAttemptAt,
+			t.storageDeletedAt,
+		),
+	}),
+);
+
 export const accountDeletions = pgTable(
 	'account_deletions',
 	{

@@ -307,10 +307,10 @@ export default function ErinnerungenPage() {
 			<header className="flex min-w-0 items-center gap-3">
 				<BackLink href={`${wgBaseHref}/ausgaben`} label="Ausgaben" />
 				<div className="min-w-0 flex-1">
-					<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight break-words">
+					<h1 className="font-heading text-lg font-semibold tracking-tight break-words">
 						Erinnerungen
 					</h1>
-					<p className="text-sm text-muted-foreground">
+					<p className="mt-0.5 text-[12px] text-muted-foreground">
 						Max. alle {REMINDER_COOLDOWN_HOURS} Stunden pro Person
 					</p>
 					<output aria-live="polite" aria-hidden={!refreshing} className="sr-only">
@@ -365,6 +365,7 @@ export default function ErinnerungenPage() {
 									amountCents={row.amountCents}
 									currency={row.currency}
 									oldestDebtAgeDays={row.oldestAge}
+									currentMemberId={identity.memberId}
 									action={row === primaryReminder ? null : reminderButton(row)}
 								/>
 							);
@@ -385,7 +386,11 @@ export default function ErinnerungenPage() {
 				{loading ? (
 					<Skeleton className="h-20 w-full" />
 				) : remindersLoadFailed && reminders.length === 0 ? null : (
-					<ReminderHistory items={reminders} memberName={memberName} />
+					<ReminderHistory
+						items={reminders}
+						memberName={memberName}
+						currentMemberId={identity.memberId}
+					/>
 				)}
 			</section>
 			{primaryReminder && <ThumbAction>{reminderButton(primaryReminder, true)}</ThumbAction>}

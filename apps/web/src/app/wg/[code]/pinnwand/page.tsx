@@ -1,6 +1,8 @@
 'use client';
+import { useToast } from '@/components/ui/Toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { LoadErrorBanner } from '@/components/wg/LoadErrorBanner';
 import { OfflineQueueNotice } from '@/components/wg/OfflineQueueNotice';
 import { SubNav } from '@/components/wg/SubNav';
@@ -14,6 +16,7 @@ import { captureException } from '@/core/infra/observability';
 import { buildDraftKey, readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import {
 	enqueueOfflineAction,
+	isOfflineActionQueued,
 	readOfflineQueue,
 	syncOfflineActions,
 	writeOfflineQueue,
@@ -22,6 +25,7 @@ import {
 	DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE,
+	QUEUE_EDIT_ALREADY_SENT_MESSAGE,
 } from '@/core/offline/offline-copy';
 import { isPendingImageToken } from '@/core/offline/offline-images';
 import {
@@ -36,10 +40,9 @@ import {
 	commentActionErrorMessage,
 } from '@/features/pinnwand/announcement-errors';
 import {
-	type AnnouncementFilter,
-	filterAnnouncements,
 	getAnnouncementHash,
 	getMyOpenAnnouncements,
+	isAnnouncementArchived,
 	mergeBackgroundAnnouncements,
 	reconcilePendingAnnouncements,
 } from '@/features/pinnwand/announcement-workflow';
@@ -48,8 +51,6 @@ import { AnnouncementSkeleton } from '@/features/pinnwand/components/Announcemen
 import { EmptyState } from '@/features/pinnwand/components/EmptyState';
 import { MyOpenAnnouncements } from '@/features/pinnwand/components/MyOpenAnnouncements';
 import { PinnwandComposer } from '@/features/pinnwand/components/PinnwandComposer';
-import { PinnwandFilterBar } from '@/features/pinnwand/components/PinnwandFilterBar';
-import { PinnwandHeader } from '@/features/pinnwand/components/PinnwandHeader';
 import type {
 	Announcement,
 	AnnouncementComment,
@@ -58,14 +59,10 @@ import type {
 	ReactionKey,
 } from '@/features/pinnwand/components/announcement-types';
 import { CONTENT_MAX, REFRESH_INTERVAL_MS } from '@/features/pinnwand/components/constants';
-import { Megaphone } from 'lucide-react';
+import { ChevronDown, Megaphone, Plus } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-
-function statusFilterFromParam(value: string | null): AnnouncementFilter['status'] {
-	return value === 'open' || value === 'resolved' ? value : 'all';
-}
 
 function kindFromParam(value: string | null): AnnouncementKind | null {
 	if (
@@ -118,6 +115,7 @@ function notificationWarningMessage(warning: NotificationWarning): string | null
 // craftsman-ignore: TS002 — Next.js App Router requires default export from page.tsx
 export default function PinnwandPage(): React.ReactElement {
 	const { wg, members, identity, isAdmin } = useWg();
+	const toast = useToast();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const {
 		data: cachedAnnouncements,
@@ -132,7 +130,6 @@ export default function PinnwandPage(): React.ReactElement {
 	);
 	const processedAnnouncementsRevisionRef = useRef(announcementsServerRevision);
 	const searchParams = useSearchParams();
-	const statusParamFilter = statusFilterFromParam(searchParams.get('status'));
 	const prefillContent = searchParams.get('content');
 	const prefillKind = kindFromParam(searchParams.get('kind'));
 	const prefillImageUrl = searchParams.get('imageUrl');
@@ -156,12 +153,7 @@ export default function PinnwandPage(): React.ReactElement {
 	const [actionError, setActionError] = useState<string | null>(null);
 	const [refreshing, setRefreshing] = useState(false);
 	const [composerOpen, setComposerOpen] = useState(false);
-	const [filter, setFilter] = useState<AnnouncementFilter>({
-		status: statusParamFilter,
-		kind: 'all',
-		pinnedOnly: false,
-		query: '',
-	});
+	const [archiveOpen, setArchiveOpen] = useState(searchParams.get('status') === 'resolved');
 	const [highlightedId, setHighlightedId] = useState<string | null>(null);
 	const [pendingRemoteItems, setPendingRemoteItems] = useState<Announcement[] | null>(null);
 	const [newCount, setNewCount] = useState(0);
@@ -180,20 +172,7 @@ export default function PinnwandPage(): React.ReactElement {
 
 	const { isPending, start, end } = usePendingSet();
 
-	useEffect(() => {
-		if (statusParamFilter === 'all') return;
-		setFilter((current) => ({ ...current, status: statusParamFilter }));
-	}, [statusParamFilter]);
-
 	const scrollToAnnouncement = useCallback((id: string, behavior: ScrollBehavior = 'smooth') => {
-		setFilter((current) => ({
-			...current,
-			status: 'all',
-			kind: 'all',
-			pinnedOnly: false,
-			query: '',
-			ownership: 'all',
-		}));
 		setHighlightedId(id);
 		window.setTimeout(() => {
 			document.getElementById(`announcement-${id}`)?.scrollIntoView({
@@ -424,10 +403,16 @@ export default function PinnwandPage(): React.ReactElement {
 
 	useEffect(() => {
 		if (!highlightedId || itemCount === 0) return;
-		document.getElementById(`announcement-${highlightedId}`)?.scrollIntoView({
-			block: 'center',
-			behavior: 'smooth',
-		});
+		// Verlinkte Beiträge können im eingeklappten Archiv liegen.
+		const target = itemsRef.current.find((item) => item.id === highlightedId);
+		if (target && isAnnouncementArchived(target, Date.now())) setArchiveOpen(true);
+		const timer = window.setTimeout(() => {
+			document.getElementById(`announcement-${highlightedId}`)?.scrollIntoView({
+				block: 'center',
+				behavior: 'smooth',
+			});
+		}, 80);
+		return () => window.clearTimeout(timer);
 	}, [highlightedId, itemCount]);
 
 	function applyPendingItems(): void {
@@ -512,6 +497,20 @@ export default function PinnwandPage(): React.ReactElement {
 			setError('Inhalt fehlt oder zu lang.');
 			return;
 		}
+		if (submittingRef.current) return;
+		// The edited queue entry may have been synced meanwhile; a new create would duplicate it.
+		if (queueEditId && !isOfflineActionQueued(queueEditId)) {
+			setQueueEditId(null);
+			setContent('');
+			setKind('info');
+			setImageUrl(null);
+			setComposerOpen(false);
+			removeDraft(draftKey);
+			setError(null);
+			setNotice(QUEUE_EDIT_ALREADY_SENT_MESSAGE);
+			void load();
+			return;
+		}
 		// Race guard: if the image is still a local pending-image-token (upload
 		// hasn't resolved to the S3 URL yet), do NOT post. Server's imageUrlSchema
 		// would reject the token as image_invalid, the user would see a generic
@@ -571,6 +570,7 @@ export default function PinnwandPage(): React.ReactElement {
 						setError(OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE);
 						return;
 					}
+					announcementIdempotencyKeyRef.current = null;
 					refreshCount();
 					if (!clearEditedQueueItem()) {
 						setError(OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE);
@@ -668,6 +668,7 @@ export default function PinnwandPage(): React.ReactElement {
 			resolvedAt: nextStatus === 'resolved' ? new Date().toISOString() : null,
 			resolvedByMemberId: nextStatus === 'resolved' ? identity.memberId : null,
 		}));
+		if (nextStatus === 'resolved') toast.success('Erledigt – liegt jetzt unter „Geklärt & älter“');
 		void patchAnnouncement(announcement.id, { status: nextStatus }, pendingKey, previousItems);
 	}
 
@@ -941,43 +942,49 @@ export default function PinnwandPage(): React.ReactElement {
 	}
 
 	const showSkeleton = initialLoading && items.length === 0;
-	const filteredItems = useMemo(
-		() => filterAnnouncements(items, { ...filter, currentMemberId: identity.memberId }),
-		[filter, identity.memberId, items],
-	);
+	const { openItems, archivedItems } = useMemo(() => {
+		const now = Date.now();
+		const openItems: Announcement[] = [];
+		const archivedItems: Announcement[] = [];
+		for (const item of items) {
+			(isAnnouncementArchived(item, now) ? archivedItems : openItems).push(item);
+		}
+		return { openItems, archivedItems };
+	}, [items]);
 	const myOpenItems = useMemo(() => getMyOpenAnnouncements(items), [items]);
-	const statusFocusActive = filter.status !== 'all';
+
+	function renderCard(a: Announcement): React.ReactElement {
+		return (
+			<AnnouncementCard
+				key={`${identity.memberId}:${a.id}`}
+				announcement={a}
+				author={memberLookup(a.authorMemberId)}
+				deletePending={isPending(a.id)}
+				pinPending={isPending(`${a.id}:pin`)}
+				statusPending={isPending(`${a.id}:status`)}
+				reactionPending={(reaction) => isPending(`${a.id}:reaction:${reaction}`)}
+				onDelete={() => remove(a.id)}
+				onTogglePinned={() => togglePinned(a)}
+				onToggleStatus={() => toggleStatus(a)}
+				onToggleReaction={(reaction) => {
+					void toggleReaction(a, reaction);
+				}}
+				onAddComment={(content) => addComment(a, content)}
+				onUpdateComment={(commentId, content) => updateComment(a, commentId, content)}
+				onDeleteComment={(commentId) => deleteComment(a, commentId)}
+				currentMemberId={identity.memberId}
+				isAdmin={isAdmin}
+				shareCode={wg.shareCode}
+				highlighted={highlightedId === a.id}
+			/>
+		);
+	}
 
 	return (
 		<div data-exchange-content className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4">
 			<SubNav />
-			<PinnwandHeader
-				itemCount={items.length}
-				refreshing={refreshing}
-				composerOpen={composerOpen}
-				composerBusy={submitting}
-				loading={initialLoading}
-				hasDraft={hasDraft}
-				showComposerToggle={false}
-				onToggleComposer={() => {
-					if (submittingRef.current) return;
-					if (composerOpen) closeComposer();
-					else setComposerOpen(true);
-					setNotice(null);
-				}}
-			/>
+			<h1 className="sr-only">Pinnwand</h1>
 
-			{/* Filter erst zeigen, wenn es etwas zu filtern gibt. */}
-			{items.length > 0 && <PinnwandFilterBar filter={filter} onFilterChange={setFilter} />}
-			{statusFocusActive && (
-				<Alert>
-					<AlertDescription>
-						{filter.status === 'open'
-							? 'Aktiver Filter: Nur offene Beiträge'
-							: 'Aktiver Filter: Nur geklärte Beiträge'}
-					</AlertDescription>
-				</Alert>
-			)}
 			{newCount > 0 && (
 				<Button
 					type="button"
@@ -1048,46 +1055,51 @@ export default function PinnwandPage(): React.ReactElement {
 					Noch keine Beiträge geladen.
 				</EmptyState>
 			) : items.length === 0 ? (
-				<EmptyState icon={Megaphone} hint="Teile eine Frage oder Info über den Button unten.">
+				<EmptyState icon={Megaphone} hint="Teile eine Frage oder Info über das Plus unten rechts.">
 					Noch keine Beiträge
 				</EmptyState>
-			) : filteredItems.length === 0 ? (
-				<EmptyState
-					icon={Megaphone}
-					hint="Passe Suche oder Filter an, um Beiträge wieder zu sehen."
-				>
-					Keine passenden Beiträge.
-				</EmptyState>
 			) : (
-				<ul className="flex flex-col gap-4" aria-label="Pinnwand-Beiträge">
-					{filteredItems.map((a) => {
-						const author = memberLookup(a.authorMemberId);
-						return (
-							<AnnouncementCard
-								key={`${identity.memberId}:${a.id}`}
-								announcement={a}
-								author={author}
-								deletePending={isPending(a.id)}
-								pinPending={isPending(`${a.id}:pin`)}
-								statusPending={isPending(`${a.id}:status`)}
-								reactionPending={(reaction) => isPending(`${a.id}:reaction:${reaction}`)}
-								onDelete={() => remove(a.id)}
-								onTogglePinned={() => togglePinned(a)}
-								onToggleStatus={() => toggleStatus(a)}
-								onToggleReaction={(reaction) => {
-									void toggleReaction(a, reaction);
-								}}
-								onAddComment={(content) => addComment(a, content)}
-								onUpdateComment={(commentId, content) => updateComment(a, commentId, content)}
-								onDeleteComment={(commentId) => deleteComment(a, commentId)}
-								currentMemberId={identity.memberId}
-								isAdmin={isAdmin}
-								shareCode={wg.shareCode}
-								highlighted={highlightedId === a.id}
-							/>
-						);
-					})}
-				</ul>
+				<>
+					{openItems.length === 0 ? (
+						<EmptyState icon={Megaphone} hint="Geklärtes und ältere Infos liegen unten.">
+							Nichts Offenes
+						</EmptyState>
+					) : (
+						<ul
+							className="flex flex-col divide-y overflow-hidden rounded-xl border"
+							aria-label="Pinnwand-Beiträge"
+						>
+							{openItems.map(renderCard)}
+						</ul>
+					)}
+					{archivedItems.length > 0 && (
+						<Collapsible open={archiveOpen} onOpenChange={setArchiveOpen}>
+							<CollapsibleTrigger
+								render={
+									<Button
+										variant="ghost"
+										className="group min-h-11 w-full justify-between px-1 text-muted-foreground"
+									/>
+								}
+							>
+								Geklärt & älter ({archivedItems.length})
+								<ChevronDown
+									aria-hidden
+									className="size-4 shrink-0 group-aria-expanded:rotate-180"
+								/>
+							</CollapsibleTrigger>
+							{/* Verlinkte Archiv-Beiträge müssen per Hash auffindbar bleiben. */}
+							<CollapsibleContent keepMounted>
+								<ul
+									className="flex flex-col divide-y overflow-hidden rounded-xl border"
+									aria-label="Geklärte und ältere Beiträge"
+								>
+									{archivedItems.map(renderCard)}
+								</ul>
+							</CollapsibleContent>
+						</Collapsible>
+					)}
+				</>
 			)}
 			{/* Offenes Formular hat eigenes Schließen (X) und Posten. */}
 			{!composerOpen && (
@@ -1101,6 +1113,7 @@ export default function PinnwandPage(): React.ReactElement {
 							setNotice(null);
 						}}
 					>
+						<Plus data-icon="inline-start" aria-hidden />
 						{hasDraft ? 'Entwurf fortsetzen' : 'Beitrag erstellen'}
 					</Button>
 				</ThumbAction>

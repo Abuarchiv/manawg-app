@@ -37,10 +37,11 @@ export function getImageStorageProvider(): ImageStorageProvider {
 	throw new ImageStorageConfigurationError();
 }
 
-function getSupabaseServiceClient() {
+function getSupabaseServiceClient(timeoutMs?: number) {
 	const publicSupabaseURL = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 	const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
 	if (!publicSupabaseURL || !serviceRoleKey) throw new ImageStorageConfigurationError();
+	const timeoutSignal = timeoutMs ? AbortSignal.timeout(timeoutMs) : null;
 
 	return createClient(publicSupabaseURL, serviceRoleKey, {
 		auth: {
@@ -48,14 +49,26 @@ function getSupabaseServiceClient() {
 			autoRefreshToken: false,
 			detectSessionInUrl: false,
 		},
+		...(timeoutSignal
+			? {
+					global: {
+						fetch: (input, init) => {
+							const signal = init?.signal
+								? AbortSignal.any([init.signal, timeoutSignal])
+								: timeoutSignal;
+							return fetch(input, { ...init, signal });
+						},
+					},
+				}
+			: {}),
 	});
 }
 
-async function getPrivateBucket() {
+async function getPrivateBucket(timeoutMs?: number) {
 	const bucketName = process.env.SUPABASE_STORAGE_BUCKET?.trim();
 	if (!bucketName) throw new ImageStorageConfigurationError();
 
-	const client = getSupabaseServiceClient();
+	const client = getSupabaseServiceClient(timeoutMs);
 	const { data, error } = await client.storage.getBucket(bucketName);
 	if (error || !data || !hasExactPrivateImageBucketConfig(data)) {
 		throw new ImageStorageConfigurationError();
@@ -85,6 +98,13 @@ export async function createSupabaseSignedUpload(
 			'Cache-Control': 'max-age=0',
 		},
 	};
+}
+
+export async function removeSupabaseImages(objectKeys: readonly string[]): Promise<void> {
+	if (objectKeys.length === 0) return;
+	const { client, bucketName } = await getPrivateBucket(10_000);
+	const { error } = await client.storage.from(bucketName).remove([...objectKeys]);
+	if (error) throw error;
 }
 
 export function limitPrivateImageStream(

@@ -74,6 +74,22 @@ export function computeBalances(
 			});
 		}
 	}
+	for (const pair of totals.values()) {
+		if (pair.amountCents >= 0) continue;
+		const key = `${pair.currency}:${pair.creditorId}:${pair.debtorId}`;
+		const reverse = totals.get(key);
+		if (reverse) {
+			reverse.amountCents -= pair.amountCents;
+		} else {
+			totals.set(key, {
+				creditorId: pair.debtorId,
+				debtorId: pair.creditorId,
+				amountCents: -pair.amountCents,
+				currency: pair.currency,
+			});
+		}
+		pair.amountCents = 0;
+	}
 
 	// Net opposite directions per pair: A owes B 42,95 € and B owes A 38,52 €
 	// is a single 4,43 € debt from A to B, never two remindable rows.

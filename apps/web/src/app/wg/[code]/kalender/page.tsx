@@ -50,7 +50,6 @@ import {
 	RotateCcw,
 	Trash2,
 } from 'lucide-react';
-import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 interface CalendarEvent {
@@ -557,30 +556,12 @@ export default function KalenderPage() {
 	}
 
 	return (
-		<div data-household-content className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
+		<div data-household-content className="mx-auto flex w-full max-w-4xl flex-col gap-4 px-4 py-4">
 			<SubNav />
-			<header className="flex flex-wrap items-center gap-3">
-				<div className="min-w-0 flex-1">
-					<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight break-words [overflow-wrap:anywhere]">
-						Kalender
-					</h1>
-					<p className="mt-0.5 text-[13px] text-muted-foreground tabular-nums">
-						{loading ? 'Lädt…' : `${events.length} WG-Termin${events.length === 1 ? '' : 'e'}`}
-					</p>
-				</div>
-				<div className="flex shrink-0 items-center justify-end gap-2">
-					{!isCurrentMonth && (
-						<Button
-							variant="outline"
-							size="icon"
-							onClick={handleJumpToToday}
-							aria-label="Zum aktuellen Monat springen"
-							title="Heute"
-						>
-							<RotateCcw aria-hidden />
-						</Button>
-					)}
-				</div>
+			{/* Der Tab oben benennt die Seite schon; Titel und Zähler bleiben für Screenreader. */}
+			<header className="sr-only">
+				<h1>Kalender</h1>
+				<p>{loading ? 'Lädt…' : `${events.length} WG-Termin${events.length === 1 ? '' : 'e'}`}</p>
 			</header>
 
 			{actionError && (
@@ -610,18 +591,18 @@ export default function KalenderPage() {
 				className="gap-3"
 			>
 				<TabsList className="w-full">
-					<TabsTrigger value="list" className="min-h-11">
+					<TabsTrigger value="list" className="min-w-max whitespace-nowrap">
 						<List data-icon="inline-start" aria-hidden />
 						Agenda
 					</TabsTrigger>
-					<TabsTrigger value="month" className="min-h-11">
+					<TabsTrigger value="month" className="min-w-max whitespace-nowrap">
 						<CalendarDays data-icon="inline-start" aria-hidden />
 						Monat
 					</TabsTrigger>
 				</TabsList>
 				<TabsContent value="list" className="flex flex-col gap-3">
 					<section aria-labelledby="calendar-upcoming-heading" className="flex flex-col gap-3">
-						<h2 id="calendar-upcoming-heading" className="text-sm font-semibold">
+						<h2 id="calendar-upcoming-heading" className="sr-only">
 							Nächste 30 Tage
 						</h2>
 						{loading ? (
@@ -638,7 +619,19 @@ export default function KalenderPage() {
 						)}
 					</section>
 				</TabsContent>
-				<TabsContent value="month">
+				<TabsContent value="month" className="flex flex-col gap-2">
+					{!isCurrentMonth && (
+						<Button
+							variant="outline"
+							size="icon"
+							className="self-end"
+							onClick={handleJumpToToday}
+							aria-label="Zum aktuellen Monat springen"
+							title="Heute"
+						>
+							<RotateCcw aria-hidden />
+						</Button>
+					)}
 					<CalendarMonth
 						month={month}
 						occurrences={monthOccurrences}
@@ -774,17 +767,6 @@ export default function KalenderPage() {
 					)}
 				</div>
 			</details>
-
-			<p className="text-center text-xs text-muted-foreground">
-				Putzplan-Aufgaben erscheinen automatisch in dieser Liste, werden aber nicht in den
-				Kalender-Feed übernommen.
-				<Link
-					href={`${wgBaseHref}/putzen`}
-					className="mx-auto flex min-h-11 w-fit items-center rounded-sm underline transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-				>
-					Putzplan öffnen
-				</Link>
-			</p>
 
 			<EventCreateModal
 				open={createOpen}

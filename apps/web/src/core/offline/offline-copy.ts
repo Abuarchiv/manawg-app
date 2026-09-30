@@ -57,6 +57,10 @@ export const OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE =
 export const OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE =
 	'Offline gespeichert, aber der alte Entwurf konnte nicht entfernt werden. Prüfe die Offline-Warteschlange.';
 
+/** Shown when a queued entry that is being edited was synced (or discarded) in the meantime. */
+export const QUEUE_EDIT_ALREADY_SENT_MESSAGE =
+	'Der Eintrag wurde inzwischen schon gesendet – bitte prüfe die Liste.';
+
 /** Shown after a successful online save when clearing the now-stale local draft fails. */
 export const DRAFT_CLEANUP_FAILED_MESSAGE =
 	'Gespeichert, aber der alte Offline-Entwurf konnte nicht entfernt werden.';

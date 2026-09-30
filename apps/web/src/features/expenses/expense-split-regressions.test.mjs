@@ -58,7 +58,7 @@ test('#490 create-mode remainder candidates match the visible split rows', () =>
 	const withDepartedValue = remainderCandidates(MEMBERS, 'manual', { ben: '2,50' }, false);
 	assert.deepEqual(
 		withDepartedValue.map((member) => member.id),
-		['alice', 'ben'],
+		['alice'],
 	);
 });
 

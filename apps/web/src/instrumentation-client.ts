@@ -1,3 +1,11 @@
+if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+	import('@/core/infra/sentry')
+		.then(({ initializeSentry }) => initializeSentry())
+		.catch(() => {
+			// Optional telemetry must never prevent the app from starting.
+		});
+}
+
 const key = process.env.NEXT_PUBLIC_POSTHOG_KEY;
 const host = process.env.NEXT_PUBLIC_POSTHOG_HOST;
 

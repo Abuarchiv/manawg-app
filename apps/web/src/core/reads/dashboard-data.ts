@@ -80,6 +80,8 @@ export interface DashboardSpendSummary {
 export interface ActivityItem {
 	kind: 'expense' | 'shopping' | 'announcement' | 'chore' | 'recurring' | 'absence' | 'audit';
 	timestamp: string;
+	/** Damit die Oberfläche eigene Einträge als „Du …“ zeigen kann. */
+	memberId?: string | null;
 	memberName: string;
 	text: string;
 	amountCents?: number;
@@ -493,6 +495,7 @@ export async function loadDashboardData(
 		activity.push({
 			kind: 'expense',
 			timestamp: e.occurredAt.toISOString(),
+			memberId: e.paidByMemberId,
 			memberName: memberById.get(e.paidByMemberId)?.name ?? '—',
 			text: e.description,
 			amountCents: e.amountCents,
@@ -505,6 +508,7 @@ export async function loadDashboardData(
 		activity.push({
 			kind: 'shopping',
 			timestamp: (s.boughtAt ?? s.createdAt).toISOString(),
+			memberId: s.addedByMemberId,
 			memberName: memberById.get(s.addedByMemberId)?.name ?? '—',
 			// Matches activity.ts's buildActivityTimeline wording for the same
 			// event — these two feed builders are independently maintained
@@ -522,6 +526,7 @@ export async function loadDashboardData(
 		activity.push({
 			kind: 'announcement',
 			timestamp: a.createdAt.toISOString(),
+			memberId: a.authorMemberId,
 			memberName: memberById.get(a.authorMemberId)?.name ?? '—',
 			text: a.content.length > 80 ? `${a.content.slice(0, 80)}…` : a.content,
 			href: getDashboardActivityHref(shareCode, 'announcement', a.id),
@@ -632,6 +637,7 @@ export async function loadDashboardData(
 		activity.push({
 			kind: 'absence',
 			timestamp: absence.startDate.toISOString(),
+			memberId: absence.memberId,
 			memberName: memberById.get(absence.memberId)?.name ?? '—',
 			text: 'Abwesenheit eingetragen',
 			href: getDashboardActivityHref(shareCode, 'absence', absence.id),
@@ -662,6 +668,7 @@ export async function loadDashboardData(
 		activity.push({
 			kind,
 			timestamp: audit.createdAt.toISOString(),
+			memberId: audit.memberId ?? null,
 			memberName: actorName,
 			text: formatAuditActivityText(audit.summary, actorName),
 			...(href ? { href } : {}),

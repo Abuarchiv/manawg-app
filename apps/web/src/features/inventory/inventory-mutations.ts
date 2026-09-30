@@ -136,11 +136,16 @@ export async function updateInventoryItemMutation(
 	tx: DbTransaction,
 	input: UpdateInventoryItemMutationInput,
 ) {
-	const existingRows = await tx
+	const existingQuery = tx
 		.select()
 		.from(wgInventoryItems)
 		.where(and(eq(wgInventoryItems.id, input.itemId), eq(wgInventoryItems.wgId, input.wgId)))
 		.limit(1);
+	// A relative +/- tap has no stale state to conflict on: lock the row so
+	// concurrent taps apply one after another (and log their exact delta)
+	// instead of failing the optimistic quantity check below with a 409.
+	const isDeltaOnly = input.quantity === undefined && input.quantityDelta !== undefined;
+	const existingRows = await (isDeltaOnly ? existingQuery.for('update') : existingQuery);
 	const existing = existingRows[0];
 	if (!existing) return { kind: 'not_found' as const };
 

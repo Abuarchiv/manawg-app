@@ -26,7 +26,7 @@ export type SplitMode = 'equal' | 'manual';
 
 export type SplitInputResult =
 	| { ok: true; splits: DebtorShare[] }
-	| { ok: false; reason: 'splits_empty' | 'splits_mismatch' | 'no_members' };
+	| { ok: false; reason: 'invalid_share' | 'splits_empty' | 'splits_mismatch' | 'no_members' };
 
 interface BuildSplitsInput {
 	splitMode: SplitMode;
@@ -40,6 +40,14 @@ interface BuildSplitsInput {
 	 * The page passes its current expense count.
 	 */
 	rotationOffset: number;
+	/**
+	 * The saved splits of the expense being edited. When the amount and the
+	 * set of debtors are unchanged, an equal split resends these per-member
+	 * amounts instead of re-rotating the leftover cent: moving that cent to
+	 * another member would change their share and reopen it if it was
+	 * already settled.
+	 */
+	previousSplits?: readonly DebtorShare[] | undefined;
 }
 
 export function isEqualExpenseSplit(
@@ -55,28 +63,25 @@ export function isEqualExpenseSplit(
 
 	const activeIds = members.filter((member) => member.active !== false).map((member) => member.id);
 	if (splits.length !== activeIds.length) return false;
-	const debtorIds = new Set(splits.map((split) => split.debtorMemberId));
-	if (debtorIds.size !== activeIds.length || !activeIds.every((id) => debtorIds.has(id))) {
-		return false;
-	}
-	// The page builds equal splits with a rotation seed (ausgaben/page.tsx),
-	// so on an uneven amount the "+1 cent" lands on a different member than an
-	// unrotated expectation. Compare the shares as a multiset over exactly the
-	// active members: "equal" means one Hamilton share per active member, not
-	// a particular member holding a particular cent.
-	const expected = distributeCentsEqually(amountCents, activeIds).sort(
-		(left, right) => left - right,
-	);
-	const actual = splits.map((split) => split.amountCents).sort((left, right) => left - right);
-	return actual.every((value, index) => value === expected[index]);
+	const splitIds = new Set(splits.map((split) => split.debtorMemberId));
+	if (!activeIds.every((id) => splitIds.has(id))) return false;
+	// Equal splits rotate who receives the leftover cent (see
+	// buildSplitsFromForm's rotationOffset), so compare the cent values as a
+	// multiset instead of per member.
+	const byAmount = (a: number, b: number) => a - b;
+	const expected = distributeCentsEqually(amountCents, activeIds).sort(byAmount);
+	const actual = splits.map((split) => split.amountCents).sort(byAmount);
+	return actual.every((cents, index) => cents === expected[index]);
 }
 
 export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {
-	const { splitMode, members, manualSplits, amountCents, rotationOffset } = input;
+	const { splitMode, members, manualSplits, amountCents, rotationOffset, previousSplits } = input;
 
 	if (splitMode === 'equal') {
 		const activeIds = members.filter((m) => m.active).map((m) => m.id);
 		if (activeIds.length === 0) return { ok: false, reason: 'no_members' };
+		const kept = keepPreviousEqualSplits(amountCents, activeIds, previousSplits);
+		if (kept) return { ok: true, splits: kept };
 		return { ok: true, splits: buildEqualSplits(amountCents, activeIds, rotationOffset) };
 	}
 
@@ -88,7 +93,7 @@ export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {
 		const raw = manualSplits[member.id] ?? '';
 		if (raw.trim().length === 0) continue;
 		const value = parseEuroAmount(raw);
-		if (value === null || value < 0) continue;
+		if (value === null || value < 0) return { ok: false, reason: 'invalid_share' };
 		const cents = Math.round(value * CENTS_PER_EURO);
 		splits.push({ debtorMemberId: member.id, amountCents: cents });
 		sum += cents;
@@ -97,6 +102,32 @@ export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {
 	if (splits.length === 0) return { ok: false, reason: 'splits_empty' };
 	if (sum !== amountCents) return { ok: false, reason: 'splits_mismatch' };
 	return { ok: true, splits };
+}
+
+function keepPreviousEqualSplits(
+	amountCents: number,
+	activeIds: readonly string[],
+	previousSplits: readonly DebtorShare[] | undefined,
+): DebtorShare[] | null {
+	if (!previousSplits || previousSplits.length !== activeIds.length) return null;
+	const previousById = new Map(
+		previousSplits.map((split) => [split.debtorMemberId, split.amountCents]),
+	);
+	if (previousById.size !== activeIds.length) return null;
+	let sum = 0;
+	const splits: DebtorShare[] = [];
+	for (const id of activeIds) {
+		const cents = previousById.get(id);
+		if (cents === undefined) return null;
+		splits.push({ debtorMemberId: id, amountCents: cents });
+		sum += cents;
+	}
+	if (sum !== amountCents) return null;
+	// Only reuse a split that still is an equal split of this amount.
+	const byAmount = (a: number, b: number) => a - b;
+	const expected = distributeCentsEqually(amountCents, activeIds).sort(byAmount);
+	const actual = splits.map((split) => split.amountCents).sort(byAmount);
+	return actual.every((cents, index) => cents === expected[index]) ? splits : null;
 }
 
 /**
@@ -130,21 +161,11 @@ export function splitCandidates<T extends SplitMemberLike>(
 }
 
 /**
- * Who "Rest aufteilen" may hand cents to.
- *
- * While editing, a departed member's share is locked, so only active members
- * take the remainder. In create and recurring-template mode the remainder
- * follows the rows the user actually sees (`splitCandidates`): active members
- * plus a moved-out one who already carries a value. It must never introduce a
- * new amount for someone who left — the create endpoint filters departed
- * members and answers `member_not_in_wg`, so that save could never succeed.
+ * Who "Rest aufteilen" may assign cents to: active members only, in every
+ * form mode. A moved-out member keeps a historical share they already carry,
+ * but must never receive new cents — the API rejects that with
+ * `member_not_in_wg`.
  */
-export function remainderCandidates<T extends SplitMemberLike>(
-	members: readonly T[],
-	splitMode: SplitMode,
-	manualSplits: Record<string, string>,
-	isEditingExpense: boolean,
-): T[] {
-	if (isEditingExpense) return members.filter((m) => m.active);
-	return splitCandidates(members, splitMode, manualSplits);
+export function remainderCandidates<T extends SplitMemberLike>(members: readonly T[]): T[] {
+	return members.filter((m) => m.active);
 }

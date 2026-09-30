@@ -1,4 +1,5 @@
 import { getAuthenticatedUser } from '@/core/auth/server';
+import { isPrivateImageKeyRevoked } from '@/core/db/private-image-deletions';
 import { apiError, authUnavailable, badRequest, notFound, serverError } from '@/core/errors';
 import { requireMember } from '@/core/guards/api-auth';
 import { logApiError } from '@/core/infra/observability';
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 	if (!auth.ok) return noStore(auth.response);
 
 	try {
+		if (await isPrivateImageKeyRevoked(key)) return noStore(notFound('image_not_found'));
 		const image = await downloadSupabaseImage(key);
 		const headers = new Headers({
 			'Cache-Control': 'private, no-store',

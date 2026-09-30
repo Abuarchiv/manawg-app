@@ -6,7 +6,13 @@ import { Button } from '@/components/ui/button';
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
-import { readOfflineQueue, syncOfflineActions } from '@/core/offline/offline-client';
+import { createSupabaseBrowserClient } from '@/core/auth/client';
+import {
+	filterOfflineActionsForAuthUser,
+	needsManualOfflineResolution,
+	readOfflineQueue,
+	syncOfflineActions,
+} from '@/core/offline/offline-client';
 import {
 	formatManualOfflineSyncResult,
 	getOfflineSyncFailureMessage,
@@ -69,8 +75,11 @@ type OfflineStatus =
 	| 'unauthenticated'
 	| 'ready';
 
-async function getAccountMemberships(): Promise<AccountMembership[] | null> {
-	const res = await fetch('/api/wg/mine', { cache: 'no-store' });
+async function getAccountMemberships(signal?: AbortSignal): Promise<AccountMembership[] | null> {
+	const res = await fetch('/api/wg/mine', {
+		cache: 'no-store',
+		...(signal ? { signal } : {}),
+	});
 	if (res.status === 401) return null;
 	if (!res.ok) throw new Error('account_wgs_failed');
 	const data: unknown = await res.json();
@@ -86,28 +95,60 @@ async function getAccountMemberships(): Promise<AccountMembership[] | null> {
 	);
 }
 
+function isE2EFixtureMode(): boolean {
+	return (
+		process.env.NEXT_PUBLIC_DB_DOWN === 'true' &&
+		process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE === 'true'
+	);
+}
+
+async function getLocalAuthUserId(): Promise<string | null> {
+	if (isE2EFixtureMode()) return null;
+	try {
+		const { data, error } = await createSupabaseBrowserClient().auth.getSession();
+		return error ? null : (data.session?.user.id ?? null);
+	} catch {
+		return null;
+	}
+}
+
+function visibleQueueCodes(actions: OfflineAction[]): Set<string> {
+	return new Set(actions.map((action) => action.shareCode));
+}
+
 export function OfflineClient() {
-	const [online, setOnline] = useState(() => typeof navigator === 'undefined' || navigator.onLine);
+	const [online, setOnline] = useState(true);
 	const [knownWgs, setKnownWgs] = useState<KnownWg[]>([]);
 	const [queue, setQueue] = useState<OfflineAction[]>([]);
 	const [syncing, setSyncing] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
 	const [status, setStatus] = useState<OfflineStatus>('checking');
 	const syncingRef = useRef(false);
+	const syncAbortRef = useRef<AbortController | null>(null);
+	const refreshGenerationRef = useRef(0);
 
 	const refresh = useCallback(async (): Promise<OfflineAction[]> => {
+		const generation = ++refreshGenerationRef.current;
+		const current = () => generation === refreshGenerationRef.current;
 		const browserOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+		const fixtureMode = isE2EFixtureMode();
+		const localAuthUserId = await getLocalAuthUserId();
+		if (!current()) return [];
 		setOnline(!browserOffline);
 		setMessage(null);
 		if (browserOffline) {
-			const localQueue = readOfflineQueue();
-			setKnownWgs(getKnownWgs());
+			const localQueue = fixtureMode
+				? readOfflineQueue()
+				: filterOfflineActionsForAuthUser(readOfflineQueue(), localAuthUserId);
+			const visibleCodes = visibleQueueCodes(localQueue);
+			setKnownWgs(getKnownWgs().filter((wg) => visibleCodes.has(wg.code)));
 			setQueue(localQueue);
-			setStatus('browser-offline');
+			setStatus(fixtureMode || localAuthUserId ? 'browser-offline' : 'unauthenticated');
 			return localQueue;
 		}
 		try {
 			const memberships = await getAccountMemberships();
+			if (!current()) return [];
 			if (!memberships) {
 				setKnownWgs([]);
 				setQueue([]);
@@ -124,10 +165,14 @@ export function OfflineClient() {
 			setStatus('ready');
 			return nextQueue;
 		} catch {
-			const localQueue = readOfflineQueue();
-			setKnownWgs(getKnownWgs());
+			if (!current()) return [];
+			const localQueue = fixtureMode
+				? readOfflineQueue()
+				: filterOfflineActionsForAuthUser(readOfflineQueue(), localAuthUserId);
+			const visibleCodes = visibleQueueCodes(localQueue);
+			setKnownWgs(getKnownWgs().filter((wg) => visibleCodes.has(wg.code)));
 			setQueue(localQueue);
-			setStatus('server-unreachable');
+			setStatus(fixtureMode || localAuthUserId ? 'server-unreachable' : 'unauthenticated');
 			return localQueue;
 		}
 	}, []);
@@ -135,17 +180,39 @@ export function OfflineClient() {
 	useEffect(() => {
 		void refresh();
 		const refreshOnEvent = () => void refresh();
+		const onAuthStateChange = () => {
+			refreshGenerationRef.current += 1;
+			syncAbortRef.current?.abort();
+			syncAbortRef.current = null;
+			setKnownWgs([]);
+			setQueue([]);
+			window.setTimeout(refreshOnEvent, 0);
+		};
 		window.addEventListener('online', refreshOnEvent);
 		window.addEventListener('offline', refreshOnEvent);
 		window.addEventListener('manawg:offline-queue', refreshOnEvent);
+		window.addEventListener('storage', refreshOnEvent);
+		let unsubscribe = () => {};
+		if (!isE2EFixtureMode()) {
+			try {
+				const { data } = createSupabaseBrowserClient().auth.onAuthStateChange(onAuthStateChange);
+				unsubscribe = () => data.subscription.unsubscribe();
+			} catch {
+				// No cached auth client means local queue data remains hidden.
+			}
+		}
 		return () => {
+			unsubscribe();
+			syncAbortRef.current?.abort();
 			window.removeEventListener('online', refreshOnEvent);
 			window.removeEventListener('offline', refreshOnEvent);
 			window.removeEventListener('manawg:offline-queue', refreshOnEvent);
+			window.removeEventListener('storage', refreshOnEvent);
 		};
 	}, [refresh]);
 
 	const queueCounts = useMemo(() => countByShareCode(queue), [queue]);
+	const hasRetryableQueue = queue.some((action) => !needsManualOfflineResolution(action));
 	const recentQueue = queue.slice(0, 4);
 	const hiddenQueueCount = Math.max(0, queue.length - recentQueue.length);
 	const primaryWg =
@@ -184,12 +251,15 @@ export function OfflineClient() {
 						: 'ManaWG speichert vorbereitete Aktionen auf diesem Gerät. Sobald das Netz zurück ist, kannst du sie synchronisieren und in deine WG zurückspringen.';
 
 	async function syncNow() {
-		if (syncingRef.current || queue.length === 0) return;
+		if (syncingRef.current || !hasRetryableQueue) return;
+		const controller = new AbortController();
+		syncAbortRef.current = controller;
 		syncingRef.current = true;
 		setSyncing(true);
 		setMessage(null);
 		try {
-			const memberships = await getAccountMemberships();
+			const memberships = await getAccountMemberships(controller.signal);
+			if (controller.signal.aborted) return;
 			if (!memberships) {
 				setKnownWgs([]);
 				setQueue([]);
@@ -206,14 +276,22 @@ export function OfflineClient() {
 			}
 			let synced = 0;
 			for (const { code, memberId } of queuedMemberships) {
-				synced += await syncOfflineActions(code, { force: true, memberId });
+				if (controller.signal.aborted) return;
+				synced += await syncOfflineActions(code, {
+					force: true,
+					memberId,
+					signal: controller.signal,
+				});
 			}
+			if (controller.signal.aborted) return;
 			const nextQueue = await refresh();
 			setMessage(formatManualOfflineSyncResult(synced, nextQueue.length, { offlineLabel: false }));
 		} catch {
+			if (controller.signal.aborted) return;
 			await refresh();
 			setMessage(getOfflineSyncFailureMessage());
 		} finally {
+			if (syncAbortRef.current === controller) syncAbortRef.current = null;
 			syncingRef.current = false;
 			setSyncing(false);
 		}
@@ -223,7 +301,7 @@ export function OfflineClient() {
 		<main
 			id="main"
 			tabIndex={-1}
-			className="min-h-svh bg-background px-4 py-6 text-foreground focus:outline-none"
+			className="min-h-svh bg-background px-4 pt-[max(1.5rem,env(safe-area-inset-top,0px))] pb-6 text-foreground focus:outline-none"
 		>
 			<div className="mx-auto flex min-h-[calc(100svh-3rem)] w-full max-w-md flex-col justify-center gap-5 pb-[env(safe-area-inset-bottom)]">
 				<header className="flex flex-col gap-3" aria-labelledby="offline-heading">
@@ -262,11 +340,11 @@ export function OfflineClient() {
 						{statusHeading}
 					</h1>
 					<p className="text-sm text-muted-foreground">{statusDescription}</p>
-					{queue.length > 0 && (
+					{queue.length > 0 && hasRetryableQueue && (
 						<Button
 							type="button"
 							onClick={syncNow}
-							disabled={syncing || queue.length === 0}
+							disabled={syncing}
 							aria-label={
 								syncing
 									? 'Offline-Aktionen werden synchronisiert'

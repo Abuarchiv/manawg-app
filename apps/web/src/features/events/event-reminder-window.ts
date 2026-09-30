@@ -7,7 +7,12 @@ import {
 } from '@/core/utils/berlin-day';
 import { and, eq, gt, gte, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import { wgEvents } from '../../core/db/schema';
-import { EVENTS_LIST_LIMIT, eventDateForDisplay, parseRecurrenceRule } from './events';
+import {
+	EVENTS_LIST_LIMIT,
+	berlinCalendarDate,
+	eventDateForDisplay,
+	parseRecurrenceRule,
+} from './events';
 
 const EVENT_WINDOW_PAGE_SIZE = 500;
 const EVENT_WINDOW_SCAN_LIMIT = 10_000;
@@ -153,6 +158,30 @@ function lastRecurrenceIndexAtOrBefore(
 	return -1;
 }
 
+function lastTimedRecurrenceIndexAtOrBefore(
+	anchorMs: number,
+	recurrenceAnchor: Date,
+	rule: ParsedRecurrenceRule,
+	untilMs: number,
+	wallMinutes: number,
+): number {
+	const untilDate = berlinCalendarDate(new Date(untilMs));
+	const index = lastRecurrenceIndexAtOrBefore(
+		recurrenceAnchor,
+		rule,
+		untilDate.getTime() + MS_PER_DAY - 1,
+	);
+	if (index < 0) return index;
+
+	const rawStart = recurrenceRawStartAtIndex(recurrenceAnchor, rule, index);
+	if (rawStart === null) return -1;
+	const wallStart = instantAtBerlinWallTime(berlinDayKey(new Date(rawStart)), wallMinutes);
+	const occurrenceMs = wallStart?.getTime() ?? anchorMs + rawStart - recurrenceAnchor.getTime();
+	if (occurrenceMs <= untilMs) return index;
+
+	return lastRecurrenceIndexAtOrBefore(recurrenceAnchor, rule, rawStart - 1);
+}
+
 function lastRecurrenceStartMs(
 	candidate: EventWindowCandidate,
 	rule: ParsedRecurrenceRule,
@@ -160,20 +189,24 @@ function lastRecurrenceStartMs(
 	const anchorMs = candidate.startsAt.getTime();
 	if (!Number.isFinite(anchorMs)) return null;
 	const anchor = new Date(anchorMs);
+	const recurrenceAnchor = candidate.allDay ? anchor : berlinCalendarDate(anchor);
+	const wallMinutes = candidate.allDay ? 0 : berlinWallMinutes(anchor);
 	let lastIndex = rule.count === undefined ? null : rule.count - 1;
 	if (rule.until !== undefined) {
-		const untilIndex = lastRecurrenceIndexAtOrBefore(anchor, rule, Date.parse(rule.until));
+		const untilMs = Date.parse(rule.until);
+		const untilIndex = candidate.allDay
+			? lastRecurrenceIndexAtOrBefore(recurrenceAnchor, rule, untilMs)
+			: lastTimedRecurrenceIndexAtOrBefore(anchorMs, recurrenceAnchor, rule, untilMs, wallMinutes);
 		lastIndex = lastIndex === null ? untilIndex : Math.min(lastIndex, untilIndex);
 	}
 	if (lastIndex === null || lastIndex < 0) return lastIndex;
-	const rawStart = recurrenceRawStartAtIndex(anchor, rule, lastIndex);
+	const rawStart = recurrenceRawStartAtIndex(recurrenceAnchor, rule, lastIndex);
 	if (rawStart === null || !Number.isFinite(rawStart)) return null;
 	if (candidate.allDay) return rawStart;
 	const rawYear = new Date(rawStart).getUTCFullYear();
 	if (rawYear < 1000 || rawYear >= 9999) return null;
-	const wallMinutes = berlinWallMinutes(anchor);
 	const wallAligned = instantAtBerlinWallTime(berlinDayKey(new Date(rawStart)), wallMinutes);
-	return (wallAligned ?? new Date(rawStart)).getTime();
+	return (wallAligned ?? new Date(anchorMs + rawStart - recurrenceAnchor.getTime())).getTime();
 }
 
 function durationMs(candidate: EventWindowCandidate, rootStartMs: number): number | null {

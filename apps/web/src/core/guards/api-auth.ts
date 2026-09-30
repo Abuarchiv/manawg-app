@@ -3,7 +3,7 @@ import { db, wgMembers } from '@/core/db';
 import { apiError } from '@/core/errors';
 import { verifyMemberToken } from '@/core/guards/member-token';
 import { logApiError } from '@/core/infra/observability';
-import { MEMBER_TOKEN_HEADER } from '@/shared/lib/member-header';
+import { EXPECTED_MEMBER_ID_HEADER, MEMBER_TOKEN_HEADER } from '@/shared/lib/member-header';
 import { and, eq } from 'drizzle-orm';
 import type { NextRequest, NextResponse } from 'next/server';
 
@@ -76,6 +76,13 @@ export async function requireMember(
 		// holds a valid member id.
 		if (row.deactivatedAt) {
 			return { ok: false, response: unauthorized('member_deactivated') };
+		}
+		const expectedMemberId = req.headers.get(EXPECTED_MEMBER_ID_HEADER);
+		if (expectedMemberId !== null && expectedMemberId !== row.id) {
+			return {
+				ok: false,
+				response: apiError('member_context_changed', 409, 'member_context_changed'),
+			};
 		}
 		// Verify the HMAC member token when present. Fails closed: an absent,
 		// malformed, or mismatched token yields `verified: false`, forcing the

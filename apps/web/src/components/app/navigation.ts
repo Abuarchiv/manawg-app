@@ -14,8 +14,8 @@ export const WG_SECTIONS = [
 		label: 'Haushalt',
 		iconKey: 'haushalt',
 		pages: [
-			{ slug: 'einkauf', label: 'Einkäufe', icon: ListChecks },
 			{ slug: 'putzen', label: 'Putzplan', icon: Sparkles },
+			{ slug: 'einkauf', label: 'Einkäufe', icon: ListChecks },
 			{ slug: 'vorraete', label: 'Vorräte', icon: Package },
 		],
 		related: [],

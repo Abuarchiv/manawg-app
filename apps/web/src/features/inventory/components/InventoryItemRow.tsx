@@ -8,7 +8,11 @@ import { Spinner } from '@/components/ui/spinner';
 import { useConfirmDelete } from '@/core/hooks/useConfirmDelete';
 import { apiFetch } from '@/core/infra/api-client';
 import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
-import { type InventoryItemDto, isBelowThreshold } from '@/features/inventory/inventory';
+import {
+	type InventoryItemDto,
+	type InventoryMutationItemDto,
+	isBelowThreshold,
+} from '@/features/inventory/inventory';
 import { AlertCircle, Minus, Pencil, Plus, Trash2 } from 'lucide-react';
 import { memo, useRef, useState } from 'react';
 
@@ -17,14 +21,14 @@ interface InventoryItemRowProps {
 	shareCode: string;
 	memberId: string;
 	memberToken?: string | undefined;
-	onChanged: (item?: InventoryItemDto) => void;
+	onChanged: (item?: InventoryMutationItemDto, deletedId?: string) => void;
 	onEdit: (item: InventoryItemDto) => void;
 }
 
 type PendingAction = 'decrement' | 'increment' | 'delete';
 type ConsumeWarning = null | 'notification_delivery_failed' | 'notification_delivery_unknown';
 type ConsumeResponse = {
-	item: InventoryItemDto;
+	item: InventoryMutationItemDto;
 	clamped: boolean;
 	warning: ConsumeWarning;
 };
@@ -50,6 +54,8 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 	const encodedShareCode = encodeURIComponent(shareCode);
 	const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	// Hide a deleted row right away; until the refetch lands it would stay tappable.
+	const [removed, setRemoved] = useState(false);
 	const consumeIdempotencyKeyRef = useRef<string | null>(null);
 	const restockIdempotencyKeyRef = useRef<string | null>(null);
 	const lowStock = isBelowThreshold(item);
@@ -103,7 +109,7 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 					return;
 				}
 				restockIdempotencyKeyRef.current = idempotencyKey;
-				const res = await apiFetch<{ item: InventoryItemDto }>(
+				const res = await apiFetch<{ item: InventoryMutationItemDto }>(
 					`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(item.id)}`,
 					{
 						method: 'PATCH',
@@ -138,7 +144,8 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 				{ method: 'DELETE', memberId, memberToken },
 			);
 			if (res.ok) {
-				onChanged();
+				setRemoved(true);
+				onChanged(undefined, item.id);
 			} else {
 				setError('Löschen fehlgeschlagen.');
 			}
@@ -154,10 +161,12 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 		void remove();
 	}
 
+	if (removed) return null;
+
 	return (
 		<Item className="flex-col items-stretch gap-2" aria-busy={pending}>
-			<div className="flex flex-wrap items-center gap-2">
-				<ItemContent className="min-w-0 basis-full">
+			<div className="flex w-full min-w-0 flex-wrap items-center gap-2">
+				<ItemContent className="min-w-0 flex-[1_1_9rem]">
 					<ItemTitle className="w-full min-w-0 gap-2 line-clamp-none">
 						<span className="min-w-0 flex-1 break-words" title={item.name}>
 							{item.name}
@@ -170,7 +179,8 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 						)}
 					</ItemTitle>
 					<ItemDescription className="line-clamp-none tabular-nums">
-						{item.quantity} {item.unit} · Nachkaufen ab {item.threshold}
+						{item.quantity} {item.unit} · Nachkaufen ab{'\u00a0'}
+						{item.threshold}
 					</ItemDescription>
 				</ItemContent>
 
@@ -213,19 +223,31 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 						<Pencil aria-hidden />
 					</Button>
 					{isDeleteArmed || pendingAction === 'delete' ? (
-						<Button
-							type="button"
-							variant="destructive"
-							size="sm"
-							onClick={handleDelete}
-							disabled={pending}
-							aria-busy={pendingAction === 'delete'}
-							aria-label={`${item.name} endgültig entfernen`}
-							className="px-3.5"
-						>
-							{pendingAction === 'delete' ? <Spinner aria-hidden /> : <Trash2 aria-hidden />}
-							Endgültig entfernen
-						</Button>
+						<>
+							<Button
+								type="button"
+								variant="destructive"
+								size="sm"
+								onClick={handleDelete}
+								disabled={pending}
+								aria-busy={pendingAction === 'delete'}
+								aria-label={`Endgültig entfernen: ${item.name}`}
+								className="px-3.5"
+							>
+								{pendingAction === 'delete' ? <Spinner aria-hidden /> : <Trash2 aria-hidden />}
+								Endgültig entfernen
+							</Button>
+							<Button
+								type="button"
+								variant="outline"
+								size="sm"
+								onClick={() => deleteConfirm.cancel()}
+								disabled={pending}
+								aria-label={`Abbrechen: Löschen von ${item.name}`}
+							>
+								Abbrechen
+							</Button>
+						</>
 					) : (
 						<Button
 							type="button"

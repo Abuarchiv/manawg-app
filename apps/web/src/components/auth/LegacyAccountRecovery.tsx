@@ -103,6 +103,7 @@ export function LegacyAccountRecovery() {
 								autoComplete="off"
 								autoCapitalize="characters"
 								inputMode="text"
+								enterKeyHint="done"
 								maxLength={8}
 								aria-describedby={error ? 'legacy-recovery-error' : undefined}
 								aria-invalid={error ? true : undefined}

@@ -74,18 +74,24 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 	const [recurrenceFreq, setRecurrenceFreq] = useState<string>('');
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [errorField, setErrorField] = useState<'title' | 'startsAt' | 'endsAt' | null>(null);
 	const draftInitializedRef = useRef(false);
 
 	useEffect(() => {
 		if (!open || draftInitializedRef.current) return;
 		draftInitializedRef.current = true;
 		setError(null);
-		// Start at the next full hour; a picked day keeps that time of day.
+		setErrorField(null);
+		// Start at the next full hour; a picked day keeps that time of day
+		// (including a day picked in the past — the calendar lets you select
+		// one, so silently discarding it back to "today" would be confusing).
 		const nextHour = new Date();
 		nextHour.setHours(nextHour.getHours() + 1, 0, 0, 0);
 		const seeded = new Date(defaultDate ?? nextHour);
 		seeded.setHours(nextHour.getHours(), 0, 0, 0);
-		setStartsAt(buildIsoLocal(seeded < nextHour ? nextHour : seeded));
+		// Today after 23:00 would seed 00:00 of today, which has already passed.
+		const pickedToday = seeded.toDateString() === new Date().toDateString();
+		setStartsAt(buildIsoLocal(pickedToday && seeded < nextHour ? nextHour : seeded));
 		setEndsAt('');
 	}, [open, defaultDate]);
 
@@ -100,9 +106,11 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 		e.preventDefault();
 		if (submitting) return;
 		setError(null);
+		setErrorField(null);
 		const validation = validateEventForm({ title, startsAt, endsAt, allDay });
 		if (!validation.ok) {
 			setError(validation.error);
+			setErrorField(validation.field);
 			return;
 		}
 		const trimmedTitle = title.trim();
@@ -132,6 +140,7 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 			setRecurrenceFreq('');
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Termin konnte nicht gespeichert werden.');
+			setErrorField(null);
 		} finally {
 			setSubmitting(false);
 		}
@@ -184,6 +193,8 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 							description={description}
 							onDescriptionChange={setDescription}
 							disabled={submitting}
+							errorField={errorField}
+							errorId="event-create-error"
 							recurrenceField={
 								<Field data-disabled={submitting}>
 									<FieldLabel htmlFor="event-recurrence">Wiederholung</FieldLabel>
@@ -205,7 +216,7 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 						/>
 						{error && (
 							<Alert variant="destructive">
-								<AlertDescription>{error}</AlertDescription>
+								<AlertDescription id="event-create-error">{error}</AlertDescription>
 							</Alert>
 						)}
 					</div>

@@ -78,22 +78,25 @@ export function DataTab({ wg, identity, exportSummary, exportSummaryError }: Dat
 
 	return (
 		<>
-			<Section title="Datenexport" hint="Backup und Transparenz für eure WG-Daten.">
+			<Section
+				title="Datenexport"
+				hint="Ausgewählte WG-Daten, inklusive erledigter Zahlungen. Datei-Inhalte und Systemwiederherstellung sind nicht enthalten."
+			>
 				{exportSummary.length > 0 && (
-					<div className="border-border grid grid-cols-2 gap-x-4 gap-y-2 border-b p-3 text-xs">
+					<div className="border-border grid grid-cols-2 gap-x-4 gap-y-1.5 border-b p-3 text-xs">
 						{exportSummary.map((section) => (
-							<div key={section.key} className="flex items-baseline gap-2">
+							<div key={section.key} className="flex min-w-0 items-baseline gap-2">
 								<span className="text-foreground font-mono font-medium tabular-nums">
 									{section.count}
 								</span>
-								<span className="text-muted-foreground">{section.label}</span>
+								<span className="text-muted-foreground min-w-0 break-words">{section.label}</span>
 							</div>
 						))}
 					</div>
 				)}
 				{exportSummaryError && (
 					<p
-						className="text-muted-foreground border-border block border-b px-4 py-2 text-[13px]"
+						className="text-muted-foreground border-border block border-b px-4 py-2 text-[12px]"
 						aria-live="polite"
 					>
 						{exportSummaryError} Downloads sind trotzdem möglich.

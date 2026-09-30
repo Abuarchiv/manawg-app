@@ -383,6 +383,7 @@ export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
 		}
 
 		let paidByName = '';
+		let paidByColIndex = -1;
 		let paidByValue = Number.NEGATIVE_INFINITY;
 		for (const col of memberColumns) {
 			const raw = (fields[col.index] ?? '').trim();
@@ -392,17 +393,28 @@ export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
 			if (signedCents > paidByValue) {
 				paidByValue = signedCents;
 				paidByName = col.name;
+				paidByColIndex = col.index;
 			}
 		}
-		if (!paidByName && memberColumns[0]) paidByName = memberColumns[0].name;
+		if (!paidByName && memberColumns[0]) {
+			paidByName = memberColumns[0].name;
+			paidByColIndex = memberColumns[0].index;
+		}
 
+		// Splitwise's per-person columns hold each person's NET balance on the
+		// row, not their share: a debtor's column is `-share` (matches
+		// Math.abs below), but the payer's column is `paid - ownShare`, so
+		// their share has to be recovered as `total - net` — using the raw
+		// abs value for the payer too under-detects real custom splits as
+		// "drift" and silently discards them (see customSplits below).
 		const parsedMemberAmounts = memberColumns
 			.map((col) => {
 				const raw = (fields[col.index] ?? '').trim();
 				const signedCents = raw ? parseAmountToCents(raw) : null;
-				return signedCents === null || signedCents === 0
-					? null
-					: { memberName: col.name, amountCents: Math.abs(signedCents) };
+				if (signedCents === null || signedCents === 0) return null;
+				const amountCents =
+					col.index === paidByColIndex ? totalCents - signedCents : Math.abs(signedCents);
+				return amountCents <= 0 ? null : { memberName: col.name, amountCents };
 			})
 			.filter((amount): amount is ParsedSplit => Boolean(amount));
 		const customTotal = parsedMemberAmounts.reduce((acc, amount) => acc + amount.amountCents, 0);

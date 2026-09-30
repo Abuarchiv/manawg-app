@@ -1,4 +1,5 @@
-import { badRequest, serverError, tooMany } from '@/core/errors';
+import { TransactionAbort } from '@/core/db/transaction';
+import { badRequest, conflict, serverError, tooMany } from '@/core/errors';
 import {
 	ReplayCache,
 	type ReplayReservation,
@@ -183,6 +184,18 @@ export async function POST(
 			});
 		} catch (writeErr) {
 			replayReservation?.reject(writeErr);
+			// The commit rolled back, so free the Postgres claim: a retry with the
+			// same key must re-run and get the real error, not a pending 500.
+			if (claimedSlot) {
+				const slot = claimedSlot;
+				// Clear before awaiting: a retry may claim this key once the delete
+				// completes, and the outer catch must not remove that new claim.
+				claimedSlot = null;
+				await releaseResponseSlot(slot.scope, slot.key);
+			}
+			if (writeErr instanceof TransactionAbort && writeErr.code === 'paypal_payment_pending') {
+				return conflict('paypal_payment_pending');
+			}
 			throw writeErr;
 		}
 

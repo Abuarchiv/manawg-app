@@ -41,7 +41,7 @@ export function AboEditModal({
 	);
 
 	return (
-		<AboModalShell title="Abo bearbeiten" onClose={onClose} submitting={submitting}>
+		<AboModalShell title="Fixkosten bearbeiten" onClose={onClose} submitting={submitting}>
 			{(requestClose) => (
 				<AboForm
 					mode="edit"

@@ -40,12 +40,11 @@ import {
 	CircleCheck,
 	Loader2,
 	Megaphone,
-	Search,
 } from 'lucide-react';
 import { useReducedMotion } from 'motion/react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 const PushPrimingPrompt = dynamic(
 	() => import('@/shared/components/push-priming-prompt').then((m) => m.PushPrimingPrompt),
@@ -78,7 +77,6 @@ export default function WgHomePage() {
 	const [pendingChoreId, setPendingChoreId] = useState<string | null>(null);
 	const [completeNotice, setCompleteNotice] = useState<string | null>(null);
 	const completionRequestKeysRef = useRef(new Map<string, string>());
-	const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
 	const [berlinTodayKey, setBerlinTodayKey] = useState(() => berlinDayKey(new Date()));
 	const [agendaNow, setAgendaNow] = useState(() => Date.now());
 	const reducedMotion = useReducedMotion();
@@ -118,10 +116,6 @@ export default function WgHomePage() {
 		void dashboardRead.refresh();
 	}, [berlinTodayKey, dashboardRead.refresh, eventRead.refresh]);
 
-	useEffect(() => {
-		if (dashboardRead.serverRevision > 0) setUpdatedAt(new Date());
-	}, [dashboardRead.serverRevision]);
-
 	// Nur eigene Putzaufgaben lassen sich direkt abhaken. Erster Tipp merkt vor,
 	// zweiter bestätigt – wie im Putzplan, damit ein versehentlicher Tipp nichts bucht.
 	async function completeChore(item: TodayImportantItem): Promise<void> {
@@ -147,7 +141,10 @@ export default function WgHomePage() {
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
 				headers: { 'Idempotency-Key': idempotencyKey },
-				body: JSON.stringify({ completedByMemberId: identity.memberId }),
+				body: JSON.stringify({
+					expectedNextDueAt: item.expectedNextDueAt,
+					expectedAssignedMemberId: item.expectedAssignedMemberId,
+				}),
 			},
 		);
 		setPendingChoreId(null);
@@ -155,6 +152,14 @@ export default function WgHomePage() {
 		if (result.ok || result.error === 'chore_already_completed') {
 			completionRequestKeysRef.current.delete(choreId);
 			setCompleteNotice(`${item.title} erledigt.`);
+			void load();
+			return;
+		}
+		if (result.error === 'chore_occurrence_changed') {
+			completionRequestKeysRef.current.delete(choreId);
+			setCompleteNotice(
+				'Termin oder Zuständigkeit haben sich geändert. Der Plan wird aktualisiert.',
+			);
 			void load();
 			return;
 		}
@@ -240,27 +245,6 @@ export default function WgHomePage() {
 				data-home-content
 				className="mx-auto grid w-full max-w-[var(--app-frame-width)] min-w-0 grid-cols-1 gap-6 px-4 py-6"
 			>
-				<header className="flex min-w-0 flex-col gap-1">
-					<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight break-words">
-						{new Intl.DateTimeFormat('de-DE', {
-							weekday: 'long',
-							day: 'numeric',
-							month: 'long',
-							timeZone: 'Europe/Berlin',
-						}).format(updatedAt ?? new Date())}
-					</h1>
-					{updatedAt && (
-						<p className="text-xs text-muted-foreground">
-							Stand{' '}
-							{new Intl.DateTimeFormat('de-DE', {
-								hour: '2-digit',
-								minute: '2-digit',
-								timeZone: 'Europe/Berlin',
-							}).format(updatedAt)}{' '}
-							Uhr
-						</p>
-					)}
-				</header>
 				{isNewWg && (
 					<div>
 						<StartWelcome />
@@ -353,21 +337,15 @@ export default function WgHomePage() {
 
 				<div className="flex min-w-0 flex-col gap-6">
 					<section aria-labelledby="week-heading" className="flex min-w-0 flex-col gap-3">
-						<div className="flex min-w-0 items-end justify-between gap-3">
-							<div className="min-w-0">
-								<h2 id="week-heading" className="font-heading text-xl font-semibold">
-									Diese Woche
-								</h2>
-								<p className="text-sm text-muted-foreground">
-									{formatAgendaDay(weekAgenda.weekStartKey)} –{' '}
-									{formatAgendaDay(weekAgenda.sundayKey)}
-								</p>
-							</div>
+						<div className="flex min-w-0 flex-wrap items-center gap-3">
+							<h2 id="week-heading" className="font-heading min-w-0 text-xl font-semibold">
+								Diese Woche
+							</h2>
 							<Link
 								href={`${wgBaseHref}/kalender`}
 								className={cn(
 									buttonVariants({ variant: 'ghost' }),
-									'min-h-11 shrink-0 px-2 text-sm',
+									'min-h-11 ml-auto shrink-0 px-2 text-sm after:h-[44px] after:min-w-[44px]',
 								)}
 							>
 								Kalender <ChevronRight data-icon="inline-end" aria-hidden />
@@ -454,18 +432,8 @@ export default function WgHomePage() {
 					</section>
 
 					<section aria-labelledby="wg-now-heading" className="flex min-w-0 flex-col gap-3">
-						<div className="flex justify-end">
-							<Link
-								href={`${wgBaseHref}/suche`}
-								className={cn(
-									buttonVariants({ variant: 'ghost' }),
-									'min-w-0 max-w-full shrink whitespace-normal px-0 text-[13px] text-muted-foreground leading-snug',
-								)}
-							>
-								<Search data-icon="inline-start" aria-hidden /> WG durchsuchen
-							</Link>
-						</div>
-						<Collapsible defaultOpen>
+						{/* Immer zugeklappt starten: Neuigkeiten öffnet man bei Bedarf selbst. */}
+						<Collapsible>
 							<h2 id="wg-now-heading">
 								<CollapsibleTrigger
 									render={
@@ -481,19 +449,15 @@ export default function WgHomePage() {
 							</h2>
 							<CollapsiblePanel {...(reducedMotion ? { transition: { duration: 0 } } : {})}>
 								<div className="flex min-w-0 flex-col gap-3">
-									<div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-										<div className="flex min-w-0 flex-wrap items-center justify-end gap-x-3 gap-y-1">
-											<Link
-												href={`${wgBaseHref}/aktivitaet`}
-												className={cn(
-													buttonVariants({ variant: 'ghost' }),
-													'min-w-0 max-w-full shrink whitespace-normal px-0 text-[13px] text-muted-foreground text-right leading-snug',
-												)}
-											>
-												Ganze Chronik <ChevronRight data-icon="inline-end" aria-hidden />
-											</Link>
-										</div>
-									</div>
+									<Link
+										href={`${wgBaseHref}/aktivitaet`}
+										className={cn(
+											buttonVariants({ variant: 'ghost' }),
+											'min-w-0 max-w-full self-end whitespace-normal px-0 text-[12px] text-muted-foreground leading-snug',
+										)}
+									>
+										Ganze Chronik <ChevronRight data-icon="inline-end" aria-hidden />
+									</Link>
 									{data ? (
 										<div className="flex flex-col gap-2">
 											{latestAnnouncement && !latestIsPending && (
@@ -524,7 +488,7 @@ export default function WgHomePage() {
 												</Item>
 											)}
 											{activityItems.length > 0 ? (
-												<ActivityFeed items={activityItems} compact />
+												<ActivityFeed items={activityItems} />
 											) : !latestAnnouncement || latestIsPending ? (
 												<p className="text-sm text-muted-foreground">Noch keine neuen Einträge.</p>
 											) : null}
@@ -605,17 +569,19 @@ function TodayRow({
 			)}
 			<Link
 				href={item.href}
-				className="flex min-h-14 min-w-0 flex-1 items-center gap-2 rounded-lg py-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+				className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-lg py-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 			>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="font-medium break-words">{item.title}</span>
+					<span className="text-[14px] font-medium leading-snug break-words">{item.title}</span>
 					<span
 						className={cn(
-							'text-sm text-muted-foreground',
+							'text-[12px] text-muted-foreground',
 							item.kind === 'recurring' && 'tabular-nums',
 						)}
 					>
-						{armed ? (
+						{pending ? (
+							'Wird gespeichert …'
+						) : armed ? (
 							'Nochmal tippen zum Bestätigen'
 						) : debtAmount !== undefined ? (
 							<>
@@ -656,11 +622,11 @@ function AgendaRow({ item }: { item: WeekAgendaItem }) {
 			</span>
 			<Link
 				href={item.href}
-				className="flex min-h-14 min-w-0 flex-1 items-center gap-2 rounded-lg py-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+				className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-lg py-2 outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
 			>
 				<span className="flex min-w-0 flex-1 flex-col">
-					<span className="font-medium break-words">{item.title}</span>
-					<span className="text-sm text-muted-foreground">
+					<span className="text-[14px] font-medium leading-snug break-words">{item.title}</span>
+					<span className="text-[12px] text-muted-foreground">
 						{formatAgendaDay(item.dayKey)} · {item.detail}
 					</span>
 				</span>

@@ -89,7 +89,9 @@ for (const colorScheme of ['light'] as const) {
 
 			await page.reload({ waitUntil: 'domcontentloaded' });
 			await dismissOnboarding(page);
-			const messageBody = page.locator('p.whitespace-pre-wrap').filter({ hasText: 'Erste Zeile' });
+			const messageBody = page
+				.locator('[data-slot="bubble-content"] .whitespace-pre-wrap')
+				.filter({ hasText: 'Erste Zeile' });
 			// ChatView polls after an SSR history payload, so wait for the mocked readback.
 			await expect(messageBody).toHaveText(/Erste Zeile\s+Zweite Zeile/, { timeout: 15_000 });
 		});

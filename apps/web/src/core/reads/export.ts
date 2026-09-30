@@ -4,6 +4,7 @@ interface WgExportInput {
 	wg: { name: string; shareCode: string };
 	members: ExportRow[];
 	expenses: ExportRow[];
+	expensePayments: ExportRow[];
 	recurringExpenses: ExportRow[];
 	shoppingItems: ExportRow[];
 	chores: ExportRow[];
@@ -18,6 +19,7 @@ export interface WgExport {
 	sections: {
 		members: ExportRow[];
 		expenses: ExportRow[];
+		expensePayments: ExportRow[];
 		recurringExpenses: ExportRow[];
 		shoppingItems: ExportRow[];
 		chores: ExportRow[];
@@ -38,6 +40,7 @@ export interface ExportSectionSummary {
 const SECTION_LABELS: Record<ExportSectionKey, string> = {
 	members: 'Mitglieder',
 	expenses: 'Ausgaben',
+	expensePayments: 'Erledigte Zahlungen',
 	recurringExpenses: 'Fixkosten',
 	shoppingItems: 'Einkauf',
 	chores: 'Putzplan',
@@ -54,10 +57,12 @@ const SECTION_HEADERS: Record<ExportSectionKey, string[]> = {
 		'amountCents',
 		'currency',
 		'paidBy',
+		'paidByMemberId',
 		'imageUrl',
 		'occurredAt',
 		'splits',
 	],
+	expensePayments: ['id', 'fromMemberId', 'toMemberId', 'amountCents', 'currency', 'completedAt'],
 	recurringExpenses: [
 		'id',
 		'description',
@@ -90,6 +95,7 @@ export function buildWgExport(input: WgExportInput, now = Date.now()): WgExport 
 		sections: {
 			members: input.members,
 			expenses: input.expenses,
+			expensePayments: input.expensePayments,
 			recurringExpenses: input.recurringExpenses,
 			shoppingItems: input.shoppingItems,
 			chores: input.chores,

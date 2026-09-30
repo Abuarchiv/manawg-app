@@ -1,11 +1,16 @@
 import { AppBottomNav } from '@/components/app/AppBottomNav';
+import { RouteFocusOnNavigate } from '@/components/app/RouteFocusOnNavigate';
+import { WgAppHeader } from '@/components/app/WgAppHeader';
+import { WG_SECTIONS } from '@/components/app/navigation';
 import { ToastContainer } from '@/components/ui/Toast';
 import { NavItem } from '@/components/wg/NavItem';
 import { OfflineBanner } from '@/components/wg/OfflineBanner';
 import { WgContextProvider } from '@/components/wg/WgContextProvider';
 import { getAuthenticatedUserFromCookies } from '@/core/auth/server';
 import { db, wgMembers, wgs } from '@/core/db';
+import { deriveMemberToken } from '@/core/guards/member-token';
 import { getE2EWgFixture, isE2EDbDownMode } from '@/core/infra/e2e-db-down';
+import type { StoredIdentity } from '@/shared/lib/identity';
 import { isValidShareCode, normalizeShareCode } from '@/shared/lib/share-code';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Metadata } from 'next';
@@ -75,7 +80,7 @@ export default async function WgLayout({ children, params }: Props) {
 	const user = await getAuthenticatedUserFromCookies();
 	if (!user) redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
 
-	const [membership] = await db
+	const [access] = await db
 		.select({
 			role: wgMembers.role,
 			id: wgs.id,
@@ -83,6 +88,8 @@ export default async function WgLayout({ children, params }: Props) {
 			shareCode: wgs.shareCode,
 			joiningEnabled: wgs.joiningEnabled,
 			shareCodeRotatedAt: wgs.shareCodeRotatedAt,
+			memberId: wgMembers.id,
+			memberName: wgMembers.name,
 		})
 		.from(wgMembers)
 		.innerJoin(wgs, eq(wgMembers.wgId, wgs.id))
@@ -94,13 +101,17 @@ export default async function WgLayout({ children, params }: Props) {
 			),
 		)
 		.limit(1);
-	if (!membership) {
+	if (!access) {
 		redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
 	}
-	const { role, ...wg } = membership;
-	// Seed the admin flag from the server: the client still refreshes it with
-	// the roster, but one failed members fetch must not hide admin actions for
-	// the whole session. UI gating only — every mutation re-checks server-side.
+	const { role, memberId, memberName, ...wg } = access;
+	const memberToken = deriveMemberToken(wg.id, memberId);
+	const initialIdentity: StoredIdentity = {
+		memberId,
+		name: memberName,
+		...(memberToken ? { memberToken } : {}),
+	};
+	// Seed admin gating from the server; every mutation still checks authorization.
 	const viewerIsAdmin = role === 'admin';
 
 	// Load the full roster including deactivated members: history and balances
@@ -122,7 +133,13 @@ export default async function WgLayout({ children, params }: Props) {
 	}));
 
 	return (
-		<WgShell code={code} wg={wg} members={members} viewerIsAdmin={viewerIsAdmin}>
+		<WgShell
+			code={code}
+			wg={wg}
+			members={members}
+			viewerIsAdmin={viewerIsAdmin}
+			initialIdentity={initialIdentity}
+		>
 			{children}
 		</WgShell>
 	);
@@ -132,6 +149,7 @@ function WgShell({
 	code,
 	wg,
 	members,
+	initialIdentity,
 	viewerIsAdmin,
 	children,
 }: {
@@ -151,13 +169,19 @@ function WgShell({
 		active: boolean;
 	}>;
 	viewerIsAdmin?: boolean;
+	initialIdentity?: StoredIdentity;
 	children: ReactNode;
 }) {
 	const wgBaseHref = `/wg/${encodeURIComponent(code)}`;
 
 	return (
-		<WgContextProvider wg={wg} members={members} viewerIsAdmin={viewerIsAdmin}>
-			<ToastContainer />
+		<WgContextProvider
+			key={wg.id}
+			wg={wg}
+			members={members}
+			initialIdentity={initialIdentity}
+			viewerIsAdmin={viewerIsAdmin}
+		>
 			<div
 				className="group/wg-shell min-h-svh bg-background"
 				style={{
@@ -166,6 +190,7 @@ function WgShell({
 				}}
 			>
 				<OfflineBanner />
+				<RouteFocusOnNavigate />
 				<WgAppHeader />
 				{/* WCAG 1.3.1 / 2.4.1 — single <main> landmark.
 				    tabIndex={-1} lets the skip-link target receive programmatic focus. */}
@@ -178,7 +203,7 @@ function WgShell({
 				data-app-chrome
 				className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full min-w-0 max-w-[var(--app-nav-width)] px-2 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]"
 			>
-				<div className="rounded-[20px] border border-border bg-background text-foreground">
+				<div className="glass-bar rounded-[18px]">
 					<ul className="flex flex-wrap gap-1 p-1 [&>li]:min-w-fit [&>li]:flex-1">
 						<NavItem
 							href={wgBaseHref}
@@ -200,13 +225,14 @@ function WgShell({
 						{/* Vier Ziele nach Candidate A: Start, Haushalt (Einkauf/Vorräte/
 					    Putzen/Kalender), Finanzen (Ausgaben/Fixkosten/Mahnungen/Import),
 					    Austausch (Pinnwand/Chat). Alle bisherigen Deep Links lösen
-					    weiter auf; Suche/Aktivität/Einstellungen bleiben über
+					    weiter auf; Aktivität/Einstellungen bleiben über
 					    Header- und Start-Verlinkungen erreichbar. */}
 					</ul>
 				</div>
 			</AppBottomNav>
+			{/* Last in the DOM so Tab reaches a toast's dismiss button right after
+			    whatever the user just did, instead of jumping back to the page top. */}
+			<ToastContainer />
 		</WgContextProvider>
 	);
 }
-import { WgAppHeader } from '@/components/app/WgAppHeader';
-import { WG_SECTIONS } from '@/components/app/navigation';

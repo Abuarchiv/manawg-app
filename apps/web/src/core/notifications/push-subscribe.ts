@@ -46,6 +46,16 @@ async function saveServerPushOptOut(
 	}
 }
 
+/** Remove one browser endpoint without changing the member's other devices. */
+export async function retireWebPushEndpoint(
+	code: string,
+	memberId: string,
+	endpoint: string,
+	memberToken?: string,
+): Promise<void> {
+	await saveServerPushOptOut(code, memberId, endpoint, memberToken);
+}
+
 async function saveServerPushOptIn(
 	code: string,
 	memberId: string,
@@ -166,6 +176,9 @@ export async function unsubscribeWebPush(
 		return;
 	}
 
-	await saveServerPushOptOut(code, memberId, endpoint, memberToken);
-	await subscription.unsubscribe().catch(() => undefined);
+	try {
+		await retireWebPushEndpoint(code, memberId, endpoint, memberToken);
+	} finally {
+		await subscription.unsubscribe().catch(() => undefined);
+	}
 }

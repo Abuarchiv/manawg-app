@@ -6,7 +6,7 @@ test.skip(process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true', 'requires local f
 const shareCode = FIXTURE_WG.shareCode;
 const memberId = FIXTURE_WG.memberId;
 
-test('shopping remove button gets a properly spaced aria-label when armed', async ({ page }) => {
+test('shopping remove button names the item and the armed confirm state', async ({ page }) => {
 	const itemName = 'Milch';
 	await setupMember(page);
 	await page.route(`**/api/wg/${shareCode}/shopping`, (route) =>
@@ -32,11 +32,11 @@ test('shopping remove button gets a properly spaced aria-label when armed', asyn
 	await dismissOnboarding(page);
 	await page.getByRole('button', { name: `Artikelaktionen: ${itemName}` }).click();
 	const drawer = page.getByRole('dialog');
-	await drawer.getByRole('button', { name: `${itemName} entfernen` }).click();
-	// Regression: the armed label used to concatenate without a space
-	// ("Milch entfernenbestätigen").
+	await drawer.getByRole('button', { name: `Artikel entfernen: ${itemName}` }).click();
+	// WCAG 2.5.3 — the visible "Milch" label must stay in the accessible name,
+	// and the armed (confirm) state must be named distinctly from the initial one.
 	await expect(
-		drawer.getByRole('button', { name: `${itemName} entfernen bestätigen` }),
+		drawer.getByRole('button', { name: `Endgültig entfernen: ${itemName}` }),
 	).toBeVisible();
 });
 

@@ -63,3 +63,39 @@ test('a removed absence stays removed when a chore completion updates the cache'
 	);
 	await expect(absenceRow).toHaveCount(0);
 });
+
+test('an armed absence removal can be cancelled without deleting it', async ({ page }) => {
+	const shareCode = 'MTE8PZAT';
+	const memberId = '7d898f9e-5ad7-4f5d-abed-8c3e99a76973';
+	const absence = {
+		id: 'absence-holiday',
+		memberId,
+		memberName: 'Alex',
+		startDate: '2026-01-01T00:00:00.000Z',
+		endDate: '2099-12-31T00:00:00.000Z',
+		reason: 'Urlaub',
+	};
+	let deleteCalls = 0;
+	await setupMember(page);
+	await page.route(`**/api/wg/${shareCode}/chores`, (route) =>
+		route.fulfill({ json: { chores: [], monthCompletions: {} } }),
+	);
+	await page.route(`**/api/wg/${shareCode}/absences`, (route) =>
+		route.fulfill({ json: { absences: [absence] } }),
+	);
+	await page.route(`**/api/wg/${shareCode}/absences/${absence.id}`, (route) => {
+		deleteCalls += 1;
+		return route.fulfill({ json: {} });
+	});
+
+	await navigateToFeature(page, `/wg/${shareCode}/putzen`);
+	await dismissOnboarding(page);
+	const absenceRow = page.locator(`#absence-${absence.id}`);
+	await absenceRow.getByRole('button', { name: /entfernen$/ }).click();
+	await expect(absenceRow.getByRole('button', { name: /endgültig entfernen$/ })).toBeVisible();
+	await absenceRow.getByRole('button', { name: /abbrechen$/ }).click();
+
+	await expect(absenceRow.getByRole('button', { name: /endgültig entfernen$/ })).toHaveCount(0);
+	await expect(absenceRow).toBeVisible();
+	expect(deleteCalls).toBe(0);
+});

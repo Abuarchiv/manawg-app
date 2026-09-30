@@ -1,8 +1,38 @@
 # ManaWG Release Candidate Evidence
 
+Latest dated readback: [2026-09-30 release evidence](2026-09-30-release-evidence.md).
+CI work is explicitly deferred by the owner; historical gates below remain
+historical evidence and are not claimed passed for the latest revision.
+
 This is a dated evidence log, not a standing release approval. Older branch names, candidate SHAs, and blockers describe only their recorded date.
 
 Production migration requires a successful `push` run of `.github/workflows/ci.yml` for the exact current `main` candidate SHA, with both `validate` and `e2e-fixtures` successful. A read-only Actions API preflight verifies this before the workflow enters the protected Production environment; the separate exact-SHA Preview evidence and explicit confirmation remain required.
+
+## Hosted operations readback — 2026-09-25, 19:05 CEST
+
+At this readback `origin/main` was `519ebc2566bf4410146d8c22eec3b36887200cab`. Its [push CI run 36162244967](https://github.com/Abuarchiv/manawg-app/actions/runs/36162244967) passed `validate`, `e2e-fixtures` (337 passed, 39 hosted cases skipped) and `db-supabase-preview`; `e2e-preview` was skipped. No Vercel Preview deployment of this exact SHA was found. `app.manawg.com` still resolved to READY Production deployment `dpl_7dNFNMGJHbwJy7rYvkxnSHTANxxW`, created before these merges; its exact source tree was not confirmed. Current `main` is not claimed as deployed to Production.
+
+The Production Supabase dashboard showed custom SMTP enabled with host `smtp.resend.com`. A controlled password-reset request through `https://app.manawg.com/neu` reached the owner's Gmail inbox at approximately 19:00 CEST as a message from `manawg.com` titled “Neues Passwort für ManaWG”. No reset link was opened and no password was changed. This proves one real Production reset-mail receipt; it does not prove signup-mail delivery, Preview mail, future deliverability, or an alert. The Preview project showed custom SMTP disabled.
+
+The Vercel project is on Hobby; its Alerts screen offered “Upgrade to Pro” and no verified alarm recipient or test receipt. Read-only Vercel CLI queries returned no error-level or HTTP 500 events in the available seven-day window; this is not alert evidence. Supabase leaked-password protection remains disabled on Free. No paid plan or provider setting was changed.
+
+## Local review candidate — 2026-09-25, 17:37 CEST
+
+The isolated `fix/release-readiness-20260925` worktree contains the integrated release fixes plus recurring-expense source metadata across online/offline requests, canonical replay of an already booked due period, and Cron row locking/CAS for concurrent template changes. The existing Production/Preview unique index protects `(recurring_expense_id, recurring_due_at)`; this branch adds no migration. Independent reviews found and rechecked the retry, pause, schedule, Drizzle error, and WG-lock ordering paths. No Production deployment or database write was performed for this candidate.
+
+Fresh Node 22 checks on this local code stand passed: Biome/feature-boundary lint, both TypeScript configurations, production build, bundle budget, analytics privacy, **152/152 unit tests**, and **321 fixture E2E tests**. The fixture run skipped **38 hosted tests**. `pnpm audit --audit-level high` exited 0; its one reported advisory is moderate. These results establish local/fixture behavior only. The Cron and expense route race tests use mocks, not a live PostgreSQL concurrency test.
+
+The user accepted a no-cost local Production export. Its isolated no-network PostgreSQL 17 import matched **61/61** data sections, financial totals, the migration ledger, selected access controls, and checked references. It is a single FileVault-protected local snapshot; Storage object bytes and provider configuration are outside it. Hosted restore, Auth login after restore, and service recovery time are unproven.
+
+Release decision stays **blocked** until the exact candidate has protected Preview/authenticated multi-user and privacy evidence, Auth email receipt and alert delivery are verified, provider-dependent flows have test credentials, and real devices/residents have exercised the release. Supabase Free still has Leaked Password Protection disabled; the provider requires a paid tier to enable it. See the latest dated status in `TASKS.md`.
+
+## Candidate integration — 2026-09-25, 16:10 CEST
+
+The local review branch `fix/release-readiness-20260925` is based on fetched `origin/main` SHA `23d992ac926b12b4c39f6687118171472e9e6336`. It combines the earlier uncommitted release fixes with the newer shopping, chat, calendar, inventory, import, and expense changes. The upstream negative-remainder bug in manual expense splits was fixed in the shared helper and independently reviewed. Nothing in this branch has been merged or deployed to Production.
+
+Node 22 gates on this integrated worktree passed: lint, typecheck, production build, bundle budget, analytics privacy, **138 unit tests**, and **316 fixture E2E tests** (38 hosted cases skipped; no failures or flakes). These are local/fixture results, not authenticated hosted proof. A review-branch PR can run validate and fixture CI; protected `e2e-preview` requires the exact current `main` SHA under the existing workflow.
+
+Current `app.manawg.com` resolves to READY Production CLI deployment `dpl_gBf72dfaQqb6Z22o3F1tAzUs9oNC`. Vercel metadata reports `gitCommitSha=23d992a`, but `gitSource` and `gitDirty` are absent; this does not prove a clean exact Git tree. The local review branch is not in that deployment.
 
 ## Readiness audit — 2026-09-25
 

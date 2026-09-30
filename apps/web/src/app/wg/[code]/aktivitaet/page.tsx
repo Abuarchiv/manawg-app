@@ -156,10 +156,10 @@ export default function AktivitaetPage() {
 			<header className="flex items-start gap-2">
 				<BackLink href={wgBaseHref} label="Dashboard" />
 				<div className="min-w-0 flex-1">
-					<h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
+					<h1 className="font-heading text-lg font-semibold tracking-tight text-foreground">
 						Aktivität
 					</h1>
-					<p className="mt-0.5 text-[13px] text-muted-foreground">
+					<p className="mt-0.5 text-[12px] text-muted-foreground">
 						Verlauf, Erinnerungen und offene Klärungen.
 					</p>
 				</div>
@@ -216,7 +216,7 @@ export default function AktivitaetPage() {
 								))}
 							</ItemGroup>
 						) : (
-							<p className="py-1 text-[13px] text-muted-foreground">Keine offenen Klärungen.</p>
+							<p className="py-1 text-[12px] text-muted-foreground">Keine offenen Klärungen.</p>
 						)}
 					</CardContent>
 				</Card>
@@ -283,19 +283,22 @@ export default function AktivitaetPage() {
 					{data ? (
 						chronicleGroups.length > 0 ? (
 							<div className="space-y-5">
-								<output aria-live="polite" className="block text-[13px] text-muted-foreground">
+								<output aria-live="polite" className="block text-[12px] text-muted-foreground">
 									{formatVisibleActivityCount(filteredItems.length)}
 								</output>
 								{chronicleGroups.map((group) => (
 									<div key={group.date} className="space-y-2">
 										<Marker variant="separator">
 											<MarkerContent>
-												<span className="font-semibold uppercase tracking-wide">
+												<span className="font-medium">
 													{group.label} · {group.items.length}
 												</span>
 											</MarkerContent>
 										</Marker>
-										<ActivityFeed items={group.items} />
+										{/* Eine umrandete Liste pro Tag statt einer Karte pro Eintrag. */}
+										<div className="rounded-xl border px-3">
+											<ActivityFeed items={group.items} />
+										</div>
 									</div>
 								))}
 							</div>
@@ -343,7 +346,7 @@ export default function AktivitaetPage() {
 							))}
 						</div>
 					) : (
-						<p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[13px] text-muted-foreground">
+						<p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[12px] text-muted-foreground">
 							Keine Aktivität geladen. Versuche es erneut.
 						</p>
 					)}

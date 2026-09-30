@@ -23,12 +23,6 @@
 			"@/*": ["./src/*"]
 		}
 	},
-	"include": [
-		".next-chore-auth-check/types/**/*.ts",
-		".next/types/**/*.ts",
-		"next-env.d.ts",
-		"src/**/*.ts",
-		"src/**/*.tsx"
-	],
+	"include": [".next/types/**/*.ts", "next-env.d.ts", "src/**/*.ts", "src/**/*.tsx"],
 	"exclude": ["node_modules", ".next", "e2e", "playwright.config.ts"]
 }

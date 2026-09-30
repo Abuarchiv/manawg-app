@@ -1,4 +1,5 @@
 import { db, pushSubscriptions, wgMembers } from '@/core/db';
+import { logApiError } from '@/core/infra/observability';
 import { isQuietHoursActive } from '@/core/notifications/notification-preferences';
 import {
 	type NotificationEvent,
@@ -147,7 +148,7 @@ async function sendWebPush(
 					staleSubscriptionIds.push(sub.id);
 				} else {
 					failures.push(err);
-					console.error('[notifications] web push failed', err);
+					logApiError('[notifications] web push failed', err);
 				}
 			}
 		}),

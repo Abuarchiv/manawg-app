@@ -119,24 +119,6 @@ export function recurringDueDateMatchesExpected(current: string, expected: strin
 	return currentTime !== null && expectedTime !== null && currentTime === expectedTime;
 }
 
-export type ProviderKey = 'netflix' | 'spotify' | 'disney' | 'strom' | 'internet';
-
-const PROVIDER_PATTERNS: ReadonlyArray<{ key: ProviderKey; regex: RegExp }> = [
-	{ key: 'netflix', regex: /netflix/i },
-	{ key: 'spotify', regex: /spotify/i },
-	{ key: 'disney', regex: /disney(\s|\+|plus)?/i },
-	{ key: 'strom', regex: /\b(strom|electric(ity)?|stadtwerke)\b/i },
-	{ key: 'internet', regex: /\b(internet|wlan|wifi|dsl|glasfaser|vodafone|telekom)\b/i },
-];
-
-export function detectProvider(description: string | null | undefined): ProviderKey | null {
-	if (!description) return null;
-	for (const entry of PROVIDER_PATTERNS) {
-		if (entry.regex.test(description)) return entry.key;
-	}
-	return null;
-}
-
 interface RecurringPreviewInput {
 	nextDueAt: string | Date;
 	intervalMonths: number;

@@ -26,15 +26,17 @@ function Switch({
 	return (
 		<SwitchPrimitive
 			className={cn(
-				'group/switch relative peer inline-flex h-11 w-[68px] shrink-0 items-center rounded-[22px] border border-transparent bg-transparent px-0 outline-none before:absolute before:inset-x-0 before:top-1/2 before:h-[30px] before:-translate-y-1/2 before:pointer-events-none before:rounded-[15px] before:bg-input before:content-[""] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
-				'data-[checked]:before:bg-primary data-[unchecked]:before:bg-muted-foreground/60',
+				// No border: it would shrink the 68px track and push the thumb off-centre.
+				'group/switch relative peer inline-flex h-11 w-[68px] shrink-0 items-center rounded-[22px] border-0 bg-transparent px-0 outline-none before:absolute before:inset-x-0 before:top-1/2 before:h-[30px] before:-translate-y-1/2 before:pointer-events-none before:rounded-[15px] before:bg-(--switch-track) before:content-[""] focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+				// The thumb's pressed glass paints this colour too.
+				'[--switch-track:var(--input)] data-[checked]:[--switch-track:var(--primary)] dark:data-[unchecked]:[--switch-track:color-mix(in_oklab,var(--muted-foreground)_60%,transparent)]',
 				className,
 			)}
 			{...props}
 		>
 			<SwitchThumbPrimitive
 				className={cn(
-					'pointer-events-none absolute z-10 block rounded-[12.5px] bg-background transition-[left,top,width,height,box-shadow,background-color] duration-[280ms] ease-[cubic-bezier(0.34,1.28,0.64,1)] dark:data-[checked]:bg-primary-foreground dark:data-[unchecked]:bg-foreground',
+					'pointer-events-none absolute z-10 block rounded-full bg-background transition-[left,top,width,height,box-shadow,background-color,opacity] duration-[280ms] ease-[cubic-bezier(0.34,1.28,0.64,1)] dark:data-[checked]:bg-primary-foreground dark:data-[unchecked]:bg-foreground',
 				)}
 				pressedWidth={pressedWidth}
 			>

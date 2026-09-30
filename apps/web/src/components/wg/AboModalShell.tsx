@@ -72,7 +72,7 @@ export function AboModalShell({ title, onClose, submitting, children }: AboModal
 								className="size-9"
 								onClick={requestClose}
 								disabled={submitting}
-								aria-label="Abo-Editor schließen"
+								aria-label="Fixkosten-Editor schließen"
 							>
 								<ArrowLeft />
 							</Button>
@@ -96,8 +96,8 @@ export function AboModalShell({ title, onClose, submitting, children }: AboModal
 					<AlertDialogHeader>
 						<AlertDialogTitle>Eingaben verwerfen?</AlertDialogTitle>
 						<AlertDialogDescription>
-							Ungespeicherte Änderungen an diesem Abo gehen beim Schließen verloren. Es wird nichts
-							gespeichert.
+							Ungespeicherte Änderungen an diesen Fixkosten gehen beim Schließen verloren. Es wird
+							nichts gespeichert.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<AlertDialogFooter>

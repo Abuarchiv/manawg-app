@@ -15,6 +15,7 @@ import { ActionNoticeBanner } from '@/components/wg/ActionNoticeBanner';
 import { LoadErrorBanner } from '@/components/wg/LoadErrorBanner';
 import { OfflineQueueNotice } from '@/components/wg/OfflineQueueNotice';
 import { SubNav } from '@/components/wg/SubNav';
+import { ThumbAction } from '@/components/wg/ThumbAction';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { getWgLoadErrorMessage } from '@/core/guards/load-errors';
 import { useCachedFetch } from '@/core/hooks/useCachedFetch';
@@ -29,7 +30,9 @@ import {
 	writeDraft,
 } from '@/core/offline/drafts';
 import {
+	discardQueuedEntry,
 	enqueueOfflineAction,
+	isOfflineActionQueued,
 	readOfflineQueue,
 	syncOfflineActions,
 	writeOfflineQueue,
@@ -38,6 +41,7 @@ import {
 	DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE,
+	QUEUE_EDIT_ALREADY_SENT_MESSAGE,
 } from '@/core/offline/offline-copy';
 import {
 	type OfflineActionType,
@@ -45,7 +49,7 @@ import {
 	createQueuedAbsence,
 	createQueuedChore,
 	createQueuedChoreCompletion,
-	resolveLocalRowRemoval,
+	isQueuedCreateId,
 } from '@/core/offline/offline-queue';
 import { useOfflineQueueSync } from '@/core/offline/useOfflineQueueSync';
 import { endOfBerlinDay, instantAtBerlinWallTime } from '@/core/utils/berlin-day';
@@ -55,6 +59,7 @@ import { getAbsentMemberIds } from '@/features/chores/absence';
 import type { AbsenceInput } from '@/features/chores/absence';
 import { absenceSaveErrorMessage, choreCreateErrorMessage } from '@/features/chores/chore-errors';
 import { buildChoreFairness, chooseNextAvailableMember } from '@/features/chores/chore-fairness';
+import { computeNextDueAt } from '@/features/chores/chore-recurrence';
 import {
 	CHORE_GROUPS,
 	getChoreGroup,
@@ -76,7 +81,7 @@ import type {
 	RecurrenceType,
 } from '@/features/chores/components/chore-types';
 import { QUICK_CHORE_TEMPLATES, TITLE_MAX } from '@/features/chores/components/constants';
-import { Sparkles } from 'lucide-react';
+import { Plus, Sparkles } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -149,6 +154,7 @@ export default function PutzenPage() {
 	const choreCreateRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 	const absenceCreateRequestRef = useRef<{ fingerprint: string; key: string } | null>(null);
 	const completionRequestKeysRef = useRef(new Map<string, string>());
+	const swapRequestKeysRef = useRef(new Map<string, string>());
 
 	const { isPending, start: startPending, end: endPending } = usePendingSet();
 	const [completeConfirmId, setCompleteConfirmId] = useState<string | null>(null);
@@ -266,17 +272,14 @@ export default function PutzenPage() {
 			absenceStartDate?: string;
 			absenceEndDate?: string;
 			absenceReason?: string;
+			openAbsencesPanel?: boolean;
 			queueEditId?: string;
-			queueEditType?: OfflineActionType;
 		}>(draftKey);
 		if (!draft) {
 			setDraftHydrated(true);
 			return;
 		}
-		// A queued absence edit belongs to the absences panel (the queue link
-		// opens it via ?panel=absences) — it must not pop the chore form.
-		const editingQueuedAbsence = draft.queueEditType === 'absence.create';
-		if (!editingQueuedAbsence && !isEmptyModuleDraft('chore', draft, identity.memberId)) {
+		if (!isEmptyModuleDraft('chore', draft, identity.memberId)) {
 			assigneeTouchedRef.current = true;
 			setShowForm(true);
 		}
@@ -341,16 +344,14 @@ export default function PutzenPage() {
 
 	useEffect(() => {
 		if (!draftHydrated) return;
-		// Queue-edit bookkeeping (queueEditType, panel hints) must not outlive
-		// the edit: it would keep isEmptyModuleDraft false forever, re-open the
-		// chore form on every visit and trip the queue conflict guard.
-		const stored = readDraft<Record<string, unknown>>(draftKey) ?? {};
 		writeDraft(draftKey, {
-			...(queueEditId ? stored : {}),
+			...readDraft<Record<string, unknown>>(draftKey),
 			title: newTitle,
 			recurrenceType: newRecurrenceType,
 			intervalDays: newInterval,
-			assignedMemberId: newAssigned,
+			// Nur eine selbst gewählte Zuständigkeit ist ein Entwurf. Der automatische Vorschlag
+			// ließ das leere Formular sonst bei jedem Besuch wieder aufspringen.
+			assignedMemberId: assigneeTouchedRef.current ? newAssigned : '',
 			absenceMemberId,
 			absenceStartDate: absenceStart,
 			absenceEndDate: absenceEnd,
@@ -420,11 +421,32 @@ export default function PutzenPage() {
 		return true;
 	}
 
+	/** The edited queue entry may have been synced meanwhile; a new create would duplicate it. */
+	function editedQueueItemWasSent(type: OfflineActionType): boolean {
+		if (!queueEditId) return false;
+		const editType = readDraft<{ queueEditType?: string }>(draftKey)?.queueEditType;
+		return editType === type && !isOfflineActionQueued(queueEditId);
+	}
+
 	async function add(): Promise<void> {
 		const title = newTitle.trim();
 		if (title.length === 0) return;
 		const pendingKey = 'chore:add';
 		if (isPending(pendingKey)) return;
+		if (editedQueueItemWasSent('chore.create')) {
+			setQueueEditId(null);
+			setNewTitle('');
+			setNewInterval(7);
+			setNewRecurrenceType('days');
+			setNewAssigned('');
+			assigneeTouchedRef.current = false;
+			setShowForm(false);
+			removeDraft(draftKey);
+			setActionError(null);
+			setActionNotice(QUEUE_EDIT_ALREADY_SENT_MESSAGE);
+			void load(false);
+			return;
+		}
 		startPending(pendingKey);
 		setActionError(null);
 		setActionNotice(null);
@@ -478,6 +500,7 @@ export default function PutzenPage() {
 						setActionError(OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE);
 						return;
 					}
+					choreCreateRequestRef.current = null;
 					refreshCount();
 					setItems((current) => [
 						{
@@ -552,6 +575,16 @@ export default function PutzenPage() {
 		}
 		const pendingKey = 'absence:add';
 		if (isPending(pendingKey)) return;
+		if (editedQueueItemWasSent('absence.create')) {
+			setQueueEditId(null);
+			setAbsenceStart('');
+			setAbsenceEnd('');
+			setAbsenceReason('');
+			setActionError(null);
+			setActionNotice(QUEUE_EDIT_ALREADY_SENT_MESSAGE);
+			void load(false);
+			return;
+		}
 		startPending(pendingKey);
 		setActionError(null);
 		setActionNotice(null);
@@ -608,6 +641,7 @@ export default function PutzenPage() {
 						setActionError(OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE);
 						return;
 					}
+					absenceCreateRequestRef.current = null;
 					if (!clearEditedQueueItem(['absence.create'])) {
 						setActionError(OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE);
 						return;
@@ -655,24 +689,22 @@ export default function PutzenPage() {
 	async function removeAbsence(id: string): Promise<void> {
 		const pendingKey = `absence:${id}:remove`;
 		if (isPending(pendingKey)) return;
+		const queued = discardQueuedEntry(wg.shareCode, id);
+		if (queued === 'storage_blocked') {
+			setActionError(
+				'Offline-Speicher ist blockiert. Die vorgemerkte Abwesenheit konnte nicht entfernt werden.',
+			);
+			return;
+		}
+		if (queued === 'removed' || isQueuedCreateId(id)) {
+			updateAbsences((current) => current.filter((absence) => absence.id !== id));
+			refreshCount();
+			setActionError(null);
+			setActionNotice('Offline vorgemerkte Abwesenheit wurde entfernt.');
+			return;
+		}
 		startPending(pendingKey);
 		try {
-			// Offline angelegte Abwesenheiten tragen eine synthetische ID, die der
-			// Server nie vergeben hat — lokal entfernen statt mit 400 id_invalid.
-			const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
-			if (localRemoval) {
-				if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
-					setActionError(
-						'Offline-Speicher ist blockiert. Die Abwesenheit konnte nicht entfernt werden.',
-					);
-					return;
-				}
-				setQueueEditId((current) => (current === id ? null : current));
-				updateAbsences((current) => current.filter((absence) => absence.id !== id));
-				refreshCount();
-				setActionNotice('Die offline angelegte Abwesenheit wurde aus dem Plan entfernt.');
-				return;
-			}
 			const result = await apiFetch<Record<string, never>>(
 				`/api/wg/${encodedShareCode}/absences/${encodeURIComponent(id)}`,
 				{
@@ -734,7 +766,10 @@ export default function PutzenPage() {
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
 				headers: { 'Idempotency-Key': idempotencyKey },
-				body: JSON.stringify({ completedByMemberId: identity.memberId }),
+				body: JSON.stringify({
+					expectedNextDueAt: chore.nextDueAt,
+					expectedAssignedMemberId: chore.assignedMemberId,
+				}),
 			},
 		);
 
@@ -749,6 +784,8 @@ export default function PutzenPage() {
 						memberId: identity.memberId,
 						idempotencyKey,
 						choreId: chore.id,
+						expectedNextDueAt: chore.nextDueAt,
+						expectedAssignedMemberId: chore.assignedMemberId,
 					}),
 				);
 				if (queuedCount === 0) {
@@ -764,6 +801,7 @@ export default function PutzenPage() {
 					endPending(chore.id);
 					return;
 				}
+				completionRequestKeysRef.current.delete(chore.id);
 				refreshCount();
 				setActionNotice(
 					'Erledigung offline vorgemerkt. Nächster Termin und Zuständigkeit werden nach der Synchronisierung bestätigt.',
@@ -788,6 +826,15 @@ export default function PutzenPage() {
 			) {
 				setCompleteConfirmId(null);
 				setActionNotice('Diese Putzaufgabe wurde bereits erledigt. Der Plan wird aktualisiert.');
+				void load(false);
+				endPending(chore.id);
+				return;
+			}
+			if (result.status === 409 && result.error === 'chore_occurrence_changed') {
+				setCompleteConfirmId(null);
+				setActionError(
+					'Termin oder Zuständigkeit haben sich geändert. Prüfe den aktualisierten Plan.',
+				);
 				void load(false);
 				endPending(chore.id);
 				return;
@@ -857,19 +904,29 @@ export default function PutzenPage() {
 		setActionError(null);
 		setActionNotice(null);
 
-		// Provenance (`source: 'chore_swap'` + the highlight deep link) is
-		// server-generated: the public announcements POST forces every member
-		// post to `manual` (#517), so swap requests go through the chore route.
+		// Keep the key after an unknown result so retry replays the same swap post.
+		const idempotencyKey =
+			swapRequestKeysRef.current.get(chore.id) ?? createOfflineIdempotencyKey();
+		if (!idempotencyKey) {
+			setActionError('Tauschanfrage konnte nicht sicher gespeichert werden. Versuche es erneut.');
+			endPending(pendingKey);
+			return;
+		}
+		swapRequestKeysRef.current.set(chore.id, idempotencyKey);
 		const result = await apiFetch<{ announcement?: { id?: string } }>(
 			`/api/wg/${encodedShareCode}/chores/${encodeURIComponent(chore.id)}/swap-request`,
 			{
 				method: 'POST',
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
+				headers: { 'Idempotency-Key': idempotencyKey },
 			},
 		);
 
 		if (!result.ok) {
+			if (result.status > 0 && result.status < 500 && result.status !== 429) {
+				swapRequestKeysRef.current.delete(chore.id);
+			}
 			setActionError(
 				result.error === 'chore_not_found'
 					? 'Diese Putzaufgabe existiert nicht mehr. Lade den Plan neu.'
@@ -882,9 +939,9 @@ export default function PutzenPage() {
 							: 'Tauschanfrage konnte nicht gepostet werden.',
 			);
 		} else {
+			swapRequestKeysRef.current.delete(chore.id);
 			setActionNotice('Tauschanfrage wurde auf der Pinnwand gepostet.');
 		}
-
 		endPending(pendingKey);
 	}
 
@@ -941,26 +998,22 @@ export default function PutzenPage() {
 
 	async function handleRemove(id: string): Promise<void> {
 		if (isPending(id)) return;
-		startPending(id);
 		setActionError(null);
 		setActionNotice(null);
-
-		// Offline angelegte Aufgaben tragen eine synthetische ID: der Server
-		// würde mit 400 id_invalid antworten, deshalb lokal entfernen.
-		const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
-		if (localRemoval) {
-			if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
-				setActionError('Offline-Speicher ist blockiert. Die Aufgabe konnte nicht entfernt werden.');
-				endPending(id);
-				return;
-			}
-			setQueueEditId((current) => (current === id ? null : current));
-			setItems((current) => current.filter((item) => item.id !== id));
-			refreshCount();
-			setActionNotice('Die offline angelegte Aufgabe wurde aus dem Plan entfernt.');
-			endPending(id);
+		const queued = discardQueuedEntry(wg.shareCode, id);
+		if (queued === 'storage_blocked') {
+			setActionError(
+				'Offline-Speicher ist blockiert. Die vorgemerkte Aufgabe konnte nicht entfernt werden.',
+			);
 			return;
 		}
+		if (queued === 'removed' || isQueuedCreateId(id)) {
+			setItems((current) => current.filter((item) => item.id !== id));
+			refreshCount();
+			setActionNotice('Offline vorgemerkte Aufgabe wurde entfernt.');
+			return;
+		}
+		startPending(id);
 
 		const result = await apiFetch<Record<string, never>>(
 			`/api/wg/${encodedShareCode}/chores/${encodeURIComponent(id)}`,
@@ -1054,10 +1107,19 @@ export default function PutzenPage() {
 	});
 	const nextAssigneeNameByChoreId = new Map<string, string | null>(
 		items.map((chore): [string, string | null] => {
+			// Mirror the complete route: availability is judged on the next due
+			// day, not today. The client row has no anchor, which only affects
+			// month-end clamping, never the day an absence is checked against.
+			const nextDueAt = computeNextDueAt(
+				new Date(chore.nextDueAt),
+				chore.intervalDays,
+				new Date(),
+				chore.recurrenceType,
+			);
 			const nextAssigneeId = chooseNextAvailableMember({
 				members: activeMembers,
 				currentMemberId: chore.assignedMemberId,
-				absentMemberIds,
+				absentMemberIds: getAbsentMemberIds(absences, nextDueAt.getTime()),
 				chores: items,
 			});
 			if (!nextAssigneeId) return [chore.id, null];
@@ -1108,9 +1170,6 @@ export default function PutzenPage() {
 				itemCount={items.length}
 				loading={showSkeleton}
 				health={!showSkeleton && items.length > 0 ? health : null}
-				refreshing={refreshing}
-				showForm={showForm}
-				onToggleForm={() => setShowForm((open) => !open)}
 			/>
 			<ChoreForm
 				open={showForm}
@@ -1210,7 +1269,7 @@ export default function PutzenPage() {
 					</EmptyContent>
 				</Empty>
 			) : (
-				<div id="chore-list" className="flex flex-col gap-5">
+				<div id="chore-list" className="flex flex-col gap-4">
 					{choreGroups.map((group) => (
 						<section
 							key={group.key}
@@ -1219,17 +1278,21 @@ export default function PutzenPage() {
 						>
 							<h2
 								id={`chore-group-${group.key}`}
-								className="text-sm font-medium text-muted-foreground"
+								className="px-1 text-[12px] font-medium text-muted-foreground"
 							>
 								{group.label} ({group.chores.length})
 							</h2>
-							<ItemGroup aria-label={group.label}>
+							<ItemGroup
+								aria-label={group.label}
+								className="gap-0 divide-y overflow-hidden rounded-xl border"
+							>
 								{group.chores.map((chore) => (
 									<ChoreRow
 										key={chore.id}
 										chore={chore}
 										isAdmin={isAdmin}
 										assignee={memberLookup(chore.assignedMemberId)}
+										isMine={chore.assignedMemberId === identity.memberId}
 										isPending={isPending(chore.id)}
 										isSwapPending={isPending(`${chore.id}:swap`)}
 										isTakePending={isPending(`${chore.id}:take`)}
@@ -1248,6 +1311,14 @@ export default function PutzenPage() {
 						</section>
 					))}
 				</div>
+			)}
+			{!showSkeleton && items.length > 0 && (
+				<FairnessPanel
+					fairness={fairness}
+					monthCompletions={monthCompletions}
+					members={members.map((member) => ({ id: member.id, name: member.name }))}
+					currentMemberId={identity.memberId}
+				/>
 			)}
 			{!showSkeleton && (items.length > 0 || absences.length > 0 || absencesPanelActive) && (
 				<AbsencePanel
@@ -1273,13 +1344,12 @@ export default function PutzenPage() {
 					isPending={isPending}
 				/>
 			)}
-			{!showSkeleton && items.length > 0 && (
-				<FairnessPanel
-					fairness={fairness}
-					monthCompletions={monthCompletions}
-					members={members.map((member) => ({ id: member.id, name: member.name }))}
-				/>
-			)}
+			<ThumbAction>
+				<Button type="button" className="min-h-11 w-full" onClick={() => setShowForm(true)}>
+					<Plus data-icon="inline-start" aria-hidden />
+					Putzaufgabe erfassen
+				</Button>
+			</ThumbAction>
 		</div>
 	);
 }

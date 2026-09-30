@@ -23,6 +23,7 @@ import {
 	ItemTitle,
 } from '@/components/ui/item';
 import { Spinner } from '@/components/ui/spinner';
+import { useWg } from '@/components/wg/WgContextProvider';
 import { useConfirmDelete } from '@/core/hooks/useConfirmDelete';
 import type { MemberInfo, ShoppingItem } from '@/features/shopping/components/shopping-types';
 import { cn } from '@/shared/lib/cn';
@@ -38,6 +39,7 @@ interface ShoppingItemRowProps {
 	adder: MemberInfo;
 	buyer: MemberInfo | null;
 	pending: boolean;
+	queued?: boolean;
 	onToggle: (item: ShoppingItem) => void;
 	onRemove: (id: string) => void;
 	removeError?: string | null;
@@ -51,6 +53,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 	adder,
 	buyer,
 	pending,
+	queued = false,
 	onToggle,
 	onRemove,
 	removeError = null,
@@ -61,12 +64,21 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 	const isBought = item.boughtAt !== null;
 	const deleteConfirm = useConfirmDelete();
 	const isDeleteArmed = deleteConfirm.confirmId === item.id;
-	const buyerName = item.boughtByMemberId ? buyer?.name : null;
+	const { identity } = useWg();
+	// Die eigene Person heißt „dir“/„dich“, nicht beim eigenen Namen.
+	const buyerName = item.boughtByMemberId
+		? item.boughtByMemberId === identity.memberId
+			? 'dir'
+			: buyer?.name
+		: null;
+	const adderName = item.addedByMemberId === identity.memberId ? 'dir' : adder.name;
 	const swipeStartX = useRef<number | null>(null);
 	const [swipeX, setSwipeX] = useState(0);
 
 	function endSwipe(): void {
-		if (swipeStartX.current !== null && swipeX >= SWIPE_TOGGLE_PX && !pending) onToggle(item);
+		if (swipeStartX.current !== null && swipeX >= SWIPE_TOGGLE_PX && !pending && !queued) {
+			onToggle(item);
+		}
 		swipeStartX.current = null;
 		setSwipeX(0);
 	}
@@ -78,7 +90,10 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 	}
 
 	return (
-		<li className="relative overflow-hidden">
+		<li className={cn('relative', swipeX > 0 && 'overflow-hidden')}>
+			{/* overflow-hidden nur während aktiver Wischgeste: sonst schneidet es die
+			    unsichtbare Tap-Fläche der Checkbox (after:-inset-2.5) am linken Rand ab,
+			    weil das Item hier px-0 hat und die Checkbox flächenbündig sitzt. */}
 			<div
 				aria-hidden
 				className={cn(
@@ -93,7 +108,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 				data-shopping-row
 				id={`shopping-${item.id}`}
 				className={cn(
-					'relative touch-pan-y scroll-mt-24 bg-background px-0',
+					'relative touch-pan-y scroll-mt-24 rounded-none bg-background px-3',
 					swipeX === 0 && 'transition-transform',
 					highlighted && 'ring-2 ring-inset ring-ring',
 				)}
@@ -101,7 +116,12 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 				aria-busy={pending}
 				onPointerDown={(event) => {
 					// Maus bleibt beim Klicken; Wischen ist eine Touch-Geste.
-					if (event.pointerType !== 'mouse') swipeStartX.current = event.clientX;
+					if (event.pointerType !== 'mouse' && !pending && !queued) {
+						swipeStartX.current = event.clientX;
+						// Ohne Capture würden pointermove/-up bei schnellem Wischen auf ein
+						// Nachbarelement umgeleitet und die Zeile bliebe optisch hängen.
+						event.currentTarget.setPointerCapture(event.pointerId);
+					}
 				}}
 				onPointerMove={(event) => {
 					if (swipeStartX.current === null) return;
@@ -117,7 +137,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 					<Checkbox
 						checked={isBought}
 						onCheckedChange={() => onToggle(item)}
-						disabled={pending}
+						disabled={pending || queued}
 						size="lg"
 						className="relative after:absolute after:-inset-2.5"
 						aria-label={isBought ? `${item.name} wieder öffnen` : `${item.name} erledigen`}
@@ -146,6 +166,8 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 								<Spinner aria-hidden />
 								Speichert…
 							</output>
+						) : queued ? (
+							<output aria-live="polite">Wartet auf Synchronisierung…</output>
 						) : isBought ? (
 							buyerName ? (
 								`Gekauft von ${buyerName}`
@@ -153,7 +175,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 								'Gekauft'
 							)
 						) : (
-							`von ${adder.name}`
+							`von ${adderName}`
 						)}
 					</ItemDescription>
 				</ItemContent>
@@ -181,7 +203,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 									{isBought ? 'Erledigt' : 'Offen'}
 								</Badge>
 								<p className="text-sm text-muted-foreground">
-									Hinzugefügt von {adder.name}
+									Hinzugefügt von {adderName}
 									{isBought
 										? buyerName
 											? ` · Gekauft von ${buyerName}`
@@ -227,7 +249,11 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 										variant="destructive"
 										onClick={handleDelete}
 										disabled={pending}
-										aria-label={`${item.name} entfernen${isDeleteArmed ? ' bestätigen' : ''}`}
+										aria-label={
+											isDeleteArmed
+												? `Endgültig entfernen: ${item.name}`
+												: `Artikel entfernen: ${item.name}`
+										}
 									>
 										<Trash2 data-icon="inline-start" aria-hidden />
 										{isDeleteArmed ? 'Endgültig entfernen' : 'Artikel entfernen'}

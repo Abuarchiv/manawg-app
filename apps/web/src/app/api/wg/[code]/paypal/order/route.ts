@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { expensePayments, wgMembers } from '@/core/db';
+import { db, expensePayments, wgMembers } from '@/core/db';
 import {
 	badRequest,
 	conflict,
@@ -11,7 +11,12 @@ import {
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { logApiError } from '@/core/infra/observability';
-import { createPayPalOrder, isPayPalConfigured } from '@/core/infra/paypal';
+import {
+	createPayPalOrder,
+	isPayPalConfigured,
+	isTerminalPayPalOrderCreationError,
+} from '@/core/infra/paypal';
+import { isPayPalMerchantReady } from '@/core/infra/paypal-onboarding';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
 import { computeNetBalances, simplifyDebts } from '@/features/expenses/debt-reduction';
@@ -30,6 +35,68 @@ const orderSchema = z.object({
 	fromMemberId: z.string().uuid(),
 	toMemberId: z.string().uuid(),
 	currency: currencySchema.default('EUR'),
+});
+
+const orderLookupSchema = z.object({ toMemberId: z.string().uuid() });
+
+export const GET = withWgRoute('paypal order GET', async (req, { code }) => {
+	if (!isPayPalConfigured()) return conflict('paypal_not_configured');
+	const parsed = orderLookupSchema.safeParse({
+		toMemberId: new URL(req.url).searchParams.get('toMemberId'),
+	});
+	if (!parsed.success || parsed.data.toMemberId === undefined)
+		return badRequest('member_ids_invalid');
+
+	const auth = await requireWgMember(req, code);
+	if (!auth.ok) return auth.response;
+	const verified = requireVerifiedMember(auth.member);
+	if (verified) return verified;
+	if (auth.member.memberId === parsed.data.toMemberId) return badRequest('member_ids_invalid');
+
+	try {
+		const [current] = await db
+			.select({
+				orderId: expensePayments.providerOrderId,
+				amountCents: expensePayments.amountCents,
+				currency: expensePayments.currency,
+				status: expensePayments.status,
+				expiresAt: expensePayments.expiresAt,
+			})
+			.from(expensePayments)
+			.where(
+				and(
+					eq(expensePayments.wgId, auth.wg.id),
+					eq(expensePayments.fromMemberId, auth.member.memberId),
+					eq(expensePayments.toMemberId, parsed.data.toMemberId),
+					eq(expensePayments.provider, 'paypal'),
+					inArray(expensePayments.status, ['created', 'capturing']),
+				),
+			)
+			.limit(1);
+		if (!current || (current.status === 'created' && current.expiresAt <= new Date())) {
+			return NextResponse.json({ status: 'NONE' });
+		}
+		if (current.orderId.startsWith('pending:')) return NextResponse.json({ status: 'CREATING' });
+		let otherCaptureActive = false;
+		if (current.status === 'created') {
+			const [capturing] = await db
+				.select({ id: expensePayments.id })
+				.from(expensePayments)
+				.where(and(eq(expensePayments.wgId, auth.wg.id), eq(expensePayments.status, 'capturing')))
+				.limit(1);
+			otherCaptureActive = Boolean(capturing);
+		}
+		return NextResponse.json({
+			status:
+				current.status === 'capturing' ? 'CAPTURING' : otherCaptureActive ? 'WAITING' : 'CREATED',
+			orderId: current.orderId,
+			amountCents: current.amountCents,
+			currency: current.currency,
+		});
+	} catch (err) {
+		logApiError('[paypal order status]', err);
+		return serverError('paypal_order_failed');
+	}
 });
 
 export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
@@ -109,6 +176,7 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 					orderId: expensePayments.providerOrderId,
 					amountCents: expensePayments.amountCents,
 					expiresAt: expensePayments.expiresAt,
+					payeeMerchantId: expensePayments.payeeMerchantId,
 				})
 				.from(expensePayments)
 				.where(
@@ -126,7 +194,15 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 			}
 			if (current && current.expiresAt > now) {
 				if (current.orderId.startsWith('pending:')) {
-					return { kind: 'response' as const, response: conflict('paypal_order_creating') };
+					return {
+						kind: 'created' as const,
+						paymentId: current.id,
+						pendingOrderId: current.orderId,
+						amountCents: current.amountCents,
+						payeeMerchantId: current.payeeMerchantId,
+						payeeName: payee.name,
+						fromName: memberById.get(parsed.data.fromMemberId)?.name ?? 'Mitglied',
+					};
 				}
 				return {
 					kind: 'response' as const,
@@ -153,6 +229,7 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 				}
 			}
 
+			const pendingOrderId = `pending:${randomUUID()}`;
 			const [payment] = await tx
 				.insert(expensePayments)
 				.values({
@@ -161,7 +238,7 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 					toMemberId: parsed.data.toMemberId,
 					amountCents: debt.cents,
 					currency: parsed.data.currency,
-					providerOrderId: `pending:${randomUUID()}`,
+					providerOrderId: pendingOrderId,
 					payeeMerchantId: payee.paypalMerchantId,
 					expiresAt: new Date(now.getTime() + PAYPAL_ORDER_TTL_MS),
 				})
@@ -177,6 +254,7 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 			return {
 				kind: 'created' as const,
 				paymentId: payment.id,
+				pendingOrderId,
 				amountCents: debt.cents,
 				payeeMerchantId: payee.paypalMerchantId,
 				payeeName: payee.name,
@@ -185,6 +263,22 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 		});
 		if (reservation.kind === 'response') return reservation.response;
 
+		if (!(await isPayPalMerchantReady(reservation.payeeMerchantId))) {
+			await withExpensePaymentLock(auth.wg.id, (tx) =>
+				tx
+					.update(expensePayments)
+					.set({ status: 'failed' })
+					.where(
+						and(
+							eq(expensePayments.id, reservation.paymentId),
+							eq(expensePayments.status, 'created'),
+							eq(expensePayments.providerOrderId, reservation.pendingOrderId),
+						),
+					),
+			);
+			return conflict('paypal_onboarding_pending');
+		}
+
 		try {
 			const order = await createPayPalOrder({
 				amountCents: reservation.amountCents,
@@ -192,23 +286,38 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 				description: `ManaWG-Ausgleich: ${reservation.fromName} an ${reservation.payeeName}`,
 				payeeMerchantId: reservation.payeeMerchantId,
 				customId: `manawg:${auth.wg.id}:${reservation.paymentId}`,
+				requestId: reservation.paymentId,
 			});
 			if (!order.id) throw new Error('paypal_order_id_missing');
 			await withExpensePaymentLock(auth.wg.id, (tx) =>
 				tx
 					.update(expensePayments)
 					.set({ providerOrderId: order.id })
-					.where(eq(expensePayments.id, reservation.paymentId)),
+					.where(
+						and(
+							eq(expensePayments.id, reservation.paymentId),
+							eq(expensePayments.status, 'created'),
+							eq(expensePayments.providerOrderId, reservation.pendingOrderId),
+						),
+					),
 			);
 			return NextResponse.json({ orderId: order.id, amountCents: reservation.amountCents });
-		} catch (err) {
-			await withExpensePaymentLock(auth.wg.id, (tx) =>
-				tx
-					.update(expensePayments)
-					.set({ status: 'failed' })
-					.where(eq(expensePayments.id, reservation.paymentId)),
-			);
-			throw err;
+		} catch (createError) {
+			if (isTerminalPayPalOrderCreationError(createError)) {
+				await withExpensePaymentLock(auth.wg.id, (tx) =>
+					tx
+						.update(expensePayments)
+						.set({ status: 'failed' })
+						.where(
+							and(
+								eq(expensePayments.id, reservation.paymentId),
+								eq(expensePayments.status, 'created'),
+								eq(expensePayments.providerOrderId, reservation.pendingOrderId),
+							),
+						),
+				);
+			}
+			throw createError;
 		}
 	} catch (err) {
 		logApiError('[paypal order]', err);

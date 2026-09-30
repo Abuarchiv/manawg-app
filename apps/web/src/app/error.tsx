@@ -25,7 +25,7 @@ export default function ErrorBoundary({
 		<main
 			id="main"
 			tabIndex={-1}
-			className="mx-auto flex min-h-[60vh] w-full max-w-md flex-col items-center justify-center bg-background px-4 pb-[env(safe-area-inset-bottom)] focus:outline-none"
+			className="mx-auto flex min-h-[60dvh] w-full max-w-md flex-col items-center justify-center bg-background px-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] focus:outline-none"
 		>
 			<Empty>
 				<EmptyHeader>

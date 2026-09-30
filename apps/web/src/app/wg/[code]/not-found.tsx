@@ -9,7 +9,13 @@ import {
 	EmptyTitle,
 } from '@/components/ui/empty';
 import { SearchX } from 'lucide-react';
+import type { Metadata } from 'next';
 import Link from 'next/link';
+
+export const metadata: Metadata = {
+	title: 'WG nicht gefunden — ManaWG',
+	robots: { index: false, follow: false },
+};
 
 // craftsman-ignore: TS002 — Next.js App Router requires default export for not-found pages
 export default function WgNotFound() {

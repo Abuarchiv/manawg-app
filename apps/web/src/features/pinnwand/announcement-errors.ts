@@ -30,6 +30,9 @@ export function announcementCreateErrorMessage(error: string): string {
 	if (error === 'image_invalid') {
 		return 'Beitrag konnte nicht gespeichert werden: Der Anhang ist ungültig.';
 	}
+	if (error === 'image_removed') {
+		return 'Beitrag konnte nicht gespeichert werden: Der Anhang wurde entfernt. Lade das Bild erneut hoch.';
+	}
 	if (error === 'source_path_invalid') {
 		return 'Beitrag konnte nicht gespeichert werden: Der Quelllink ist ungültig.';
 	}

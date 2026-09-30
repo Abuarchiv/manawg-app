@@ -186,6 +186,9 @@ function harness(kind: Kind, warning: null | 'notification_delivery_failed' = nu
 			recurringExpenses,
 			wgMembers,
 		},
+		'@/core/db/private-image-deletions': {
+			assertPrivateImageCanBeAttached: async () => undefined,
+		},
 		'@/core/db/transaction': { TransactionAbort: abort },
 		'@/core/errors': {
 			apiError: (code: string, status: number) => responseError(code, status),
@@ -233,7 +236,10 @@ function harness(kind: Kind, warning: null | 'notification_delivery_failed' = nu
 		},
 		'@/core/rate-limit': { checkRateLimit: async () => ({ success: true }), wgWriteLimiter: {} },
 		'@/core/validators/currency': { currencySchema: requireFromWeb('zod').z.string() },
-		'@/features/expenses/expense-payments': { withExpensePaymentLock },
+		'@/features/expenses/expense-payments': {
+			hasCapturingExpensePayment: async () => false,
+			withExpensePaymentLock,
+		},
 		'@/features/expenses/split-math': splitMath,
 	};
 	const file = path.join(

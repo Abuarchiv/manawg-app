@@ -49,7 +49,7 @@ export function EntryFrame({
 			<header className="flex flex-col gap-2">
 				<h1
 					id={headingId}
-					className="font-heading text-[26px] leading-8 font-semibold tracking-tight"
+					className="break-words font-heading text-[22px] leading-7 font-semibold tracking-tight"
 				>
 					{title}
 				</h1>

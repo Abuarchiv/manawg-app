@@ -8,10 +8,16 @@ interface SplitReviewProps {
 	members: ReadonlyArray<{ id: string; name: string }>;
 	splits: ReadonlyArray<{ debtorMemberId: string; amountCents: number }> | null;
 	paidByMemberId: string;
+	currency?: string;
 }
 
 // The caller supplies the exact split result used by its existing save handler.
-export function SplitReview({ members, splits, paidByMemberId }: SplitReviewProps) {
+export function SplitReview({
+	members,
+	splits,
+	paidByMemberId,
+	currency = 'EUR',
+}: SplitReviewProps) {
 	if (!splits) {
 		return (
 			<p className="text-xs text-muted-foreground">
@@ -39,7 +45,7 @@ export function SplitReview({ members, splits, paidByMemberId }: SplitReviewProp
 							</ItemDescription>
 						</ItemContent>
 						<Badge variant="outline" className="font-mono tabular-nums">
-							{splits ? formatEuroCents(share?.amountCents ?? 0, 'EUR') : '—'}
+							{splits ? formatEuroCents(share?.amountCents ?? 0, currency) : '—'}
 						</Badge>
 					</Item>
 				);

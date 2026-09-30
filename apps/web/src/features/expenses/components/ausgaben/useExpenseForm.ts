@@ -11,6 +11,7 @@ import type { OfflineActionType } from '@/core/offline/offline-queue';
 import { formatEuroInput } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { parseTimestamp } from '@/core/utils/time';
+import { currencySchema } from '@/core/validators/currency';
 import { buildExpensePrefillDraft } from '@/features/expenses/expense-prefill';
 import { isEqualExpenseSplit } from '@/features/expenses/expense-split-input';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -60,6 +61,8 @@ type ExpenseDraft = {
 	recurringNextDueAt?: string;
 };
 
+type ExpenseEditReference = Pick<Expense, 'id' | 'updatedAt'> & { currency?: Expense['currency'] };
+
 interface UseExpenseFormOptions {
 	shareCode: string;
 	members: readonly FormMember[];
@@ -108,9 +111,7 @@ export function useExpenseForm({
 	const [manualSplits, setManualSplits] = useState<Record<string, string>>({});
 	const [formError, setFormError] = useState<string | null>(null);
 	const [conflictExpenseId, setConflictExpenseId] = useState<string | null>(null);
-	const [editingExpense, setEditingExpense] = useState<Pick<Expense, 'id' | 'updatedAt'> | null>(
-		null,
-	);
+	const [editingExpense, setEditingExpense] = useState<ExpenseEditReference | null>(null);
 	const [editingRecurringExpense, setEditingRecurringExpense] = useState<RecurringExpense | null>(
 		null,
 	);
@@ -155,7 +156,12 @@ export function useExpenseForm({
 				typeof target.updatedAt === 'string' &&
 				parseTimestamp(target.updatedAt) !== null
 			) {
-				setEditingExpense({ id: target.id, updatedAt: target.updatedAt });
+				const currency = 'currency' in target ? currencySchema.safeParse(target.currency) : null;
+				setEditingExpense({
+					id: target.id,
+					updatedAt: target.updatedAt,
+					...(currency?.success ? { currency: currency.data } : {}),
+				});
 			} else {
 				setInvalidEditDraft(true);
 				setShowForm(true);
@@ -359,7 +365,11 @@ export function useExpenseForm({
 		setConflictExpenseId(null);
 		setQueueEditId(null);
 		setQueueEditType(null);
-		setEditingExpense({ id: expense.id, updatedAt: expense.updatedAt });
+		setEditingExpense({
+			id: expense.id,
+			updatedAt: expense.updatedAt,
+			currency: expense.currency,
+		});
 		setInvalidEditDraft(false);
 		setShowForm(true);
 	}

@@ -1,5 +1,5 @@
 import { db, idempotencyResponses } from '@/core/db';
-import { type DbTransaction, withTransaction } from '@/core/db/transaction';
+import { type DbTransaction, lockExpensePayments, withTransaction } from '@/core/db/transaction';
 import { claimReplaySlotWithRetry } from '@/core/guards/idempotency';
 import {
 	RESPONSE_REPLAY_TTL_SECONDS,
@@ -47,6 +47,7 @@ export async function withAnnouncementReplay<T>(
 	scope: string,
 	mutate: (tx: DbTransaction) => Promise<AnnouncementMutation<T>>,
 	legacyResponse?: (value: unknown) => AnnouncementReplayResponse | null,
+	wgId?: string,
 ): Promise<AnnouncementMutation<T> & { key: string | null }> {
 	const key = readIdempotencyKey(req);
 	const completedResponse = (value: unknown): AnnouncementReplayResponse | null =>
@@ -73,6 +74,7 @@ export async function withAnnouncementReplay<T>(
 	try {
 		result = await withTransaction(async (tx) => {
 			try {
+				if (wgId) await lockExpensePayments(tx, wgId);
 				if (key) {
 					const [slot] = await tx
 						.select({

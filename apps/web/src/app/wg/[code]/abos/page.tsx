@@ -65,7 +65,7 @@ const RETRYABLE_ERRORS = new Set(['unexpected_error', 'server_error', 'db_error'
 const MEMBERSHIP_ERRORS = new Set(['not_a_member', 'member_id_required', 'member_id_invalid']);
 
 function aboSaveErrorMessage(error: string, action: 'angelegt' | 'aktualisiert'): string {
-	const prefix = `Abo konnte nicht ${action} werden`;
+	const prefix = `Fixkosten konnten nicht ${action} werden`;
 	if (RETRYABLE_ERRORS.has(error)) {
 		return `${prefix}: Versuche es gleich erneut.`;
 	}
@@ -82,7 +82,7 @@ function aboSaveErrorMessage(error: string, action: 'angelegt' | 'aktualisiert')
 		return `${prefix}: Mindestens ein Mitglied ist nicht mehr in dieser WG.`;
 	}
 	if (error === 'recurring_expense_not_found') {
-		return 'Dieses Abo existiert nicht mehr. Lade die Abos neu.';
+		return 'Diese Fixkosten existieren nicht mehr. Lade die Liste neu.';
 	}
 	if (error === 'amount_invalid') {
 		return `${prefix}: Prüfe den Betrag.`;
@@ -110,61 +110,61 @@ function aboSaveErrorMessage(error: string, action: 'angelegt' | 'aktualisiert')
 
 function aboActionErrorMessage(error: string): string {
 	if (error === 'Netzwerkfehler' || error === 'Failed to fetch') {
-		return 'Abo-Aktion fehlgeschlagen: Prüfe deine Verbindung und versuche es erneut.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Prüfe deine Verbindung und versuche es erneut.';
 	}
 	if (RETRYABLE_ERRORS.has(error)) {
-		return 'Abo-Aktion fehlgeschlagen: Versuche es gleich erneut.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Versuche es gleich erneut.';
 	}
 	if (error === 'wg_not_found') {
-		return 'Abo-Aktion fehlgeschlagen: Öffne die WG über den aktuellen Link erneut.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Öffne die WG über den aktuellen Link erneut.';
 	}
 	if (error === 'invalid_share_code') {
-		return 'Abo-Aktion fehlgeschlagen: Der WG-Code ist ungültig.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Der WG-Code ist ungültig.';
 	}
 	if (MEMBERSHIP_ERRORS.has(error)) {
-		return 'Abo-Aktion fehlgeschlagen: Tritt der WG erneut bei.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Tritt der WG erneut bei.';
 	}
 	if (error === 'recurring_expense_not_found') {
-		return 'Dieses Abo existiert nicht mehr. Lade die Abos neu.';
+		return 'Diese Fixkosten existieren nicht mehr. Lade die Liste neu.';
 	}
 	if (error === 'recurring_currency_unsupported') {
-		return 'Abo-Aktion fehlgeschlagen: Fixkosten werden derzeit nur in Euro unterstützt.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Fixkosten werden derzeit nur in Euro unterstützt.';
 	}
 	if (error === 'invalid_body' || error === 'invalid_json') {
-		return 'Abo-Aktion fehlgeschlagen: Die Anfrage war ungültig.';
+		return 'Fixkosten-Aktion fehlgeschlagen: Die Anfrage war ungültig.';
 	}
-	return 'Abo-Aktion fehlgeschlagen.';
+	return 'Fixkosten-Aktion fehlgeschlagen.';
 }
 
 function aboDeleteErrorMessage(error: string): string {
 	if (error === 'Netzwerkfehler' || error === 'Failed to fetch') {
-		return 'Abo konnte nicht gelöscht werden: Prüfe deine Verbindung und versuche es erneut.';
+		return 'Fixkosten konnten nicht gelöscht werden: Prüfe deine Verbindung und versuche es erneut.';
 	}
 	if (RETRYABLE_ERRORS.has(error)) {
-		return 'Abo konnte nicht gelöscht werden: Versuche es gleich erneut.';
+		return 'Fixkosten konnten nicht gelöscht werden: Versuche es gleich erneut.';
 	}
 	if (error === 'wg_not_found') {
-		return 'Abo konnte nicht gelöscht werden: Öffne die WG über den aktuellen Link erneut.';
+		return 'Fixkosten konnten nicht gelöscht werden: Öffne die WG über den aktuellen Link erneut.';
 	}
 	if (error === 'invalid_share_code') {
-		return 'Abo konnte nicht gelöscht werden: Der WG-Code ist ungültig.';
+		return 'Fixkosten konnten nicht gelöscht werden: Der WG-Code ist ungültig.';
 	}
 	if (MEMBERSHIP_ERRORS.has(error)) {
-		return 'Abo konnte nicht gelöscht werden: Tritt der WG erneut bei.';
+		return 'Fixkosten konnten nicht gelöscht werden: Tritt der WG erneut bei.';
 	}
 	if (error === 'id_invalid') {
-		return 'Abo konnte nicht gelöscht werden: Dieses Abo konnte nicht eindeutig zugeordnet werden.';
+		return 'Fixkosten konnten nicht gelöscht werden: Der Eintrag konnte nicht eindeutig zugeordnet werden.';
 	}
 	if (error === 'recurring_expense_not_found') {
-		return 'Dieses Abo existiert nicht mehr. Lade die Abos neu.';
+		return 'Diese Fixkosten existieren nicht mehr. Lade die Liste neu.';
 	}
 	if (error === 'delete_failed') {
-		return 'Abo konnte nicht gelöscht werden: Lade die Abos neu und prüfe, ob es noch existiert.';
+		return 'Fixkosten konnten nicht gelöscht werden: Lade die Liste neu und prüfe, ob der Eintrag noch existiert.';
 	}
 	if (error === 'invalid_body' || error === 'invalid_json') {
-		return 'Abo konnte nicht gelöscht werden: Die Anfrage war ungültig.';
+		return 'Fixkosten konnten nicht gelöscht werden: Die Anfrage war ungültig.';
 	}
-	return 'Abo konnte nicht gelöscht werden.';
+	return 'Fixkosten konnten nicht gelöscht werden.';
 }
 
 // craftsman-ignore: TS002 — Next.js App Router requires default export from page.tsx
@@ -263,7 +263,10 @@ export default function AbosPage() {
 				? pendingRequest.key
 				: createOfflineIdempotencyKey();
 		if (!idempotencyKey) {
-			setNoticeMessage('error', 'Abo konnte nicht sicher gespeichert werden. Versuche es erneut.');
+			setNoticeMessage(
+				'error',
+				'Fixkosten konnten nicht sicher gespeichert werden. Versuche es erneut.',
+			);
 			setSubmitting(false);
 			return;
 		}
@@ -302,7 +305,7 @@ export default function AbosPage() {
 				),
 			);
 			setShowCreate(false);
-			setNoticeMessage('success', 'Abo angelegt.');
+			setNoticeMessage('success', 'Fixkosten angelegt.');
 		} else {
 			updateAbos((current) => current.filter((abo) => abo.id !== optimisticId));
 			if (res.status > 0 && res.status < 500 && res.status !== 429) createRequestRef.current = null;
@@ -336,7 +339,7 @@ export default function AbosPage() {
 			haptic('medium');
 			updateAbos((current) => upsertAbo(current, res.data.recurringExpense));
 			setEditing(null);
-			setNoticeMessage('success', 'Abo aktualisiert.');
+			setNoticeMessage('success', 'Fixkosten aktualisiert.');
 		} else {
 			updateAbos((current) => upsertAbo(current, previousAbo));
 			const message = aboSaveErrorMessage(res.error, 'aktualisiert');
@@ -363,7 +366,7 @@ export default function AbosPage() {
 		);
 		if (res.ok) {
 			updateAbos((current) => upsertAbo(current, res.data.recurringExpense));
-			setNoticeMessage('success', isPaused ? 'Abo reaktiviert.' : 'Abo pausiert.');
+			setNoticeMessage('success', isPaused ? 'Fixkosten fortgesetzt.' : 'Fixkosten pausiert.');
 		} else {
 			updateAbos((current) => upsertAbo(current, abo));
 			const message = aboActionErrorMessage(res.error);
@@ -382,7 +385,7 @@ export default function AbosPage() {
 			{ method: 'DELETE', memberId: identity.memberId, memberToken: identity.memberToken },
 		);
 		if (res.ok) {
-			setNoticeMessage('success', 'Abo gelöscht.');
+			setNoticeMessage('success', 'Fixkosten gelöscht.');
 		} else {
 			updateAbos((current) => upsertAbo(current, previousAbo));
 			const message = aboDeleteErrorMessage(res.error);
@@ -410,7 +413,8 @@ export default function AbosPage() {
 	return (
 		<div data-finance-content className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
 			<SubNav liveCount={!loading && !loadError ? dueCount : undefined} />
-			<header className="flex min-w-0 flex-wrap items-center gap-3">
+			{/* Der aktive Tab benennt die Seite schon; Titel und Zähler bleiben für Screenreader. */}
+			<header className="sr-only">
 				<div className="min-w-0 flex-1">
 					<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight break-words [overflow-wrap:anywhere]">
 						Fixkosten
@@ -436,17 +440,20 @@ export default function AbosPage() {
 					message={loadError}
 					onRetry={() => void load(true)}
 					busy={loading || refreshing}
-					retryLabel="Abos erneut laden"
+					retryLabel="Fixkosten erneut laden"
 				/>
 			)}
 			{notice && <ActionNoticeBanner notice={notice} />}
 			{!loading && monthly.size > 0 && (
 				<Card size="sm">
-					<CardContent className="grid grid-cols-2 gap-3">
+					<CardContent className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,7.5rem),1fr))] gap-3">
 						<div className="min-w-0">
 							<p className="text-sm text-muted-foreground">Pro Monat</p>
 							{[...monthly].map(([currency, { totalCents }]) => (
-								<p key={currency} className="font-mono text-xl font-semibold tabular-nums">
+								<p
+									key={currency}
+									className="break-words font-mono text-lg font-semibold tabular-nums"
+								>
 									{formatEuroCents(Math.round(totalCents), currency)}
 								</p>
 							))}
@@ -454,7 +461,10 @@ export default function AbosPage() {
 						<div className="min-w-0">
 							<p className="text-sm text-muted-foreground">Dein Anteil</p>
 							{[...monthly].map(([currency, { mineCents }]) => (
-								<p key={currency} className="font-mono text-xl font-semibold tabular-nums">
+								<p
+									key={currency}
+									className="break-words font-mono text-lg font-semibold tabular-nums"
+								>
 									{formatEuroCents(Math.round(mineCents), currency)}
 								</p>
 							))}
@@ -472,7 +482,10 @@ export default function AbosPage() {
 					pendingId={pendingId}
 					loadError={loadError}
 					onFilterChange={setFilter}
-					onEdit={setEditing}
+					onEdit={(abo) => {
+						setNotice(null);
+						setEditing(abo);
+					}}
 					onTogglePause={(abo) => void handleTogglePause(abo)}
 					onDelete={setDeleteCandidate}
 				/>
@@ -505,7 +518,7 @@ export default function AbosPage() {
 			>
 				<AlertDialogContent>
 					<AlertDialogHeader>
-						<AlertDialogTitle>Abo löschen?</AlertDialogTitle>
+						<AlertDialogTitle>Fixkosten löschen?</AlertDialogTitle>
 						<AlertDialogDescription>
 							Abo „{deleteCandidate?.description}“ wird entfernt. Bereits erfasste Ausgaben bleiben
 							erhalten.
@@ -528,9 +541,16 @@ export default function AbosPage() {
 				</AlertDialogContent>
 			</AlertDialog>
 			<ThumbAction>
-				<Button type="button" className="min-h-11 w-full" onClick={() => setShowCreate(true)}>
+				<Button
+					type="button"
+					className="min-h-11 w-full"
+					onClick={() => {
+						setNotice(null);
+						setShowCreate(true);
+					}}
+				>
 					<Plus data-icon="inline-start" aria-hidden />
-					Neues Abo
+					Neue Fixkosten
 				</Button>
 			</ThumbAction>
 		</div>
@@ -539,7 +559,7 @@ export default function AbosPage() {
 
 function AbosSkeleton() {
 	return (
-		<ItemGroup aria-busy="true" aria-label="Abos werden geladen">
+		<ItemGroup aria-busy="true" aria-label="Fixkosten werden geladen">
 			{['s1', 's2', 's3', 's4'].map((key) => (
 				<Item key={key} variant="outline" aria-hidden="true">
 					<ItemContent>

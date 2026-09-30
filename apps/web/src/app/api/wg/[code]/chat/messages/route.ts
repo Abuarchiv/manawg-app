@@ -7,8 +7,9 @@ import {
 	wgChatReactions,
 	wgMembers,
 } from '@/core/db';
-import { withTransaction } from '@/core/db/transaction';
-import { badRequest, payloadTooLarge } from '@/core/errors';
+import { assertPrivateImageCanBeAttached } from '@/core/db/private-image-deletions';
+import { TransactionAbort, lockExpensePayments, withTransaction } from '@/core/db/transaction';
+import { badRequest, conflict, payloadTooLarge } from '@/core/errors';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { claimReplaySlotWithRetry } from '@/core/guards/idempotency';
 import { requireWgMember } from '@/core/guards/require-wg-member';
@@ -267,6 +268,7 @@ export const POST = withWgRoute('chat messages POST', async (req, { code }) => {
 	try {
 		outcome = await withTransaction(async (tx) => {
 			try {
+				await lockExpensePayments(tx, wg.id);
 				if (replayKey) {
 					const [slot] = await tx
 						.select({
@@ -342,6 +344,7 @@ export const POST = withWgRoute('chat messages POST', async (req, { code }) => {
 						return await complete({ status: 400, body: { error: 'reply_to_not_found' } });
 					}
 				}
+				await assertPrivateImageCanBeAttached(tx, wg.id, imageUrl);
 
 				const requestedMentionIds = Array.from(
 					new Set((parsed.data.mentionMemberIds ?? []).filter((id) => UUID_PATTERN.test(id))),
@@ -416,6 +419,9 @@ export const POST = withWgRoute('chat messages POST', async (req, { code }) => {
 			} catch (releaseErr) {
 				logApiError('[chat/messages] rollback claim release failed', releaseErr);
 			}
+		}
+		if (err instanceof TransactionAbort && err.code === 'image_removed') {
+			return conflict('image_removed', 'image_removed');
 		}
 		throw err;
 	}

@@ -7,9 +7,9 @@ export function AnnouncementSkeleton() {
 			{['first', 'second', 'third'].map((key) => (
 				<Card key={key}>
 					<CardHeader>
-						<div className="flex items-center gap-3">
+						<div className="flex min-w-0 items-center gap-3">
 							<Skeleton className="size-8 rounded-full" />
-							<Skeleton className="h-4 w-32" />
+							<Skeleton className="h-4 w-32 min-w-0" />
 						</div>
 					</CardHeader>
 					<CardContent className="flex flex-col gap-2">

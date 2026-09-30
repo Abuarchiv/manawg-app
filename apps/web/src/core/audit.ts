@@ -1,4 +1,5 @@
 import { auditEvents, db } from '@/core/db';
+import { logApiError } from '@/core/infra/observability';
 
 interface AuditEventInput {
 	wgId: string;
@@ -25,6 +26,6 @@ export async function recordAuditEvent(input: AuditEventInput): Promise<void> {
 		// Keep mutations best-effort: propagating an audit failure after the
 		// mutation would make clients retry successful writes. Surface the loss
 		// at error level so the platform log can alert on it.
-		console.error('[audit] event not recorded', err);
+		logApiError('[audit] event not recorded', err);
 	}
 }

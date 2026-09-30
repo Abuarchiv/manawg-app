@@ -94,6 +94,7 @@ export function EventEditModal({
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [errorField, setErrorField] = useState<'title' | 'startsAt' | 'endsAt' | null>(null);
 
 	useEffect(() => {
 		if (!event) return;
@@ -105,6 +106,7 @@ export function EventEditModal({
 		setLocation(event.location ?? '');
 		setRecurrence(event.recurrence ?? '');
 		setError(null);
+		setErrorField(null);
 		setConfirmingDelete(false);
 		setConfirmingDiscard(false);
 	}, [event]);
@@ -141,10 +143,12 @@ export function EventEditModal({
 		e.preventDefault();
 		if (saving || deleting) return;
 		setError(null);
+		setErrorField(null);
 		if (!event) return;
 		const validation = validateEventForm({ title, startsAt, endsAt, allDay, original: event });
 		if (!validation.ok) {
 			setError(validation.error);
+			setErrorField(validation.field);
 			return;
 		}
 		const trimmedTitle = title.trim();
@@ -163,6 +167,7 @@ export function EventEditModal({
 			});
 		} catch (err) {
 			setError(err instanceof Error ? err.message : 'Speichern fehlgeschlagen.');
+			setErrorField(null);
 		} finally {
 			setSaving(false);
 		}
@@ -214,6 +219,8 @@ export function EventEditModal({
 							description={description}
 							onDescriptionChange={setDescription}
 							disabled={saving || deleting}
+							errorField={errorField}
+							errorId="event-edit-error"
 							recurrenceField={
 								<Field data-disabled={saving || deleting}>
 									<FieldLabel htmlFor="event-edit-recurrence">Wiederholung</FieldLabel>
@@ -251,7 +258,7 @@ export function EventEditModal({
 						/>
 						{(error || actionError) && (
 							<Alert variant="destructive">
-								<AlertDescription>{error || actionError}</AlertDescription>
+								<AlertDescription id="event-edit-error">{error || actionError}</AlertDescription>
 							</Alert>
 						)}
 					</div>

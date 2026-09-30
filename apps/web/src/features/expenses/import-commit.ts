@@ -8,14 +8,17 @@ import {
 	idempotencyResponses,
 	wgMembers,
 } from '@/core/db';
-import type { DbTransaction } from '@/core/db/transaction';
+import { type DbTransaction, TransactionAbort } from '@/core/db/transaction';
 import { RESPONSE_REPLAY_TTL_SECONDS } from '@/core/idempotency';
 import {
 	type NotificationDispatchWarning,
 	dispatchNotificationSafely,
 } from '@/core/notifications/notification-dispatch';
 import { formatEuroCents } from '@/core/utils/money';
-import { withExpensePaymentLock } from '@/features/expenses/expense-payments';
+import {
+	hasCapturingExpensePayment,
+	withExpensePaymentLock,
+} from '@/features/expenses/expense-payments';
 import { settledAtForOwnShare } from '@/features/expenses/split-math';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ImportSource, ParsedExpense } from './import-parsers';
@@ -45,10 +48,11 @@ function buildDuplicateKey(
 	description: string,
 	amountCents: number,
 	paidByMemberId: string,
+	currency: string,
 ): string {
-	return [date.slice(0, 10), description.trim().toLowerCase(), amountCents, paidByMemberId].join(
-		'|',
-	);
+	const key = [date.slice(0, 10), description.trim().toLowerCase(), amountCents, paidByMemberId];
+	// EUR import keys already persisted in this four-part format; keep them stable.
+	return (currency === 'EUR' ? key : [...key, currency]).join('|');
 }
 
 // Reads inside the same transaction as the writes: the duplicate keys are the
@@ -60,6 +64,7 @@ async function loadDuplicateKeys(tx: DbTransaction, wgId: string): Promise<Set<s
 			occurredAt: expenses.occurredAt,
 			description: expenses.description,
 			amountCents: expenses.amountCents,
+			currency: expenses.currency,
 			paidByMemberId: expenses.paidByMemberId,
 		})
 		.from(expenses)
@@ -70,7 +75,7 @@ async function loadDuplicateKeys(tx: DbTransaction, wgId: string): Promise<Set<s
 			r.occurredAt instanceof Date
 				? r.occurredAt.toISOString()
 				: new Date(r.occurredAt).toISOString();
-		set.add(buildDuplicateKey(iso, r.description, r.amountCents, r.paidByMemberId));
+		set.add(buildDuplicateKey(iso, r.description, r.amountCents, r.paidByMemberId, r.currency));
 	}
 	return set;
 }
@@ -141,6 +146,7 @@ function prepareRow(input: CommitInput, parsed: ParsedExpense): PreparedRow {
 			parsed.description,
 			parsed.amountCents,
 			paidByMemberId,
+			parsed.currency,
 		),
 	};
 }
@@ -219,6 +225,9 @@ async function writeImport(
 		if (!isClaimPlaceholder(slot.body)) throw new Error('idempotency_claim_invalid');
 	}
 
+	if (await hasCapturingExpensePayment(tx, input.wg.id)) {
+		throw new TransactionAbort('paypal_payment_pending');
+	}
 	const [imp] = await tx
 		.insert(expenseImports)
 		.values({

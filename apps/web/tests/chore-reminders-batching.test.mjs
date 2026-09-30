@@ -22,7 +22,13 @@ Module._extensions['.ts'] = (loadedModule, filename) => {
 	loadedModule._compile(compiled, filename);
 };
 
-const tables = { choreCompletions: {}, chores: {}, wgMembers: {}, wgs: {} };
+const tables = {
+	choreCompletions: {},
+	chores: {},
+	pushSubscriptions: { memberId: {} },
+	wgMembers: {},
+	wgs: {},
+};
 const state = {
 	candidates: [],
 	completions: [],
@@ -47,24 +53,16 @@ function makeQuery() {
 			return query;
 		},
 		where() {
+			if (query.table === tables.choreCompletions) return Promise.resolve(state.completions);
 			return query;
 		},
-		orderBy(spec) {
-			state.orders.push(spec);
+		orderBy(...specs) {
+			state.orders.push(...specs);
 			return query;
 		},
 		limit(value) {
 			state.limits.push(value);
-			return Promise.resolve(
-				query.table === tables.chores ? state.candidates : state.completions,
-			);
-		},
-		// The completions query awaits the chain right after `.where()`.
-		then(resolve, reject) {
-			Promise.resolve(query.table === tables.choreCompletions ? state.completions : []).then(
-				resolve,
-				reject,
-			);
+			return Promise.resolve(query.table === tables.chores ? state.candidates : state.completions);
 		},
 	};
 	return query;
@@ -89,6 +87,7 @@ const mocks = new Map([
 			db,
 			choreCompletions: tables.choreCompletions,
 			chores: tables.chores,
+			pushSubscriptions: tables.pushSubscriptions,
 			wgMembers: tables.wgMembers,
 			wgs: tables.wgs,
 		},
@@ -115,6 +114,7 @@ const mocks = new Map([
 		'drizzle-orm',
 		{
 			and: (...parts) => ({ kind: 'and', parts }),
+			or: (...parts) => ({ kind: 'or', parts }),
 			asc: (column) => ({ kind: 'asc', column }),
 			eq: (column, value) => ({ kind: 'eq', column, value }),
 			gte: (column, value) => {
@@ -125,6 +125,7 @@ const mocks = new Map([
 			isNotNull: (column) => ({ kind: 'isNotNull', column }),
 			isNull: (column) => ({ kind: 'isNull', column }),
 			lte: (column, value) => ({ kind: 'lte', column, value }),
+			sql: (strings, ...values) => ({ kind: 'sql', strings, values }),
 		},
 	],
 	['next/server', { NextResponse: Response }],
@@ -141,6 +142,7 @@ function choreRow(index, overrides = {}) {
 	return {
 		id: `chore-${index}`,
 		title: `Chore ${index}`,
+		nextDueAt: new Date(Date.now() - 7 * 86_400_000),
 		assignedMemberId: `member-${index % 5}`,
 		lastReminderAt: null,
 		wgId: 'wg-1',
@@ -195,7 +197,10 @@ test('a large overdue backlog is bounded in SQL and dispatched in blocks of 10',
 		state.limits[0] > 0 && state.limits[0] <= 1000,
 		`limit must be a bounded positive number, got ${state.limits[0]}`,
 	);
-	assert.equal(state.orders[0].kind, 'asc', 'most overdue chores survive the cap');
+	assert.ok(
+		state.orders.some((order) => order.kind === 'asc' && order.column === tables.chores.nextDueAt),
+		'most overdue chores survive the cap',
+	);
 
 	assert.equal(state.updates.length, 1, 'lastReminderAt is stamped once for the whole run');
 	assert.equal(state.updates[0].lastReminderAt instanceof Date, true);

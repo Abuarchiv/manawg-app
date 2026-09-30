@@ -1,5 +1,7 @@
 import { recordAuditEvent } from '@/core/audit';
 import { db, wgChatMessages } from '@/core/db';
+import { revokePrivateImageIfUnreferenced } from '@/core/db/private-image-deletions';
+import { lockExpensePayments, withTransaction } from '@/core/db/transaction';
 import { badRequest, forbidden, notFound, requireVerifiedMember, tooMany } from '@/core/errors';
 import { requireOwnerOrAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
@@ -7,7 +9,7 @@ import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { canEditMessage, sanitizeMessageBody } from '@/features/chat/chat-pure';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -101,36 +103,49 @@ export const DELETE = withWgRoute<{ id: string }>(
 		);
 		if (!limited.success) return tooMany();
 
-		const existing = await db
-			.select({
-				id: wgChatMessages.id,
-				senderMemberId: wgChatMessages.senderMemberId,
-				deletedAt: wgChatMessages.deletedAt,
-				body: wgChatMessages.body,
-				kind: wgChatMessages.kind,
-			})
-			.from(wgChatMessages)
-			.where(and(eq(wgChatMessages.id, id), eq(wgChatMessages.wgId, wgId)))
-			.limit(1);
-		const row = existing[0];
-		if (!row) return notFound('message_not_found');
-		if (row.deletedAt) return NextResponse.json({ deleted: true });
+		const deletion = await withTransaction(async (tx) => {
+			await lockExpensePayments(tx, wgId);
+			const [row] = await tx
+				.select({
+					senderMemberId: wgChatMessages.senderMemberId,
+					deletedAt: wgChatMessages.deletedAt,
+					body: wgChatMessages.body,
+					kind: wgChatMessages.kind,
+					imageUrl: wgChatMessages.imageUrl,
+				})
+				.from(wgChatMessages)
+				.where(and(eq(wgChatMessages.id, id), eq(wgChatMessages.wgId, wgId)))
+				.limit(1)
+				.for('update');
+			if (!row) return { ok: false as const, response: notFound('message_not_found') };
+			if (row.deletedAt) return { ok: true as const, deleted: false as const, row };
 
-		// auth.member.verified is already guaranteed by the check above; kept
-		// explicit here to match requireOwnerOrAdmin's own isOwner shape.
-		const isAuthor = auth.member.verified && row.senderMemberId === auth.member.memberId;
-		const denied = isAuthor
-			? null
-			: await requireOwnerOrAdmin(wgId, auth.member, row.senderMemberId);
-		if (denied) return denied;
+			// auth.member.verified is already guaranteed by the check above; kept
+			// explicit here to match requireOwnerOrAdmin's own isOwner shape.
+			const isAuthor = auth.member.verified && row.senderMemberId === auth.member.memberId;
+			const denied = isAuthor
+				? null
+				: await requireOwnerOrAdmin(wgId, auth.member, row.senderMemberId);
+			if (denied) return { ok: false as const, response: denied };
 
-		const now = new Date();
-		const [updated] = await db
-			.update(wgChatMessages)
-			.set({ deletedAt: now })
-			.where(and(eq(wgChatMessages.id, id), eq(wgChatMessages.wgId, wgId)))
-			.returning({ id: wgChatMessages.id });
-		if (!updated) return notFound('message_not_found');
+			const [updated] = await tx
+				.update(wgChatMessages)
+				.set({ deletedAt: new Date() })
+				.where(
+					and(
+						eq(wgChatMessages.id, id),
+						eq(wgChatMessages.wgId, wgId),
+						isNull(wgChatMessages.deletedAt),
+					),
+				)
+				.returning({ id: wgChatMessages.id });
+			if (!updated) return { ok: false as const, response: notFound('message_not_found') };
+			await revokePrivateImageIfUnreferenced(tx, wgId, row.imageUrl);
+			return { ok: true as const, deleted: true as const, row, isAuthor };
+		});
+		if (!deletion.ok) return deletion.response;
+		if (!deletion.deleted) return NextResponse.json({ deleted: true });
+		const { row, isAuthor } = deletion;
 
 		void recordAuditEvent({
 			wgId,

@@ -121,6 +121,27 @@ export function computeDirectDebts(
 		}
 	}
 
+	// Negative payment residuals are refunds owed in reverse; keep positive gross pairs separate.
+	for (const debt of totals.values()) {
+		if (debt.cents >= 0) continue;
+		const currency = normalizeCurrency(debt.currency);
+		const key = currencyKey(currency, `${debt.toId}:${debt.fromId}`);
+		const reverse = totals.get(key);
+		if (reverse) {
+			reverse.cents -= debt.cents;
+		} else {
+			totals.set(key, {
+				fromId: debt.toId,
+				fromName: debt.toName,
+				toId: debt.fromId,
+				toName: debt.fromName,
+				cents: -debt.cents,
+				currency,
+			});
+		}
+		debt.cents = 0;
+	}
+
 	return Array.from(totals.values())
 		.filter((debt) => debt.cents > 0)
 		.sort(

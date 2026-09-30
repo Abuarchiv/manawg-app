@@ -1,7 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool } from 'pg';
-import { resolveConnectionString } from './connection';
+import { closeClientOnQueryTimeout, resolveConnectionString } from './connection';
 import * as schema from './schema';
 
 type DbInstance = Omit<NodePgDatabase<typeof schema>, 'transaction'>;
@@ -44,7 +44,15 @@ function dropStaleDb(): void {
 
 function buildDb(): CachedDb {
 	const url = resolveConnectionString();
-	const pool = new Pool({ connectionString: url, max: 5 });
+	const pool = new Pool({
+		connectionString: url,
+		max: 5,
+		connectionTimeoutMillis: 2_000,
+		lock_timeout: 2_000,
+		query_timeout: 5_500,
+		statement_timeout: 5_000,
+	});
+	pool.on('connect', closeClientOnQueryTimeout);
 	// Omitting `transaction` is a narrowing assignment, not a cast: the drizzle
 	// instance simply has one property more than DbInstance requires.
 	const dbInstance: DbInstance = drizzle(pool, { schema });

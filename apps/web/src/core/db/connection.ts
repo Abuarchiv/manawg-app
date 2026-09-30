@@ -1,11 +1,46 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Client } from 'pg';
 import { SUPABASE_ROOT_CA } from './supabase-ca';
 
 let supabaseRootPath: string | undefined;
 
 const warnedUrlPairs = new Set<string>();
+const RUNTIME_TIMEOUT_QUERY_PARAMS = [
+	'lock_timeout',
+	'query_timeout',
+	'statement_timeout',
+] as const;
+
+/** Discard a client when pg's client-side read deadline fires during a query. */
+export function closeClientOnQueryTimeout(client: Client): void {
+	const query = new Proxy(client.query, {
+		apply(target, thisArg, args) {
+			const callbackIndex = args.length - 1;
+			const callback = args[callbackIndex];
+			if (typeof callback === 'function') {
+				args[callbackIndex] = function (this: unknown, ...callbackArgs: unknown[]) {
+					if (isQueryReadTimeout(callbackArgs[0])) void client.end();
+					return callback.apply(this, callbackArgs);
+				};
+			}
+
+			const result = Reflect.apply(target, thisArg, args);
+			return result instanceof Promise
+				? result.catch((error: unknown) => {
+						if (isQueryReadTimeout(error)) void client.end();
+						throw error;
+					})
+				: result;
+		},
+	});
+	Reflect.set(client, 'query', query);
+}
+
+function isQueryReadTimeout(error: unknown): boolean {
+	return error instanceof Error && error.message === 'Query read timeout';
+}
 
 /**
  * `POSTGRES_URL`/`DATABASE_URL` (and the non-pooling pair below) are supported
@@ -85,6 +120,11 @@ export function validateDatabaseUrl(url: string, label: string): void {
 	}
 	if (parsed.searchParams.has('host')) {
 		throw new Error(`${label} must not override its host in query parameters.`);
+	}
+	for (const parameter of RUNTIME_TIMEOUT_QUERY_PARAMS) {
+		if (parsed.searchParams.has(parameter)) {
+			throw new Error(`${label} must not override ${parameter} in query parameters.`);
+		}
 	}
 	// Drizzle binds BEGIN/COMMIT to one node-postgres client, which supports
 	// Supavisor transaction pooling. Migration/session locks use the separate

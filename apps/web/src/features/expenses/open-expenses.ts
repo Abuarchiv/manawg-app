@@ -1,7 +1,7 @@
 import { db, expenseSplits, expenses } from '@/core/db';
 import type { DbTransaction } from '@/core/db/transaction';
 import type { DebtExpenseInput } from '@/features/expenses/debts';
-import { eq, inArray } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 
 /**
  * Load every expense of a WG together with its splits, shaped for the pure
@@ -25,7 +25,8 @@ export async function loadOpenExpenses(
 		.where(eq(expenses.wgId, wgId));
 	if (expenseRows.length === 0) return [];
 
-	const ids = expenseRows.map((row) => row.id);
+	// Joined by WG instead of `inArray(expenseIds)`: one bind parameter per
+	// expense would exceed PostgreSQL's 65,535-parameter limit for large WGs.
 	const splitRows = await client
 		.select({
 			expenseId: expenseSplits.expenseId,
@@ -34,7 +35,8 @@ export async function loadOpenExpenses(
 			settledAt: expenseSplits.settledAt,
 		})
 		.from(expenseSplits)
-		.where(inArray(expenseSplits.expenseId, ids));
+		.innerJoin(expenses, eq(expenseSplits.expenseId, expenses.id))
+		.where(eq(expenses.wgId, wgId));
 
 	const splitsByExpense = groupSplitsByExpense(splitRows);
 

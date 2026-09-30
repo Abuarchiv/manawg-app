@@ -175,7 +175,6 @@ export function RemindButton({
 				}
 				onClick={() => void handleClick()}
 				disabled={disabled}
-				aria-label={`Erinnerung senden: ${label}`}
 			>
 				{status === 'sending' ? (
 					<Spinner data-icon="inline-start" />

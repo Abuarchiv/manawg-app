@@ -1,5 +1,6 @@
 'use client';
 
+import { EXPECTED_MEMBER_ID_HEADER } from '@/shared/lib/member-header';
 import { createOfflineIdempotencyKey } from './offline-queue';
 
 const DB_NAME = 'manawg-offline-images';
@@ -17,6 +18,7 @@ interface PendingImageRecord {
 	memberId: string;
 	purpose: 'expense' | 'announcement';
 	createdAt: string;
+	publicUrl?: string;
 }
 
 interface SignResponse {
@@ -72,12 +74,26 @@ async function withStore<T>(
 	return new Promise((resolve, reject) => {
 		const tx = db.transaction(STORE_NAME, mode);
 		const request = run(tx.objectStore(STORE_NAME));
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
-		tx.oncomplete = () => db.close();
+		let result: T;
+		let requestError: DOMException | null = null;
+		request.onsuccess = () => {
+			result = request.result;
+		};
+		request.onerror = () => {
+			requestError = request.error;
+		};
+		tx.oncomplete = () => {
+			db.close();
+			if (requestError) reject(requestError);
+			else resolve(result);
+		};
 		tx.onerror = () => {
 			db.close();
 			reject(tx.error);
+		};
+		tx.onabort = () => {
+			db.close();
+			reject(tx.error ?? new Error('offline-image-transaction-aborted'));
 		};
 	});
 }
@@ -123,14 +139,21 @@ export async function removePendingImage(token: string, memberId: string): Promi
 	await withStore('readwrite', (store) => store.delete(pendingImageIdFromToken(token)));
 }
 
-export async function uploadPendingImageToken(token: string, memberId: string): Promise<string> {
+export async function uploadPendingImageToken(
+	token: string,
+	memberId: string,
+	signal?: AbortSignal,
+): Promise<string> {
 	const record = await readPendingImage(token, memberId);
 	if (!record) throw new Error('pending-image-missing');
+	if (record.publicUrl) return record.publicUrl;
 	const sigRes = await fetch('/api/upload/sign', {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
+			[EXPECTED_MEMBER_ID_HEADER]: memberId,
 		},
+		...(signal ? { signal } : {}),
 		body: JSON.stringify({
 			shareCode: record.shareCode,
 			purpose: record.purpose,
@@ -149,8 +172,11 @@ export async function uploadPendingImageToken(token: string, memberId: string): 
 		method: 'PUT',
 		body: record.file,
 		headers: { ...sig.uploadHeaders, 'Content-Type': record.type },
+		...(signal ? { signal } : {}),
 	});
 	if (!uploadRes.ok) throw new Error(`upload-failed:${uploadRes.status}`);
-	await removePendingImage(token, memberId);
+	await withStore('readwrite', (store) =>
+		store.put({ ...record, publicUrl: sig.publicUrl }, record.id),
+	);
 	return sig.publicUrl;
 }

@@ -3,57 +3,14 @@
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/shared/lib/cn';
 import { haptic } from '@/shared/lib/haptics';
-import {
-	Bell,
-	CalendarDays,
-	Clock3,
-	Home,
-	ListChecks,
-	type LucideIcon,
-	Megaphone,
-	MessageCircle,
-	Package,
-	Receipt,
-	RefreshCw,
-	Search,
-	Settings,
-	Sparkles,
-} from 'lucide-react';
+import { Home, ListChecks, type LucideIcon, Megaphone, Receipt } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-export type NavIconKey =
-	| 'home'
-	| 'ausgaben'
-	| 'einkauf'
-	| 'pinnwand'
-	| 'putzen'
-	| 'kalender'
-	| 'vorraete'
-	| 'abos'
-	| 'mahnungen'
-	| 'chat'
-	| 'suche'
-	| 'aktivitaet'
-	| 'einstellungen'
-	| 'haushalt'
-	| 'finanzen'
-	| 'austausch';
+export type NavIconKey = 'home' | 'haushalt' | 'finanzen' | 'austausch';
 
 const ICONS: Record<NavIconKey, LucideIcon> = {
 	home: Home,
-	ausgaben: Receipt,
-	einkauf: ListChecks,
-	pinnwand: Megaphone,
-	putzen: Sparkles,
-	kalender: CalendarDays,
-	vorraete: Package,
-	abos: RefreshCw,
-	mahnungen: Bell,
-	chat: MessageCircle,
-	suche: Search,
-	aktivitaet: Clock3,
-	einstellungen: Settings,
 	haushalt: ListChecks,
 	finanzen: Receipt,
 	austausch: Megaphone,
@@ -118,14 +75,14 @@ export function NavItem({
 					if (!isActive) haptic('light');
 				}}
 				className={cn(
-					'flex min-h-13 w-full flex-col items-center justify-center gap-1 rounded-[16px] py-1 text-foreground/70 outline-none transition-colors duration-[120ms] select-none focus-visible:ring-2 focus-visible:ring-ring',
+					'flex min-h-11 w-full flex-col items-center justify-center gap-0.5 rounded-[14px] py-0.5 text-foreground/70 outline-none transition-colors duration-[120ms] select-none focus-visible:ring-2 focus-visible:ring-ring',
 					isActive
 						? 'bg-foreground/8 text-foreground ring-1 ring-inset ring-foreground/12'
 						: 'active:bg-foreground/5',
 				)}
 			>
 				<span className="relative">
-					<Icon aria-hidden className="size-5" strokeWidth={1.5} />
+					<Icon aria-hidden className="size-[18px]" strokeWidth={1.5} />
 					{showBadge && (
 						<Badge
 							variant="destructive"
@@ -138,7 +95,7 @@ export function NavItem({
 						</Badge>
 					)}
 				</span>
-				<span className="max-w-full whitespace-nowrap text-center text-[11px] font-semibold leading-4">
+				<span className="max-w-full whitespace-nowrap text-center text-[10px] font-semibold leading-3.5">
 					{label}
 				</span>
 			</Link>

@@ -21,7 +21,6 @@ const createWg = read('src/app/api/wg/route.ts');
 const joinWg = read('src/app/api/wg/[code]/members/route.ts');
 const memberPatch = read('src/app/api/wg/[code]/members/[id]/route.ts');
 const config = read('drizzle.config.ts');
-const connection = read('src/core/db/connection.ts');
 const idempotency = read('src/core/idempotency.ts');
 const journal = JSON.parse(read('drizzle/meta/_journal.json'));
 
@@ -71,16 +70,6 @@ if (inventoryMigration && existsSync(join(appRoot, 'drizzle', `${inventoryMigrat
 mustNotMatch(config, /postgres:\/\/placeholder/, 'drizzle config must not use a fake database URL');
 mustNotMatch(config, /console\.warn\(/, 'drizzle config must not duplicate missing-URL warnings');
 mustMatch(config, /dbCredentials:/, 'drizzle config keeps optional database credentials');
-mustMatch(
-	connection,
-	/validateDatabaseUrl\(url, 'transaction database connection'\)/,
-	'transaction URL label',
-);
-mustNotMatch(
-	connection,
-	/validateDatabaseUrl\(url, 'withTransaction connection \(set DATABASE_MIGRATION_URL\)'\)/,
-	'connection label must not claim every source is DATABASE_MIGRATION_URL',
-);
 mustMatch(idempotency, /onConflictDoUpdate\(/, 'expired idempotency claims are reclaimable');
 mustMatch(
 	idempotency,

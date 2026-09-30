@@ -340,7 +340,7 @@ export function ImageUploader({
 							loading="lazy"
 						/>
 					) : (
-						<div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
+						<div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
 							Bild wird vorbereitet…
 						</div>
 					)}
@@ -420,7 +420,7 @@ export function ImageUploader({
 					</Alert>
 				)}
 				{notice && (
-					<output className="mt-2 block text-[13px] text-muted-foreground" aria-live="polite">
+					<output className="mt-2 block text-[12px] text-muted-foreground" aria-live="polite">
 						{notice}
 					</output>
 				)}
@@ -471,7 +471,7 @@ export function ImageUploader({
 				</Alert>
 			)}
 			{notice && (
-				<output className="mt-2 block text-[13px] text-muted-foreground" aria-live="polite">
+				<output className="mt-2 block text-[12px] text-muted-foreground" aria-live="polite">
 					{notice}
 				</output>
 			)}

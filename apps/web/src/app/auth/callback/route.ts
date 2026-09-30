@@ -21,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 	// Defense in depth: safeNextPath should already reject absolute URLs,
 	// but verify at the redirect boundary so a future regression cannot
 	// produce an open redirect.
-	if (!next.startsWith('/')) {
+	if (!next.startsWith('/') || next.startsWith('//')) {
 		return callbackError(request);
 	}
 

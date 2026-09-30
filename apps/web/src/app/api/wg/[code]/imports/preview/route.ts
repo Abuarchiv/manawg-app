@@ -15,17 +15,14 @@ import {
 	parseSplitwiseCsv,
 } from '@/features/expenses/import-parsers';
 import { parseOcrText } from '@/features/expenses/ocr';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-// Same `memberMapping` contract as `commit/route.ts`: a UUID or null. A looser
-// schema here let a preview succeed with a mapping the commit then rejected
-// with `invalid_body`.
 const previewSchema = z.object({
 	source: z.enum(['splitwise_csv', 'splid_csv', 'ocr_text']),
 	payload: z.string().min(1),
-	memberMapping: z.record(z.string(), z.string().uuid().nullable()).optional(),
+	memberMapping: z.record(z.string(), z.string().nullable()).optional(),
 });
 
 export const POST = withWgRoute('imports/preview', async (req, { code }) => {
@@ -66,25 +63,21 @@ export const POST = withWgRoute('imports/preview', async (req, { code }) => {
 		throw parseErr;
 	}
 
-	const memberRows = await db
-		.select({ id: wgMembers.id, name: wgMembers.name, deactivatedAt: wgMembers.deactivatedAt })
+	// Same contract as the commit: only active members can be mapped, so a
+	// clean preview never turns into member_not_in_wg on commit.
+	const members = await db
+		.select({ id: wgMembers.id, name: wgMembers.name })
 		.from(wgMembers)
-		.where(eq(wgMembers.wgId, wg.id));
-
-	// `commitImport` validates every mapped member against active WG members
-	// only (`assertMembersInWg`), so the preview must apply the same contract:
-	// a name auto-matched or requested for a deactivated member is reported as
-	// unmapped (a `conflict`) instead of a green preview that later fails the
-	// commit with `member_not_in_wg`.
-	const activeMembers = memberRows.filter((m) => m.deactivatedAt === null);
-	const activeMemberIds = new Set(activeMembers.map((m) => m.id));
+		.where(and(eq(wgMembers.wgId, wg.id), isNull(wgMembers.deactivatedAt)));
+	const activeMemberIds = new Set(members.map((member) => member.id));
 
 	const names = collectUniqueNames(parsedExpenses);
-	const autoMatched = matchMembers(names, activeMembers);
+	const autoMatched = matchMembers(names, members);
 	const mapping: Record<string, string | null> = {};
 	for (const name of names) {
-		const requested = memberMapping?.[name] ?? autoMatched.get(name) ?? null;
-		mapping[name] = requested !== null && activeMemberIds.has(requested) ? requested : null;
+		const candidate = memberMapping?.[name] ?? autoMatched.get(name);
+		// An unknown or moved-out member id becomes a conflict for that name.
+		mapping[name] = candidate && activeMemberIds.has(candidate) ? candidate : null;
 	}
 	const conflicts = findMappingConflicts(parsedExpenses, mapping);
 
@@ -93,6 +86,6 @@ export const POST = withWgRoute('imports/preview', async (req, { code }) => {
 		payloadHash: hashPayload(payload),
 		memberMapping: mapping,
 		conflicts,
-		members: activeMembers.map(({ id, name }) => ({ id, name })),
+		members,
 	});
 });

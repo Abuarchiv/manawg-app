@@ -3,12 +3,19 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { createSupabaseBrowserClient } from '@/core/auth/client';
 import { apiFetch } from '@/core/infra/api-client';
 import { captureException } from '@/core/infra/observability';
 import { countOfflineActions, syncOfflineActions } from '@/core/offline/offline-client';
 import { useVisibilityPausedInterval } from '@/core/utils/use-visibility-paused-interval';
 import { cn } from '@/shared/lib/cn';
-import { type StoredIdentity, getIdentity, rememberWg } from '@/shared/lib/identity';
+import {
+	type StoredIdentity,
+	clearIdentity,
+	getIdentity,
+	rememberWg,
+	setIdentity,
+} from '@/shared/lib/identity';
 import {
 	createContext,
 	useCallback,
@@ -55,78 +62,169 @@ const WgContext = createContext<WgContextValue | null>(null);
 interface Props {
 	wg: WgSummary;
 	members: Member[];
-	/** Server-seeded admin flag; the client refresh keeps it up to date. */
+	initialIdentity?: StoredIdentity | undefined;
 	viewerIsAdmin?: boolean | undefined;
 	children: ReactNode;
 }
 
-/** Backoff for a failed members refresh: 5s, 10s, 20s, 40s … capped at 60s. */
+/** Backoff for failed members refresh: 5s, 10s, 20s, 40s … capped at 60s. */
 const MEMBER_RETRY_BASE_MS = 5_000;
 const MEMBER_RETRY_MAX_MS = 60_000;
-// One 429/deploy blip must not blank the WG; repeated failures must not stay
-// silent — after this many attempts the existing error screen takes over.
+// A few transient failures are tolerated before the existing error screen takes over.
 const MEMBER_RETRY_ATTEMPTS_BEFORE_ERROR = 3;
 
-export function WgContextProvider({ wg, members: initialMembers, viewerIsAdmin, children }: Props) {
+export function WgContextProvider({
+	wg,
+	members: initialMembers,
+	initialIdentity,
+	viewerIsAdmin,
+	children,
+}: Props) {
 	const [members, setMembers] = useState<Member[]>(initialMembers);
 	const [isAdmin, setIsAdmin] = useState(viewerIsAdmin ?? false);
-	const [identity, setStateIdentity] = useState<StoredIdentity | null>(null);
+	const [identity, setStateIdentity] = useState<StoredIdentity | null>(initialIdentity ?? null);
+	const [accountReady, setAccountReady] = useState(false);
 	const [hydrated, setHydrated] = useState(false);
 	const [memberLoaded, setMemberLoaded] = useState(false);
 	const [memberLoadError, setMemberLoadError] = useState(false);
-	// Consecutive failures of the members/admin refresh: `failed` keeps the
-	// backoff timer armed, `attempts` picks the next step. A success resets it.
 	const [membersRetry, setMembersRetry] = useState({ failed: false, attempts: 0 });
-	const syncingRef = useRef(false);
-	// True after the last members refresh succeeded; the focus/visibility
-	// listeners use it to retry only while the roster or the admin flag is
-	// still missing instead of adding an API call to every focus.
 	const membersRefreshedRef = useRef(false);
+	const syncingRef = useRef(false);
+	const syncAbortRef = useRef<AbortController | null>(null);
+	const authUserIdRef = useRef<string | null>(initialIdentity?.authUserId ?? null);
+	const authGenerationRef = useRef(0);
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 
 	useEffect(() => {
 		const storedIdentity = getIdentity(wg.id);
 		// The database-free Playwright fixture has no Supabase session by design.
 		// It only exists in CI and keeps its old local identity setup working.
-		if (
+		const fixtureMode =
 			process.env.NEXT_PUBLIC_DB_DOWN === 'true' &&
-			process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE === 'true' &&
-			storedIdentity
-		) {
-			setStateIdentity(storedIdentity);
+			process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE === 'true';
+		if (fixtureMode) {
+			const fixtureIdentity = storedIdentity ?? initialIdentity;
+			if (fixtureIdentity) {
+				setStateIdentity(fixtureIdentity);
+				setAccountReady(true);
+			}
+			setMemberLoaded(true);
 		}
 		setHydrated(true);
 		rememberWg({ code: wg.shareCode, name: wg.name, lastVisitedAt: Date.now() });
-	}, [wg.id, wg.shareCode, wg.name]);
+	}, [initialIdentity, wg.id, wg.shareCode, wg.name]);
 
-	useEffect(() => {
-		let cancelled = false;
-		const loadSessionMember = async () => {
-			setMemberLoaded(false);
+	const loadSessionMember = useCallback(
+		async (authUserId: string, generation: number, keepCurrentContext = false) => {
+			if (!keepCurrentContext) setMemberLoaded(false);
 			setMemberLoadError(false);
 			const res = await apiFetch<{
 				currentMember?: { memberId: string; name: string; memberToken?: string };
 			}>(`/api/wg/${encodedShareCode}`);
-			if (cancelled) return;
-			if (!res.ok) {
-				setMemberLoadError(true);
-			} else {
-				const member = res.data.currentMember;
-				if (member) {
-					setStateIdentity({
-						memberId: member.memberId,
-						name: member.name,
-						...(member.memberToken ? { memberToken: member.memberToken } : {}),
-					});
-				}
+			if (generation !== authGenerationRef.current) return;
+			const member = res.ok ? res.data.currentMember : undefined;
+			if (member) {
+				const nextIdentity: StoredIdentity = {
+					memberId: member.memberId,
+					name: member.name,
+					authUserId,
+					...(member.memberToken ? { memberToken: member.memberToken } : {}),
+				};
+				setIdentity(wg.id, nextIdentity);
+				setStateIdentity(nextIdentity);
+				setAccountReady(true);
+				setMemberLoaded(true);
+				return;
 			}
+
+			const cachedIdentity = getIdentity(wg.id);
+			if (
+				!res.ok &&
+				(res.status === 0 || res.status >= 500) &&
+				cachedIdentity?.authUserId === authUserId
+			) {
+				setStateIdentity(cachedIdentity);
+				setAccountReady(true);
+				setMemberLoaded(true);
+				return;
+			}
+			clearIdentity(wg.id);
+			setStateIdentity(null);
+			setIsAdmin(false);
+			setAccountReady(false);
+			setMemberLoadError(!res.ok && (res.status === 0 || res.status >= 500));
+			setMemberLoaded(true);
+		},
+		[encodedShareCode, wg.id],
+	);
+
+	useEffect(() => {
+		if (!hydrated) return;
+		if (
+			process.env.NEXT_PUBLIC_DB_DOWN === 'true' &&
+			process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE === 'true'
+		) {
+			return;
+		}
+		const supabase = createSupabaseBrowserClient();
+		const clearSessionIdentity = () => {
+			authGenerationRef.current += 1;
+			syncAbortRef.current?.abort();
+			syncAbortRef.current = null;
+			authUserIdRef.current = null;
+			clearIdentity(wg.id);
+			setStateIdentity(null);
+			setIsAdmin(false);
+			setAccountReady(false);
+			membersRefreshedRef.current = false;
+			setMembersRetry({ failed: false, attempts: 0 });
+			setMemberLoadError(false);
 			setMemberLoaded(true);
 		};
-		if (hydrated) void loadSessionMember();
-		return () => {
-			cancelled = true;
+		const loadForUser = (nextUserId: string) => {
+			if (nextUserId !== authUserIdRef.current) {
+				authUserIdRef.current = nextUserId;
+				const generation = ++authGenerationRef.current;
+				syncAbortRef.current?.abort();
+				syncAbortRef.current = null;
+				setIsAdmin(false);
+				setAccountReady(false);
+				membersRefreshedRef.current = false;
+				setMembersRetry({ failed: false, attempts: 0 });
+				setMemberLoadError(false);
+				setMemberLoaded(false);
+				if (getIdentity(wg.id)?.authUserId !== nextUserId) {
+					clearIdentity(wg.id);
+					setStateIdentity(null);
+				}
+				window.setTimeout(() => void loadSessionMember(nextUserId, generation), 0);
+				return;
+			}
+			const generation = authGenerationRef.current;
+			window.setTimeout(() => void loadSessionMember(nextUserId, generation, true), 0);
 		};
-	}, [hydrated, encodedShareCode]);
+		const { data } = supabase.auth.onAuthStateChange((event, session) => {
+			const nextUserId = session?.user.id ?? null;
+			if (event === 'SIGNED_OUT' || !nextUserId) {
+				clearSessionIdentity();
+				return;
+			}
+			if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') loadForUser(nextUserId);
+		});
+		const generation = authGenerationRef.current;
+		void supabase.auth.getSession().then(({ data: sessionData, error }) => {
+			if (error || generation !== authGenerationRef.current) return;
+			const userId = sessionData.session?.user.id;
+			if (userId) loadForUser(userId);
+			else clearSessionIdentity();
+		});
+		return () => {
+			data.subscription.unsubscribe();
+			authGenerationRef.current += 1;
+			syncAbortRef.current?.abort();
+			syncAbortRef.current = null;
+		};
+	}, [hydrated, loadSessionMember, wg.id]);
 
 	const scheduleMembersRetry = useCallback(() => {
 		membersRefreshedRef.current = false;
@@ -136,7 +234,8 @@ export function WgContextProvider({ wg, members: initialMembers, viewerIsAdmin, 
 	}, []);
 
 	const refreshMembers = useCallback(async () => {
-		if (!identity) return;
+		if (!identity || !accountReady) return;
+		const authGeneration = authGenerationRef.current;
 		try {
 			const res = await apiFetch<{
 				members: Array<Member & { active?: boolean }>;
@@ -145,53 +244,63 @@ export function WgContextProvider({ wg, members: initialMembers, viewerIsAdmin, 
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
 			});
-			// Normalize defensively: an omitted flag (e.g. E2E fixtures) means active.
+			if (authGeneration !== authGenerationRef.current) return;
 			if (res.ok) {
-				setMembers(res.data.members.map((m) => ({ ...m, active: m.active !== false })));
+				setMembers(
+					res.data.members.map((member) => ({ ...member, active: member.active !== false })),
+				);
 				setIsAdmin(res.data.viewerIsAdmin === true);
 				membersRefreshedRef.current = true;
 				setMembersRetry({ failed: false, attempts: 0 });
 				setMemberLoadError(false);
-			} else if (res.status === 401 && res.error === 'auth_required') {
+				return;
+			}
+			if (res.status === 401 && res.error === 'auth_required') {
 				window.location.replace(
 					`/neu?next=${encodeURIComponent(window.location.pathname + window.location.search)}`,
 				);
-			} else if (res.status === 401 && res.error === 'not_a_member') {
-				setStateIdentity(null);
-			} else {
-				// 429/500/503/network: retry with backoff instead of leaving
-				// `isAdmin` (and the roster) stuck at its initial value.
-				scheduleMembersRetry();
+				return;
 			}
-		} catch (err) {
-			// apiFetch swallows network errors internally, so this only fires for
-			// unexpected failures — log it and retry like any other non-auth one.
-			captureException(err, { action: 'refreshMembers', shareCode: encodedShareCode });
+			if (
+				res.status === 401 &&
+				(res.error === 'not_a_member' || res.error === 'member_deactivated')
+			) {
+				clearIdentity(wg.id);
+				setStateIdentity(null);
+				setIsAdmin(false);
+				setAccountReady(false);
+				setMemberLoaded(true);
+				setMemberLoadError(false);
+				membersRefreshedRef.current = false;
+				setMembersRetry({ failed: false, attempts: 0 });
+				return;
+			}
+			if (res.error === 'member_context_changed' && authUserIdRef.current) {
+				membersRefreshedRef.current = false;
+				await loadSessionMember(authUserIdRef.current, authGeneration);
+				return;
+			}
+			scheduleMembersRetry();
+		} catch (error) {
+			if (authGeneration !== authGenerationRef.current) return;
+			captureException(error, { action: 'refreshMembers', shareCode: encodedShareCode });
 			scheduleMembersRetry();
 		}
-	}, [encodedShareCode, identity, scheduleMembersRetry]);
+	}, [accountReady, encodedShareCode, identity, loadSessionMember, scheduleMembersRetry, wg.id]);
 
-	// Surface persistent refresh failures through the existing error screen —
-	// but only after a few attempts, so a single 429/deploy blip does not
-	// blank the WG. A later success clears it again (see refreshMembers).
 	useEffect(() => {
 		if (membersRetry.attempts >= MEMBER_RETRY_ATTEMPTS_BEFORE_ERROR) {
 			setMemberLoadError(true);
 		}
 	}, [membersRetry.attempts]);
 
-	// Backoff retry while a refresh keeps failing: every failure stores a new
-	// `membersRetry`, which rebuilds this timer with the next, longer delay.
-	// A successful attempt resets the state and cancels the pending timer.
 	useEffect(() => {
-		if (!identity || !membersRetry.failed) return;
+		if (!identity || !accountReady || !membersRetry.failed) return;
 		const exponent = Math.min(Math.max(membersRetry.attempts - 1, 0), 5);
 		const delay = Math.min(MEMBER_RETRY_MAX_MS, MEMBER_RETRY_BASE_MS * 2 ** exponent);
-		const timer = window.setTimeout(() => {
-			void refreshMembers();
-		}, delay);
+		const timer = window.setTimeout(() => void refreshMembers(), delay);
 		return () => window.clearTimeout(timer);
-	}, [identity, membersRetry, refreshMembers]);
+	}, [accountReady, identity, membersRetry, refreshMembers]);
 
 	const value = useMemo<WgContextValue | null>(() => {
 		if (!identity) return null;
@@ -205,39 +314,37 @@ export function WgContextProvider({ wg, members: initialMembers, viewerIsAdmin, 
 
 	const sync = useCallback(async () => {
 		if (
+			!accountReady ||
 			!identity ||
 			syncingRef.current ||
 			countOfflineActions(wg.shareCode, { memberId: identity.memberId }) === 0
 		) {
 			return;
 		}
+		const controller = syncAbortRef.current ?? new AbortController();
+		syncAbortRef.current = controller;
 		syncingRef.current = true;
 		try {
-			await syncOfflineActions(wg.shareCode, { memberId: identity.memberId });
+			await syncOfflineActions(wg.shareCode, {
+				memberId: identity.memberId,
+				signal: controller.signal,
+			});
 		} catch {
 			// Automatic sync retries on the next app event or interval.
 		} finally {
 			syncingRef.current = false;
 		}
-	}, [identity, wg.shareCode]);
+	}, [accountReady, identity, wg.shareCode]);
 
-	// The interval doubles as the members/admin retry while a refresh has not
-	// succeeded yet — a failed fetch then heals on the same cadence as the
-	// offline queue instead of waiting for a hard reload.
-	useVisibilityPausedInterval(
-		() => {
-			if (!membersRefreshedRef.current) void refreshMembers();
-			void sync();
-		},
-		identity ? 60_000 : null,
-	);
+	// Member retries use one backoff timer; the periodic interval only syncs the offline queue.
+	useVisibilityPausedInterval(() => void sync(), identity && accountReady ? 60_000 : null);
 
 	// Sync on online/focus events in addition to the paused interval above.
 	// These listeners are re-registered when `refreshMembers`/`sync` change
 	// (which happens when identity or wg.shareCode change), so the cleanup
 	// always removes the listeners bound to the current closure.
 	useEffect(() => {
-		if (!identity) return;
+		if (!identity || !accountReady) return;
 		void sync();
 		const onAppEvent = () => {
 			if (!membersRefreshedRef.current) void refreshMembers();
@@ -249,12 +356,12 @@ export function WgContextProvider({ wg, members: initialMembers, viewerIsAdmin, 
 			window.removeEventListener('online', onAppEvent);
 			window.removeEventListener('focus', onAppEvent);
 		};
-	}, [identity, refreshMembers, sync]);
+	}, [accountReady, identity, refreshMembers, sync]);
 
 	if (!hydrated || !memberLoaded) {
 		// Static skeleton shell instead of null: the SSR/first-paint output keeps
 		// the document structure (<main> landmark, app background) while the
-		// identity is read from localStorage. Fully static markup — no dynamic
+		// client hydrates. Fully static markup — no dynamic
 		// values — so hydration cannot mismatch.
 		return (
 			<div className="min-h-svh bg-background" aria-busy="true">

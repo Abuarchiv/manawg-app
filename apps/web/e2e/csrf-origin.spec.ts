@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { NextRequest } from 'next/server';
-import { config, isRateLimitedApiPath, isShareCodeLookup, originAllowed } from '../src/middleware';
+import {
+	config,
+	isRateLimitedApiPath,
+	isShareCodeLookup,
+	middleware,
+	originAllowed,
+} from '../src/middleware';
 
 const WRITE_URL = 'https://app.example.com/api/wg/ABCDEFGH/expenses';
 
@@ -51,7 +57,7 @@ test('fails closed for a write without an Origin header', () => {
 	expect(originAllowed(request({ host: 'app.example.com' }))).toBe(false);
 });
 
-test('rejects cross-origin writes including takeover lookalikes', () => {
+test('rejects cross-origin writes including takeover lookalikes', async () => {
 	const rejected = [
 		'https://evil.example.com',
 		'https://app.example.com.evil.test',
@@ -68,7 +74,9 @@ test('rejects cross-origin writes including takeover lookalikes', () => {
 	];
 
 	for (const origin of rejected) {
-		expect(originAllowed(request({ host: 'app.example.com', origin })), origin).toBe(false);
+		const req = request({ host: 'app.example.com', origin });
+		expect(originAllowed(req), origin).toBe(false);
+		expect((await middleware(req)).status, origin).toBe(403);
 	}
 });
 
@@ -89,4 +97,13 @@ test('treats an explicit default port as same-origin and still rejects others', 
 	expect(
 		originAllowed(request({ host: 'app.example.com', origin: 'https://app.example.com:3000' })),
 	).toBe(false);
+});
+
+test('guards the password-recovery API like every other state-changing route', async () => {
+	expect(config.matcher).toContain('/api/auth/:path*');
+	const req = new NextRequest('https://app.example.com/api/auth/recovery', {
+		method: 'DELETE',
+		headers: { host: 'app.example.com', origin: 'https://evil.example.com' },
+	});
+	expect((await middleware(req)).status).toBe(403);
 });

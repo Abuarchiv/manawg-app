@@ -26,6 +26,7 @@ jobs:
       - run: pnpm lint
       - run: pnpm --dir apps/web analytics:check
       - run: pnpm --filter @manawg/web exec node scripts/check-feature-boundaries.mjs
+      - run: pnpm --filter @manawg/web exec node scripts/check-wg-auth-invariant.mjs
       - run: pnpm typecheck
       - run: pnpm --filter @manawg/web test:unit
       - run: pnpm build

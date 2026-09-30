@@ -3,6 +3,39 @@ import test from 'node:test';
 
 const checker = await import('./db-migrate.mjs');
 
+test('db:migrate accepts direct URLs and rejects query parameters that override them', async (t) => {
+	for (const [name, url] of [
+		['local connection', 'postgresql://migrator:example@localhost:5432/app'],
+		[
+			'remote connection with verified TLS',
+			'postgresql://migrator:example@db.example.test:5432/app?sslmode=verify-full',
+		],
+	]) {
+		await t.test(`accepts ${name}`, () => {
+			assert.doesNotThrow(() => checker.validateDatabaseUrl(url, 'DATABASE_MIGRATION_URL'));
+		});
+	}
+
+	for (const [name, url] of [
+		[
+			'host override',
+			'postgresql://migrator:example@db.example.test:5432/app?sslmode=verify-full&host=localhost',
+		],
+		[
+			'port override',
+			'postgresql://migrator:example@db.example.test:5432/app?sslmode=verify-full&port=6543',
+		],
+		[
+			'duplicate TLS mode',
+			'postgresql://migrator:example@db.example.test:5432/app?sslmode=verify-full&sslmode=disable',
+		],
+	]) {
+		await t.test(`rejects ${name}`, () => {
+			assert.throws(() => checker.validateDatabaseUrl(url, 'DATABASE_MIGRATION_URL'));
+		});
+	}
+});
+
 const triggerArgs = {
 	expenses: ['paid_by_member_id'],
 	expense_imports: ['imported_by_member_id'],
@@ -123,7 +156,9 @@ function createCatalogClient({ schemaCreateRows = [], triggerRows = expectedTrig
 			const text = String(sql);
 			if (text.includes('has_schema_privilege')) return { rows: schemaCreateRows };
 			if (text.includes('rel.relrowsecurity')) {
-				return { rows: [{ table_name: 'wgs', rls_enabled: true }] };
+				return {
+					rows: params[1].map((table_name) => ({ table_name, rls_enabled: true })),
+				};
 			}
 			if (text.includes('has_table_privilege')) return { rows: [] };
 			if (text.includes('has_sequence_privilege')) return { rows: [] };
@@ -169,6 +204,17 @@ test('db:check uses effective schema privileges and rejects CREATE for API roles
 	const privilegeQuery = client.queries.find(({ sql }) => sql.includes('has_schema_privilege'));
 	assert.ok(privilegeQuery, 'checker queries effective schema privileges');
 	assert.deepEqual(privilegeQuery.params, [['anon', 'authenticated'], 'public']);
+});
+
+test('db:check includes durable private image revocations in the RLS catalog scope', async () => {
+	const client = createCatalogClient();
+	await checker.assertCatalogSecurity(client, [
+		{ table: 'wgs' },
+		{ table: 'private_image_deletions' },
+	]);
+
+	const rlsQuery = client.queries.find(({ sql }) => sql.includes('rel.relrowsecurity'));
+	assert.deepEqual(rlsQuery.params, ['public', ['wgs', 'private_image_deletions']]);
 });
 
 test('db:check requests and accepts all 21 bindings enabled for normal sessions', async () => {

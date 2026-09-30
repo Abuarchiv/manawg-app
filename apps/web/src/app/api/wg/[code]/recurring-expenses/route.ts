@@ -21,6 +21,10 @@ import type { RouteCtx } from '@/core/infra/api-types';
 import { logApiError } from '@/core/infra/observability';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
+import {
+	isRecurringDueAtEditAllowed,
+	recurringDueAtSchema,
+} from '@/core/validators/recurring-due-date';
 import { withExpensePaymentLock } from '@/features/expenses/expense-payments';
 import { checkPaidByGuard } from '@/features/expenses/expenses';
 import {
@@ -35,12 +39,6 @@ import { z } from 'zod';
 
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 const RECURRING_EXPENSES_LIST_LIMIT = 500;
-// nextDueAt drives the cron's catch-up loop (one iteration per missed
-// interval). An unbounded past date used to translate into an unbounded
-// charge storm, and a nonsensical far-future date silently parked the
-// template — both now rejected at the schema.
-const MAX_PAST_DAYS = 366;
-const MAX_FUTURE_DAYS = 3650;
 
 type RecurringCreateResponseBody = { recurringExpense: unknown };
 
@@ -61,18 +59,7 @@ const createRecurringSchema = z.object({
 	currency: currencySchema.optional().default('EUR'),
 	paidByMemberId: z.string().uuid(),
 	intervalMonths: z.number().int().min(1).max(24).default(1),
-	nextDueAt: z
-		.string()
-		.datetime({ offset: true })
-		.refine(
-			(value) => {
-				const parsed = Date.parse(value);
-				if (Number.isNaN(parsed)) return false;
-				const skew = Date.now() - parsed;
-				return skew <= MAX_PAST_DAYS * 86_400_000 && skew >= -MAX_FUTURE_DAYS * 86_400_000;
-			},
-			{ message: 'due_date_out_of_range' },
-		),
+	nextDueAt: recurringDueAtSchema,
 	splits: z.array(splitSchema).min(1).max(50),
 });
 
@@ -427,9 +414,19 @@ export const PATCH = withWgRoute('recurring-expenses PATCH', async (req, { code 
 		.limit(1);
 	const template = rows[0];
 	if (!template) return notFound('recurring_expense_not_found');
-	const denied = await requireOwnerOrAdmin(wg.id, auth.member, template.createdByMemberId);
-	if (denied) return denied;
 	if (isTemplateUpdate) {
+		// Editing the template is the owner's (or admin's) call. The plain
+		// advance below is what every member's "Erfassen" sends after booking
+		// the charge; it only moves nextDueAt by one interval, guarded by the
+		// expectedNextDueAt compare-and-set.
+		const denied = await requireOwnerOrAdmin(wg.id, auth.member, template.createdByMemberId);
+		if (denied) return denied;
+		if (
+			parsed.data.nextDueAt !== undefined &&
+			!isRecurringDueAtEditAllowed(parsed.data.nextDueAt, template.nextDueAt)
+		) {
+			return badRequest('due_date_invalid');
+		}
 		const paidByMemberId = parsed.data.paidByMemberId ?? template.paidByMemberId;
 		const templateSplits = parseRecurringSplits(template.splitsJson);
 		const splits = parsed.data.splits ?? templateSplits;

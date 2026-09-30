@@ -116,8 +116,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 	try {
 		user = await getAuthenticatedUser(req);
 	} catch (err) {
+		// A transient Auth outage is retryable, not an unauthenticated caller.
 		logApiError('[api/wg POST] auth lookup failed', err);
-		return serverError('auth_unavailable');
+		return apiError('db_error', 503);
 	}
 	if (!user) return apiError('auth_required', 401, 'auth_required');
 	const authenticatedUser = user;

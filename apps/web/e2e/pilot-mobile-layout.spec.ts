@@ -9,6 +9,7 @@ const SHARE_CODE = 'MTE8PZAT';
 const MEMBER_ID = '7d898f9e-5ad7-4f5d-abed-8c3e99a76973';
 const WG_ID = '989ac820-58b7-431f-9c65-28721264f333';
 type LayoutRoute = 'home' | 'chores' | 'shopping' | 'inventory';
+const LONG_INVENTORY_NAME = 'Spülmaschinenreinigung mit Entkalkung und gründlicher Küchenhygiene';
 
 function fixtureBerlinTodayAtNoon(): string {
 	const parts = new Intl.DateTimeFormat('en-US', {
@@ -52,10 +53,10 @@ const inventoryItems = [
 	{
 		id: 'inventory-milk',
 		wgId: WG_ID,
-		name: 'Ungesüßte Hafermilch',
+		name: LONG_INVENTORY_NAME,
 		quantity: 1,
-		unit: 'Packung',
-		threshold: 2,
+		unit: 'Stück',
+		threshold: 1,
 		category: 'kueche',
 		lastDecrementedAt: null,
 		decrementCount30d: 0,
@@ -396,26 +397,65 @@ async function assertViewportLayout(page: Page, route: LayoutRoute): Promise<voi
 			expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
 		}
 	} else if (route === 'inventory') {
-		const row = page
-			.locator('[data-slot="item"]')
-			.filter({ hasText: 'Ungesüßte Hafermilch' })
-			.first();
+		const row = page.locator('[data-slot="item"]').filter({ hasText: LONG_INVENTORY_NAME }).first();
 		const title = row.locator('[data-slot="item-title"]');
-		const name = title.locator('span[title="Ungesüßte Hafermilch"]');
+		const name = title.locator(`span[title="${LONG_INVENTORY_NAME}"]`);
+		const quantity = row.locator('[data-slot="item-description"]');
 		const actions = row.locator('[data-slot="item-actions"]');
+		const contentRow = row.locator(':scope > div').first();
+		const contentRowMetrics = await contentRow.evaluate((element) => ({
+			clientWidth: element.clientWidth,
+			scrollWidth: element.scrollWidth,
+		}));
+		// 44px pseudo-element hit areas can extend 4px beyond each 36px icon button.
+		expect(contentRowMetrics.scrollWidth - contentRowMetrics.clientWidth).toBeLessThanOrEqual(8);
+		for (const text of [name, quantity]) {
+			const metrics = await text.evaluate((element) => ({
+				clientWidth: element.clientWidth,
+				scrollWidth: element.scrollWidth,
+			}));
+			expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
+		}
+		await expect(name).toHaveText(LONG_INVENTORY_NAME);
 		const rowBox = await row.boundingBox();
 		const titleBox = await title.boundingBox();
 		const actionsBox = await actions.boundingBox();
 		expect(rowBox).not.toBeNull();
 		expect(titleBox).not.toBeNull();
 		expect(actionsBox).not.toBeNull();
-		await assertWholeWordsOnSingleLines(name, ['Ungesüßte', 'Hafermilch']);
 		if (rowBox && titleBox && actionsBox) {
 			expect(titleBox.x).toBeGreaterThanOrEqual(rowBox.x);
 			expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
 			expect(actionsBox.x).toBeGreaterThanOrEqual(rowBox.x);
 			expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
 			expectRectsNotToOverlap(titleBox, actionsBox);
+		}
+		const buttons = await row.getByRole('button').all();
+		expect(buttons).toHaveLength(4);
+		for (const button of buttons) {
+			await expect(button).toBeVisible();
+			const box = await button.boundingBox();
+			const hitTarget = await button.evaluate((element) => {
+				const after = getComputedStyle(element, '::after');
+				return {
+					width: Number.parseFloat(after.width),
+					height: Number.parseFloat(after.height),
+				};
+			});
+			expect(box).not.toBeNull();
+			expect(hitTarget.width).toBeGreaterThanOrEqual(44);
+			expect(hitTarget.height).toBeGreaterThanOrEqual(44);
+			if (box && rowBox) {
+				expect(box.x).toBeGreaterThanOrEqual(rowBox.x);
+				expect(box.x + box.width).toBeLessThanOrEqual(rowBox.x + rowBox.width);
+			}
+		}
+		const firstButton = buttons[0];
+		if (!firstButton) throw new Error('inventory row actions are missing');
+		await firstButton.focus();
+		for (const button of buttons.slice(1)) {
+			await page.keyboard.press('Tab');
+			await expect(button).toBeFocused();
 		}
 	} else if (route === 'chores') {
 		const row = page.locator('[data-slot="item"]').filter({ hasText: 'Bad putzen' }).first();
@@ -598,4 +638,49 @@ for (const route of ['home', 'chores', 'shopping', 'inventory'] as const) {
 			});
 		}
 	}
+}
+
+const extraInventoryLayouts = [320, 360, 390]
+	.flatMap((width) =>
+		(['light', 'dark'] as const).flatMap((colorScheme) =>
+			(['normal', '200%'] as const).map((textScale) => ({ width, colorScheme, textScale })),
+		),
+	)
+	.filter(({ width, colorScheme }) => width !== 320 || colorScheme !== 'light');
+
+for (const { width, colorScheme, textScale } of extraInventoryLayouts) {
+	test(`inventory row remains readable at ${width}px (${colorScheme}, ${textScale} text)`, async ({
+		page,
+	}) => {
+		await page.setViewportSize({ width, height: 740 });
+		await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+		await setupMember(page);
+		await mockLayoutApis(page);
+		await navigateToFeature(page, `/wg/${SHARE_CODE}/vorraete`);
+		await dismissOnboarding(page);
+		await expect(page.getByRole('heading', { name: 'Vorräte' })).toBeVisible({ timeout: 30_000 });
+		if (textScale === '200%') {
+			await page.evaluate(() => {
+				document.documentElement.style.fontSize = '200%';
+			});
+			await page.setViewportSize({ width, height: 740 });
+			await page.waitForTimeout(100);
+		}
+		const rootFontSize = await page.evaluate(
+			() => getComputedStyle(document.documentElement).fontSize,
+		);
+		if (textScale === '200%') {
+			expect(rootFontSize).toBe('32px');
+		} else {
+			expect(Number.parseFloat(rootFontSize)).toBeGreaterThanOrEqual(14.4);
+			expect(Number.parseFloat(rootFontSize)).toBeLessThanOrEqual(16);
+		}
+		await assertViewportLayout(page, 'inventory');
+		await page.screenshot({
+			path: test
+				.info()
+				.outputPath(`inventory-row-${width}-${colorScheme}-${textScale.replace('%', '')}.png`),
+			fullPage: true,
+		});
+	});
 }

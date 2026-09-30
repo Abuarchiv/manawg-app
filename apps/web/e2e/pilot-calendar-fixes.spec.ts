@@ -150,6 +150,104 @@ test('shows a fetched multi-day event on every overlapping month-grid day', asyn
 	).toBeVisible();
 });
 
+test('keeps the month grid accessible and keyboard focus after paging at 320px', async ({
+	page,
+}) => {
+	test.skip(
+		process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true',
+		'requires the local fixture server',
+	);
+
+	await page.setViewportSize({ width: 320, height: 812 });
+	await setupMember(page);
+	await page.route(`**/api/wg/${FIXTURE_WG.shareCode}/events*`, (route) =>
+		route.fulfill({ json: { events: [] } }),
+	);
+	await page.route(`**/api/wg/${FIXTURE_WG.shareCode}/chores*`, (route) =>
+		route.fulfill({ json: { chores: [] } }),
+	);
+	await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/kalender`);
+	await dismissOnboarding(page);
+	await page.getByRole('tab', { name: 'Monat' }).click();
+
+	const grid = page.getByRole('grid');
+	const rows = grid.getByRole('row');
+	await expect(rows.first().getByRole('columnheader')).toHaveCount(7);
+	await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(7);
+	const gridCells = grid.getByRole('gridcell');
+	const cellCount = await gridCells.count();
+	expect(cellCount).toBeGreaterThanOrEqual(28);
+	expect(cellCount).toBeLessThanOrEqual(42);
+	expect(cellCount % 7).toBe(0);
+	await expect(grid.locator('[role="gridcell"][aria-selected]')).toHaveCount(cellCount);
+
+	const dayButtons = page.locator('[data-day-cell]');
+	const assertPhoneLayout = async (colorScheme: 'light' | 'dark', fontSize: number) => {
+		await expect
+			.poll(() => page.locator('html').evaluate((html) => html.classList.contains('dark')))
+			.toBe(colorScheme === 'dark');
+		const pageState = await page.evaluate(() => ({
+			viewport: document.documentElement.clientWidth,
+			scroll: document.documentElement.scrollWidth,
+			fontSize: Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+			prefersDark: matchMedia('(prefers-color-scheme: dark)').matches,
+			darkClass: document.documentElement.classList.contains('dark'),
+		}));
+		expect(pageState.scroll).toBeLessThanOrEqual(pageState.viewport);
+		expect(pageState.fontSize).toBe(fontSize);
+		expect(pageState.prefersDark).toBe(colorScheme === 'dark');
+		expect(pageState.darkClass).toBe(colorScheme === 'dark');
+		const widths = await dayButtons.evaluateAll((buttons) =>
+			buttons.map((button) => button.getBoundingClientRect().width),
+		);
+		expect(Math.min(...widths)).toBeGreaterThanOrEqual(44);
+		const tabsFit = await page
+			.getByRole('tab')
+			.evaluateAll((tabs) => tabs.every((tab) => tab.scrollWidth <= tab.clientWidth));
+		expect(tabsFit).toBe(true);
+	};
+	const baseFontSize = await page.evaluate(() =>
+		Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
+	);
+
+	const firstMonth = await grid.getAttribute('aria-label');
+	await page.locator('[data-day-cell][tabindex="0"]').press('PageDown');
+	await expect.poll(() => grid.getAttribute('aria-label')).not.toBe(firstMonth);
+	const focusedDay = page.locator('[data-day-cell]:focus');
+	await expect(focusedDay).toHaveCount(1);
+	await expect(focusedDay).toHaveAttribute('tabindex', '0');
+	const focusedLabel = await focusedDay.getAttribute('aria-label');
+	await focusedDay.press('ArrowRight');
+	await expect
+		.poll(() => page.locator('[data-day-cell]:focus').getAttribute('aria-label'))
+		.not.toBe(focusedLabel);
+	await expect(page.locator('[data-day-cell]:focus')).toHaveAttribute('tabindex', '0');
+
+	for (const width of [320, 360]) {
+		await page.setViewportSize({ width, height: 812 });
+		for (const colorScheme of ['light', 'dark'] as const) {
+			await page.emulateMedia({ colorScheme });
+			await assertPhoneLayout(colorScheme, baseFontSize);
+		}
+	}
+
+	await page.route('**/__e2e-font-scale-200.css', (route) =>
+		route.fulfill({ contentType: 'text/css', body: ':root { font-size: 32px !important; }' }),
+	);
+	await page.addStyleTag({
+		url: new URL('/__e2e-font-scale-200.css', page.url()).toString(),
+	});
+	for (const width of [320, 360]) {
+		await page.setViewportSize({ width, height: 812 });
+		for (const colorScheme of ['light', 'dark'] as const) {
+			await page.emulateMedia({ colorScheme });
+			await assertPhoneLayout(colorScheme, 32);
+		}
+	}
+	await expect(page.getByRole('tab', { name: 'Agenda' })).toBeVisible();
+	await expect(page.getByRole('tab', { name: 'Monat' })).toBeVisible();
+});
+
 test('uses Berlin calendar boundaries for all-day overlap and recurrence search', () => {
 	const previousTimezone = process.env.TZ;
 	process.env.TZ = 'Europe/Berlin';

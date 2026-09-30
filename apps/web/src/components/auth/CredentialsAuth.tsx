@@ -41,6 +41,7 @@ function GenericAuthError(): ReactElement {
 }
 
 export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps) {
+	const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [phone, setPhone] = useState('');
@@ -51,7 +52,9 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 		'generic' | 'invalid' | 'weak-password' | 'reset-invalid' | null
 	>(null);
 	const [emailMessage, setEmailMessage] = useState<string | null>(null);
-	const [phoneError, setPhoneError] = useState<'generic' | 'invalid' | 'unavailable' | null>(null);
+	const [phoneError, setPhoneError] = useState<
+		'generic' | 'invalid-phone' | 'invalid-otp' | 'unavailable' | null
+	>(null);
 	const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
 	// Offer SMS only where the Supabase project actually has it switched on.
 	const [phoneEnabled, setPhoneEnabled] = useState(false);
@@ -146,7 +149,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 		resetPhoneFeedback();
 		const normalizedPhone = phone.trim();
 		if (!E164_PATTERN.test(normalizedPhone)) {
-			setPhoneError('invalid');
+			setPhoneError('invalid-phone');
 			return;
 		}
 		setBusy('phone-request');
@@ -168,8 +171,12 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 	async function confirmPhoneOtp(): Promise<void> {
 		if (busy) return;
 		resetPhoneFeedback();
-		if (!E164_PATTERN.test(phone) || !OTP_PATTERN.test(otp)) {
-			setPhoneError('invalid');
+		if (!E164_PATTERN.test(phone)) {
+			setPhoneError('invalid-phone');
+			return;
+		}
+		if (!OTP_PATTERN.test(otp)) {
+			setPhoneError('invalid-otp');
 			return;
 		}
 		setBusy('phone-verify');
@@ -197,21 +204,34 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 		(emailError === 'invalid' && !isValidEmail(email.trim().toLowerCase()));
 	const passwordFieldInvalid =
 		(emailError === 'invalid' && password.length < 6) || emailError === 'weak-password';
+	const phoneFieldInvalid = phoneError === 'invalid-phone';
+	const otpFieldInvalid = phoneError === 'invalid-otp';
+	const phoneErrorDescribed =
+		phoneFieldInvalid ||
+		phoneError === 'unavailable' ||
+		(phoneError === 'generic' && !otpRequested);
+	const otpErrorDescribed = otpFieldInvalid || (phoneError === 'generic' && otpRequested);
 
 	return (
-		<Tabs defaultValue="email" aria-busy={busy !== null} className="gap-4">
+		<Tabs
+			value={phoneEnabled ? authMethod : 'email'}
+			onValueChange={(value) => setAuthMethod(value === 'phone' ? 'phone' : 'email')}
+			aria-busy={busy !== null}
+			className="gap-4"
+		>
 			{phoneEnabled && (
 				<TabsList className="min-h-12 w-full">
 					<TabsTrigger value="email" disabled={busy !== null} className="min-h-11">
 						E-Mail
 					</TabsTrigger>
-					<TabsTrigger value="phone" disabled={busy !== null} className="min-h-11">
-						Telefon / SMS
+					<TabsTrigger value="phone" disabled={busy !== null} className="min-h-11 px-0">
+						<span className="whitespace-nowrap">Telefon</span> / SMS
 					</TabsTrigger>
 				</TabsList>
 			)}
 			<TabsContent value="email" aria-label="Mit E-Mail anmelden">
 				<form
+					noValidate
 					onSubmit={(event) => {
 						event.preventDefault();
 						void submitEmail('sign-in');
@@ -228,6 +248,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 								value={email}
 								onChange={(event) => setEmail(event.target.value)}
 								autoComplete="email"
+								enterKeyHint="next"
 								inputMode="email"
 								required
 								aria-describedby={emailFieldInvalid ? 'auth-email-error' : undefined}
@@ -244,20 +265,23 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 								value={password}
 								onChange={(event) => setPassword(event.target.value)}
 								autoComplete="current-password"
+								enterKeyHint="go"
 								minLength={6}
 								required
-								aria-describedby={[
-									passwordFieldInvalid ? 'auth-email-error' : null,
-									'auth-password-hint',
-								]
-									.filter(Boolean)
-									.join(' ')}
+								aria-describedby={
+									passwordFieldInvalid
+										? 'auth-password-hint auth-email-error'
+										: 'auth-password-hint'
+								}
 								aria-invalid={passwordFieldInvalid || undefined}
 								className="text-base"
 							/>
-							{/* The 8-character rule has to be visible before the request is
-							    rejected, not only inside the error that follows it. */}
-							<FieldDescription id="auth-password-hint" data-testid="auth-password-hint">
+
+							<FieldDescription
+								id="auth-password-hint"
+								className="text-xs"
+								data-testid="auth-password-hint"
+							>
 								Neue Konten brauchen mindestens {NEW_PASSWORD_MIN_LENGTH} Zeichen.
 							</FieldDescription>
 						</Field>
@@ -319,6 +343,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 			{phoneEnabled && (
 				<TabsContent value="phone" aria-labelledby="phone-auth-heading">
 					<form
+						noValidate
 						onSubmit={(event) => {
 							event.preventDefault();
 							void (otpRequested ? confirmPhoneOtp() : sendPhoneOtp());
@@ -329,10 +354,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 							<h2 id="phone-auth-heading" className="text-[14px] font-semibold text-foreground">
 								Mit Telefon per SMS
 							</h2>
-							<Field
-								data-invalid={Boolean(phoneError)}
-								data-disabled={otpRequested || busy !== null}
-							>
+							<Field data-invalid={phoneFieldInvalid} data-disabled={otpRequested || busy !== null}>
 								<FieldLabel htmlFor="auth-phone">Telefonnummer</FieldLabel>
 								<Input
 									id="auth-phone"
@@ -342,11 +364,12 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 									onChange={(event) => setPhone(event.target.value)}
 									autoComplete="tel"
 									inputMode="tel"
+									enterKeyHint="send"
 									placeholder="+491701234567"
 									aria-describedby={
-										phoneError ? 'auth-phone-hint auth-phone-error' : 'auth-phone-hint'
+										phoneErrorDescribed ? 'auth-phone-hint auth-phone-error' : 'auth-phone-hint'
 									}
-									aria-invalid={phoneError ? true : undefined}
+									aria-invalid={phoneFieldInvalid ? true : undefined}
 									disabled={otpRequested || busy !== null}
 									className="text-base"
 								/>
@@ -355,7 +378,7 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 								Mit + und Landesvorwahl, zum Beispiel +491701234567.
 							</p>
 							{otpRequested && (
-								<Field data-invalid={Boolean(phoneError)}>
+								<Field data-invalid={otpFieldInvalid}>
 									<FieldLabel htmlFor="auth-phone-otp">6-stelliger SMS-Code</FieldLabel>
 									<Input
 										id="auth-phone-otp"
@@ -365,10 +388,10 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 										onChange={(event) => setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
 										inputMode="numeric"
 										autoComplete="one-time-code"
+										enterKeyHint="done"
 										maxLength={6}
-										pattern="[0-9]{6}"
-										aria-describedby={phoneError ? 'auth-phone-error' : undefined}
-										aria-invalid={phoneError ? true : undefined}
+										aria-describedby={otpErrorDescribed ? 'auth-phone-error' : undefined}
+										aria-invalid={otpFieldInvalid ? true : undefined}
 										className="font-mono text-base"
 									/>
 								</Field>
@@ -378,12 +401,17 @@ export function CredentialsAuth({ next, onAuthenticated }: CredentialsAuthProps)
 									<GenericAuthError />
 								</div>
 							)}
-							{phoneError === 'invalid' && (
+							{phoneError === 'invalid-phone' && (
 								<div id="auth-phone-error">
 									<ErrorBox>
 										Gib eine Telefonnummer im internationalen E.164-Format ein, zum Beispiel
 										+491701234567.
 									</ErrorBox>
+								</div>
+							)}
+							{phoneError === 'invalid-otp' && (
+								<div id="auth-phone-error">
+									<ErrorBox>Gib einen sechsstelligen SMS-Code ein.</ErrorBox>
 								</div>
 							)}
 							{phoneError === 'unavailable' && (

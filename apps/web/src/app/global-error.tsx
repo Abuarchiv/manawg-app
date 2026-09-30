@@ -24,7 +24,7 @@ export default function GlobalError({
 	return (
 		<html lang="de">
 			<body className="min-h-[100dvh] bg-background text-foreground antialiased">
-				<main className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col items-center justify-center px-4 pb-[env(safe-area-inset-bottom)]">
+				<main className="mx-auto flex min-h-[100dvh] w-full max-w-md flex-col items-center justify-center px-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
 					<Empty>
 						<EmptyHeader>
 							<EmptyMedia variant="icon">

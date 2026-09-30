@@ -1,4 +1,5 @@
 import { refreshSupabaseSession } from '@/core/auth/middleware';
+import { isE2EDbDownMode } from '@/core/infra/e2e-db-down';
 import {
 	checkRateLimit,
 	clientIpKey,
@@ -7,7 +8,11 @@ import {
 	wgShareCodeLookupLimiter,
 	wgWriteLimiter,
 } from '@/core/rate-limit';
-import { contentSecurityPolicy } from '@/shared/lib/security-headers';
+import {
+	contentSecurityPolicy,
+	crossOriginOpenerPolicy,
+	isPayPalSdkEnabled,
+} from '@/shared/lib/security-headers';
 import { type NextRequest, NextResponse } from 'next/server';
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -15,6 +20,7 @@ const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 export function isRateLimitedApiPath(path: string): boolean {
 	return (
 		path === '/api/account' ||
+		path.startsWith('/api/auth/') ||
 		path === '/api/wg' ||
 		path.startsWith('/api/wg/') ||
 		path.startsWith('/api/calendar/') ||
@@ -48,7 +54,15 @@ export function isShareCodeLookup(path: string, method: string): boolean {
 
 async function withPageSecurityHeaders(req: NextRequest): Promise<NextResponse> {
 	const nonce = crypto.randomUUID().replaceAll('-', '');
-	const csp = contentSecurityPolicy(nonce);
+	const localFixtureHttp =
+		isE2EDbDownMode() &&
+		req.nextUrl.protocol === 'http:' &&
+		['localhost', '127.0.0.1', '[::1]'].includes(req.nextUrl.hostname);
+	const payPalSdkEnabled = isPayPalSdkEnabled(
+		process.env.NEXT_PUBLIC_PAYPAL_CLIENT_ID,
+		process.env.NEXT_PUBLIC_PAYPAL_PARTNER_ATTRIBUTION_ID,
+	);
+	const csp = contentSecurityPolicy(nonce, !localFixtureHttp, payPalSdkEnabled);
 	const requestHeaders = new Headers(req.headers);
 	requestHeaders.set('x-nonce', nonce);
 	requestHeaders.set('Content-Security-Policy', csp);
@@ -59,7 +73,14 @@ async function withPageSecurityHeaders(req: NextRequest): Promise<NextResponse> 
 		},
 	});
 	res.headers.set('Content-Security-Policy', csp);
-	return refreshSupabaseSession(req, res);
+	const securedResponse = await refreshSupabaseSession(req, res);
+	// COOP is a document policy. Keep it consistent on every app page so a
+	// PayPal popup remains connected after an SPA navigation from / or /neu.
+	securedResponse.headers.set(
+		'Cross-Origin-Opener-Policy',
+		crossOriginOpenerPolicy(payPalSdkEnabled),
+	);
+	return securedResponse;
 }
 
 function getClientIp(req: NextRequest): string {
@@ -177,6 +198,7 @@ export const config = {
 	matcher: [
 		'/((?!api|_next/static|_next/image|favicon.ico|manifest.json|.*\\..*).*)',
 		'/api/account',
+		'/api/auth/:path*',
 		'/api/wg',
 		'/api/wg/:path*',
 		'/api/calendar/:path*',

@@ -126,22 +126,24 @@ test('a 429 throttle is not replayed for the seven-day window', async () => {
 	assert.equal(state.calls.has(`${scope}:${key}`), false, '429 must not be stored');
 });
 
-test('a deterministic 4xx stays replayable', async () => {
+test('a deterministic 4xx releases the claim and is not replayed', async () => {
 	const { state, call } = harness();
 	const first = await call(async () => {
 		state.runs += 1;
 		return Response.json({ error: 'member_not_in_wg' }, { status: 400 });
 	});
 	assert.equal(first.status, 400);
-	assert.deepEqual(state.released, []);
-	assert.equal(state.calls.get(`${scope}:${key}`).status, 400);
+	assert.deepEqual(state.released, [`${scope}:${key}`]);
+	assert.equal(state.calls.has(`${scope}:${key}`), false, '4xx must not be stored');
 
 	const replay = await call(async () => {
 		state.runs += 1;
-		return Response.json({ error: 'other' }, { status: 400 });
+		return Response.json({ error: 'member_not_in_wg' }, { status: 400 });
 	});
-	assert.equal(state.runs, 1);
+	assert.equal(state.runs, 2, 'retry re-runs a deterministic 4xx');
+	assert.deepEqual(state.released, [`${scope}:${key}`, `${scope}:${key}`]);
 	assert.deepEqual(await replay.json(), { error: 'member_not_in_wg' });
+	assert.equal(state.calls.has(`${scope}:${key}`), false);
 });
 
 test('a handler that throws releases the claim', async () => {

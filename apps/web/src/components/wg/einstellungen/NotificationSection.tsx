@@ -343,7 +343,7 @@ export function NotificationSection({
 				{loadingStatus && (
 					<div className="grid gap-2" aria-live="polite">
 						<Skeleton className="h-11 w-full" />
-						<p className="text-muted-foreground text-[13px]">Benachrichtigungen werden geladen…</p>
+						<p className="text-muted-foreground text-[12px]">Benachrichtigungen werden geladen…</p>
 					</div>
 				)}
 				{!status && error && (
@@ -433,7 +433,7 @@ export function NotificationSection({
 					))}
 				</div>
 
-				<div className="border-border grid min-w-0 max-w-full gap-2 border-t pt-3">
+				<div className="border-border grid min-w-0 max-w-full grid-cols-1 gap-2 border-t pt-3">
 					<div className="flex min-h-[44px] items-center justify-between gap-2">
 						<div className="min-w-0">
 							<div className="text-foreground text-sm font-medium">Ruhezeit</div>
@@ -450,7 +450,7 @@ export function NotificationSection({
 							Aus
 						</Button>
 					</div>
-					<div className="grid min-w-0 grid-cols-2 gap-2">
+					<div className="grid min-w-0 grid-cols-1 gap-2">
 						<Field className="min-w-0">
 							<FieldTitle>Von</FieldTitle>
 							<NativeSelect
@@ -463,7 +463,7 @@ export function NotificationSection({
 										: saveQuietHours(value, status?.quietEndHour ?? 7));
 								}}
 								aria-label="Ruhezeit von"
-								className="w-full text-base"
+								className="w-full min-w-0 text-base"
 							>
 								<NativeSelectOption value="">Aus</NativeSelectOption>
 								{HOUR_OPTIONS.map((option) => (
@@ -485,7 +485,7 @@ export function NotificationSection({
 										: saveQuietHours(status?.quietStartHour ?? 22, value));
 								}}
 								aria-label="Ruhezeit bis"
-								className="w-full text-base"
+								className="w-full min-w-0 text-base"
 							>
 								<NativeSelectOption value="">Aus</NativeSelectOption>
 								{HOUR_OPTIONS.map((option) => (

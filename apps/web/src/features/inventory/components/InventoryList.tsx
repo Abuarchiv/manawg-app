@@ -18,6 +18,7 @@ import {
 	INVENTORY_CATEGORY_LABELS,
 	type InventoryCategory,
 	type InventoryItemDto,
+	type InventoryMutationItemDto,
 	groupItemsByCategory,
 	isBelowThreshold,
 } from '@/features/inventory/inventory';
@@ -31,7 +32,7 @@ interface InventoryListProps {
 	shareCode: string;
 	memberId: string;
 	memberToken?: string | undefined;
-	onChanged: (item?: InventoryItemDto) => void;
+	onChanged: (item?: InventoryMutationItemDto, deletedId?: string) => void;
 	addOpen: boolean;
 	onAddOpenChange: (open: boolean) => void;
 }

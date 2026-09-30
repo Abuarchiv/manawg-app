@@ -300,12 +300,243 @@ test.describe('ManaWG launch smoke', () => {
 
 			// Step 6: The focused overview retains access to every primary destination.
 			await expect(
-				page.getByRole('heading', { name: `Start – ${wgName}`, exact: true }),
+				page.getByRole('heading', { name: `${wgName} – Start`, exact: true }),
 			).toBeVisible();
 			const navigation = page.getByRole('navigation', { name: 'WG Hauptnavigation' });
 			for (const label of ['Start', 'Haushalt', 'Finanzen', 'Austausch']) {
 				await expect(navigation.getByRole('link', { name: label, exact: true })).toBeVisible();
 			}
+
+			// Exercise a real money write and both export formats before the WG is deleted.
+			const expenseDescription = `Smoke Expense ${runNamespace}`;
+			const expenseResponse = await page.request.post(`/api/wg/${createdShareCode}/expenses`, {
+				headers: memberHeaders,
+				data: {
+					amountCents: 1234,
+					currency: 'EUR',
+					description: expenseDescription,
+					splits: [{ debtorMemberId: memberId, amountCents: 1234 }],
+				},
+			});
+			expect(expenseResponse.status(), await expenseResponse.text()).toBe(200);
+			const createdExpense = (await expenseResponse.json()) as {
+				expense?: {
+					id?: string;
+					amountCents?: number;
+					currency?: string;
+					splits?: Array<{ debtorMemberId?: string; amountCents?: number }>;
+				};
+			};
+			expect(createdExpense.expense?.id).toMatch(UUID_PATTERN);
+			expect(createdExpense.expense).toMatchObject({
+				amountCents: 1234,
+				currency: 'EUR',
+				splits: [{ debtorMemberId: memberId, amountCents: 1234 }],
+			});
+
+			const expensesResponse = await page.request.get(`/api/wg/${createdShareCode}/expenses`, {
+				headers: memberHeaders,
+			});
+			expect(expensesResponse.status()).toBe(200);
+			const listed = (await expensesResponse.json()) as {
+				expenses?: Array<{ id?: string; description?: string; amountCents?: number }>;
+			};
+			expect(listed.expenses?.filter((entry) => entry.description === expenseDescription)).toEqual([
+				expect.objectContaining({ id: createdExpense.expense?.id, amountCents: 1234 }),
+			]);
+
+			await gotoWithRetry(page, `/wg/${createdShareCode}/ausgaben`);
+			await expect(page.getByText(expenseDescription, { exact: true })).toBeVisible({
+				timeout: 30_000,
+			});
+			await page.reload();
+			await expect(page.getByText(expenseDescription, { exact: true })).toBeVisible({
+				timeout: 30_000,
+			});
+
+			const shoppingName = `Smoke Shopping ${runNamespace}`;
+			const shoppingCreate = await page.request.post(`/api/wg/${createdShareCode}/shopping`, {
+				headers: memberHeaders,
+				data: { name: shoppingName, quantity: '2' },
+			});
+			expect(shoppingCreate.status(), await shoppingCreate.text()).toBe(200);
+			const shopping = (await shoppingCreate.json()) as {
+				item?: { id?: string; name?: string; quantity?: string };
+			};
+			expect(shopping.item?.id).toMatch(UUID_PATTERN);
+			expect(shopping.item).toMatchObject({ name: shoppingName, quantity: '2' });
+			const shoppingId = shopping.item?.id;
+			if (!shoppingId) throw new Error('created shopping item ID was not returned');
+
+			await gotoWithRetry(page, `/wg/${createdShareCode}/einkauf`);
+			const shoppingCheckbox = page.getByRole('checkbox', { name: `${shoppingName} erledigen` });
+			await expect(shoppingCheckbox).toBeVisible({ timeout: 30_000 });
+			const shoppingBoughtResponse = page.waitForResponse(
+				(response) =>
+					response.url().endsWith(`/api/wg/${createdShareCode}/shopping/${shoppingId}`) &&
+					response.request().method() === 'PATCH',
+			);
+			await shoppingCheckbox.click();
+			const shoppingBought = await shoppingBoughtResponse;
+			expect(shoppingBought.status(), await shoppingBought.text()).toBe(200);
+			const shoppingList = await page.request.get(`/api/wg/${createdShareCode}/shopping`, {
+				headers: memberHeaders,
+			});
+			expect(shoppingList.status()).toBe(200);
+			const listedShopping = (await shoppingList.json()) as {
+				items?: Array<{ id?: string; boughtAt?: string | null }>;
+			};
+			expect(listedShopping.items?.filter((item) => item.id === shoppingId)).toEqual([
+				expect.objectContaining({ boughtAt: expect.any(String) }),
+			]);
+
+			const choreTitle = `Smoke Chore ${runNamespace}`;
+			const choreCreate = await page.request.post(`/api/wg/${createdShareCode}/chores`, {
+				headers: memberHeaders,
+				data: { title: choreTitle, intervalDays: 7, assignedMemberId: memberId },
+			});
+			expect(choreCreate.status(), await choreCreate.text()).toBe(200);
+			const createdChore = (await choreCreate.json()) as {
+				chore?: { id?: string; title?: string; nextDueAt?: string };
+			};
+			expect(createdChore.chore?.id).toMatch(UUID_PATTERN);
+			expect(createdChore.chore?.title).toBe(choreTitle);
+			const choreId = createdChore.chore?.id;
+			const firstDueAt = createdChore.chore?.nextDueAt;
+			if (!choreId || !firstDueAt) throw new Error('created chore proof was not returned');
+
+			await gotoWithRetry(page, `/wg/${createdShareCode}/putzen`);
+			await expect(page.getByText(choreTitle, { exact: true })).toBeVisible({ timeout: 30_000 });
+			const completion = await page.request.post(
+				`/api/wg/${createdShareCode}/chores/${choreId}/complete`,
+				{ headers: memberHeaders },
+			);
+			expect(completion.status(), await completion.text()).toBe(200);
+			const choreList = await page.request.get(`/api/wg/${createdShareCode}/chores`, {
+				headers: memberHeaders,
+			});
+			expect(choreList.status()).toBe(200);
+			const listedChores = (await choreList.json()) as {
+				chores?: Array<{ id?: string; nextDueAt?: string }>;
+				monthCompletions?: Record<string, number>;
+			};
+			const nextDueAt = listedChores.chores?.find((chore) => chore.id === choreId)?.nextDueAt;
+			expect(Date.parse(nextDueAt ?? '')).toBeGreaterThan(Date.parse(firstDueAt));
+			expect(listedChores.monthCompletions?.[memberId]).toBe(1);
+
+			const originalMessage = `Smoke Chat ${runNamespace}`;
+			const editedMessage = `${originalMessage} edited`;
+			const chatCreate = await page.request.post(`/api/wg/${createdShareCode}/chat/messages`, {
+				headers: memberHeaders,
+				data: { body: originalMessage },
+			});
+			expect(chatCreate.status(), await chatCreate.text()).toBe(200);
+			const createdChat = (await chatCreate.json()) as {
+				message?: { id?: string; body?: string };
+			};
+			expect(createdChat.message?.id).toMatch(UUID_PATTERN);
+			expect(createdChat.message?.body).toBe(originalMessage);
+			const messageId = createdChat.message?.id;
+			if (!messageId) throw new Error('created chat message ID was not returned');
+			const chatEdit = await page.request.patch(
+				`/api/wg/${createdShareCode}/chat/messages/${messageId}`,
+				{ headers: memberHeaders, data: { body: editedMessage } },
+			);
+			expect(chatEdit.status(), await chatEdit.text()).toBe(200);
+			const chatList = await page.request.get(`/api/wg/${createdShareCode}/chat/messages`, {
+				headers: memberHeaders,
+			});
+			expect(chatList.status()).toBe(200);
+			const listedChat = (await chatList.json()) as {
+				messages?: Array<{ id?: string; body?: string }>;
+			};
+			expect(listedChat.messages?.filter((message) => message.id === messageId)).toEqual([
+				expect.objectContaining({ body: editedMessage }),
+			]);
+			await gotoWithRetry(page, `/wg/${createdShareCode}/chat`);
+			await expect(page.getByText(editedMessage, { exact: true })).toBeVisible({ timeout: 30_000 });
+			await page.reload();
+			await expect(page.getByText(editedMessage, { exact: true })).toBeVisible({ timeout: 30_000 });
+
+			const eventTitle = `Smoke Event ${runNamespace}`;
+			const editedEventTitle = `${eventTitle} edited`;
+			const eventStart = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+			const eventEnd = new Date(eventStart.getTime() + 60 * 60 * 1000);
+			const eventCreate = await page.request.post(`/api/wg/${createdShareCode}/events`, {
+				headers: memberHeaders,
+				data: {
+					title: eventTitle,
+					startsAt: eventStart.toISOString(),
+					endsAt: eventEnd.toISOString(),
+				},
+			});
+			expect(eventCreate.status(), await eventCreate.text()).toBe(200);
+			const createdEvent = (await eventCreate.json()) as {
+				event?: { id?: string; title?: string; startsAt?: string };
+			};
+			expect(createdEvent.event?.id).toMatch(UUID_PATTERN);
+			expect(createdEvent.event?.startsAt).toBe(eventStart.toISOString());
+			const eventId = createdEvent.event?.id;
+			if (!eventId) throw new Error('created calendar event ID was not returned');
+			const eventEdit = await page.request.patch(`/api/wg/${createdShareCode}/events/${eventId}`, {
+				headers: memberHeaders,
+				data: { title: editedEventTitle },
+			});
+			expect(eventEdit.status(), await eventEdit.text()).toBe(200);
+			const eventWindow = new URLSearchParams({
+				from: new Date(eventStart.getTime() - 60 * 60 * 1000).toISOString(),
+				to: new Date(eventEnd.getTime() + 60 * 60 * 1000).toISOString(),
+			});
+			const eventList = await page.request.get(
+				`/api/wg/${createdShareCode}/events?${eventWindow.toString()}`,
+				{ headers: memberHeaders },
+			);
+			expect(eventList.status()).toBe(200);
+			const listedEvents = (await eventList.json()) as {
+				events?: Array<{ id?: string; title?: string; startsAt?: string }>;
+			};
+			expect(listedEvents.events?.filter((event) => event.id === eventId)).toEqual([
+				expect.objectContaining({ title: editedEventTitle, startsAt: eventStart.toISOString() }),
+			]);
+			await gotoWithRetry(page, `/wg/${createdShareCode}/kalender`);
+			await expect(page.getByText(editedEventTitle, { exact: true })).toBeVisible({
+				timeout: 30_000,
+			});
+			await page.reload();
+			await expect(page.getByText(editedEventTitle, { exact: true })).toBeVisible({
+				timeout: 30_000,
+			});
+
+			const exportUrl = `/api/wg/${createdShareCode}/export`;
+			const jsonExport = await page.request.get(`${exportUrl}?format=json`, {
+				headers: memberHeaders,
+			});
+			expect(jsonExport.status()).toBe(200);
+			const backup = (await jsonExport.json()) as {
+				failedSections?: string[];
+				sections?: {
+					expenses?: Array<{ id?: string; amountCents?: number }>;
+					shoppingItems?: Array<{ id?: string; status?: string }>;
+					chores?: Array<{ id?: string; title?: string }>;
+				};
+			};
+			expect(backup.failedSections).toEqual([]);
+			expect(
+				backup.sections?.expenses?.filter((entry) => entry.id === createdExpense.expense?.id),
+			).toEqual([expect.objectContaining({ amountCents: 1234 })]);
+			expect(backup.sections?.shoppingItems?.filter((item) => item.id === shoppingId)).toEqual([
+				expect.objectContaining({ status: 'erledigt' }),
+			]);
+			expect(backup.sections?.chores?.filter((chore) => chore.id === choreId)).toEqual([
+				expect.objectContaining({ title: choreTitle }),
+			]);
+
+			const csvExport = await page.request.get(`${exportUrl}?format=csv&section=expenses`, {
+				headers: memberHeaders,
+			});
+			expect(csvExport.status()).toBe(200);
+			expect(csvExport.headers()['content-type']).toContain('text/csv');
+			expect(await csvExport.text()).toContain(expenseDescription);
 		} catch (error) {
 			flowError = error;
 		} finally {

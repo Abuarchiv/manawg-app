@@ -12,19 +12,6 @@ export type AnnouncementKind = (typeof ANNOUNCEMENT_KINDS)[number];
 export type AnnouncementSource = (typeof ANNOUNCEMENT_SOURCES)[number];
 type AnnouncementReactionKey = (typeof ANNOUNCEMENT_REACTIONS)[number];
 export type AnnouncementStatus = 'open' | 'resolved';
-export type AnnouncementKindFilter = AnnouncementKind | 'all';
-export type AnnouncementStatusFilter = AnnouncementStatus | 'all';
-export type AnnouncementOwnershipFilter = 'all' | 'mine' | 'untaken';
-
-export interface AnnouncementFilter {
-	status: AnnouncementStatusFilter;
-	kind: AnnouncementKindFilter;
-	pinnedOnly: boolean;
-	query?: string;
-	ownership?: AnnouncementOwnershipFilter;
-	currentMemberId?: string | null;
-}
-
 interface AnnouncementReactionInput {
 	announcementId: string;
 	memberId: string;
@@ -67,33 +54,26 @@ export function summarizeAnnouncementReactions(
 	return summary;
 }
 
-export function filterAnnouncements<
-	T extends {
-		content?: string;
+/** Infos und Entscheidungen brauchen keine Klärung; ohne Pin rutschen sie nach einer Woche ohne Antwort ins Archiv. */
+const ANNOUNCEMENT_FADE_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function isAnnouncementArchived(
+	item: {
 		kind: string;
 		status: string;
 		pinnedAt: string | null;
-		takers?: readonly { memberId: string }[];
+		createdAt: string;
+		comments?: readonly { createdAt: string }[];
 	},
->(items: readonly T[], filter: AnnouncementFilter): T[] {
-	const query = filter.query?.trim().toLocaleLowerCase('de-DE') ?? '';
-	const ownership = filter.ownership ?? 'all';
-
-	return items.filter((item) => {
-		if (filter.status !== 'all' && item.status !== filter.status) return false;
-		if (filter.kind !== 'all' && item.kind !== filter.kind) return false;
-		if (filter.pinnedOnly && !item.pinnedAt) return false;
-		if (query && !item.content?.toLocaleLowerCase('de-DE').includes(query)) return false;
-		if (
-			ownership === 'mine' &&
-			(!filter.currentMemberId ||
-				!item.takers?.some((taker) => taker.memberId === filter.currentMemberId))
-		) {
-			return false;
-		}
-		if (ownership === 'untaken' && (item.takers?.length ?? 0) > 0) return false;
-		return true;
-	});
+	now: number,
+): boolean {
+	if (item.status === 'resolved') return true;
+	if (item.pinnedAt || (item.kind !== 'info' && item.kind !== 'decision')) return false;
+	const lastActivity = Math.max(
+		Date.parse(item.createdAt),
+		...(item.comments ?? []).map((comment) => Date.parse(comment.createdAt)),
+	);
+	return now - lastActivity > ANNOUNCEMENT_FADE_MS;
 }
 
 export function getMyOpenAnnouncements<

@@ -123,6 +123,9 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 		action: 'send' | 'react' | 'unreact' | 'edit' | 'delete',
 		error: string,
 	) {
+		if (error === 'image_removed') {
+			return 'Dieses Bild wurde entfernt. Lade es erneut hoch, bevor du die Nachricht sendest.';
+		}
 		if (error === 'Netzwerkfehler' || error === 'Failed to fetch') {
 			switch (action) {
 				case 'send':
@@ -231,7 +234,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 		);
 		setMessages((prev) =>
 			isLatestChatRefreshResponse(requestSequence, refreshRequestSequenceRef.current)
-				? reconcileChatMessages(prev, res.data.messages, refreshedLoadedMessages)
+				? reconcileChatMessages(prev, res.data.messages, refreshedLoadedMessages, PAGE_SIZE)
 				: prev,
 		);
 		setReactionRows((prev) => {
@@ -633,6 +636,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 						ref={scrollRef}
 						preserveScrollOnPrepend
 						data-scroll-y
+						role="log"
 						aria-label="Chat-Nachrichten"
 						className="bg-background"
 					>

@@ -3,7 +3,6 @@ import { formatNotificationMessage } from '../src/core/notifications/notificatio
 import { buildActivityTimeline } from '../src/core/reads/activity';
 import { computeMemberBalances, summarizeDashboardSpend } from '../src/core/reads/dashboard-data';
 import { getTodayImportantItems, getWgHealth } from '../src/core/reads/dashboard-insights';
-import { searchWgItems } from '../src/core/reads/search';
 import { computeNetBalances } from '../src/features/expenses/debt-reduction';
 import { computeBalances, computeOldestDebtAges } from '../src/features/expenses/debts';
 import { getDueRecurringExpenses } from '../src/features/expenses/recurring-expenses';
@@ -199,26 +198,7 @@ test.describe('audit #158 currency consumers', () => {
 		).toContain('CHF');
 	});
 
-	test('keeps currency in search, activity, notifications, and health output', () => {
-		const searchResults = searchWgItems('miete', {
-			shareCode: 'WGCODE01',
-			currentMemberId: alice,
-			announcements: [],
-			chores: [],
-			expenses: [
-				{
-					id: 'expense-chf',
-					description: 'Miete',
-					amountCents: 95000,
-					currency: 'CHF',
-					occurredAt: '2026-01-15T12:00:00.000Z',
-				},
-			],
-			recurringExpenses: [],
-			shoppingItems: [],
-		});
-		expect(searchResults[0]?.meta).toContain('CHF');
-
+	test('keeps currency in activity, notifications, and health output', () => {
 		const activity = buildActivityTimeline({
 			members: members.map(({ id, name }) => ({ id, name })),
 			expenses: [

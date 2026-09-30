@@ -7,8 +7,8 @@ import {
 	tryCompleteAccountDeletion,
 } from '@/core/db/account-deletion';
 import { removeAccountFromWgs } from '@/core/db/delete-account';
-import { withTransaction } from '@/core/db/transaction';
-import { apiError, authUnavailable, serverError } from '@/core/errors';
+import { TransactionAbort, withTransaction } from '@/core/db/transaction';
+import { apiError, authUnavailable, conflict, serverError } from '@/core/errors';
 import { logApiError } from '@/core/infra/observability';
 import { eq } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -41,8 +41,7 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 	if (!hasSupabaseEnv() || !serviceRoleKey) {
 		return apiError('account_deletion_unavailable', 503, 'account_deletion_unavailable');
 	}
-	// Deleting the account is exactly the operation that must survive an Auth
-	// blip as an explicit "retry later", not an unhandled throw → bare 500.
+	// Deletion must return a retryable 503 if the Auth lookup is unavailable.
 	let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
 	try {
 		user = await getAuthenticatedUser(req);
@@ -84,6 +83,9 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 			));
 		return acceptedDeletionResponse(req, completed, local.deletedWgs);
 	} catch (err) {
+		if (err instanceof TransactionAbort && err.code === 'paypal_payment_pending') {
+			return conflict('paypal_payment_pending');
+		}
 		logApiError('[api/account DELETE] failed', err);
 		try {
 			const deletion = await readAccountDeletionStatusWithFreshConnection(user.id);

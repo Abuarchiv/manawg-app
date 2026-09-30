@@ -82,8 +82,6 @@ test('WG install prompt stays above and does not block the bottom navigation', a
 		await expect(bottomNav.getByRole('link', { name: label })).toBeVisible();
 	}
 
-	// Let the 220 ms entrance animation settle before measuring final hit regions.
-	await page.waitForTimeout(250);
 	const measurements: Array<{
 		width: number;
 		theme: 'light' | 'dark';
@@ -120,8 +118,14 @@ test('WG install prompt stays above and does not block the bottom navigation', a
 							const sharedHeight = Number.parseFloat(
 								getComputedStyle(document.documentElement).getPropertyValue('--app-nav-height'),
 							);
+							const promptCard = document.querySelector(
+								'section[aria-label="App installieren"] [data-slot="card"]',
+							);
+							if (!nav || !promptCard) return false;
+							const navBounds = nav.getBoundingClientRect();
 							return (
-								nav !== null && Math.abs(nav.getBoundingClientRect().height - sharedHeight) < 0.1
+								Math.abs(navBounds.height - sharedHeight) < 0.1 &&
+								promptCard.getBoundingClientRect().bottom <= navBounds.top
 							);
 						}),
 					)
@@ -208,4 +212,51 @@ test('WG install prompt stays above and does not block the bottom navigation', a
 		JSON.stringify(measurements, null, 2),
 	);
 	expect(measurements.filter((measurement) => measurement.gap < 0)).toEqual([]);
+});
+
+const wgFeatureTitles = [
+	['abos', 'Fixkosten — ManaWG'],
+	['putzen', 'Putzplan — ManaWG'],
+	['einkauf', 'Einkaufsliste — ManaWG'],
+	['kalender', 'Kalender — ManaWG'],
+	['import', 'Ausgaben importieren — ManaWG'],
+	['ausgaben', 'Ausgaben — ManaWG'],
+	['pinnwand', 'Pinnwand — ManaWG'],
+	['aktivitaet', 'Aktivität — ManaWG'],
+	['mahnungen', 'Erinnerungen — ManaWG'],
+	['einstellungen', 'Einstellungen — ManaWG'],
+	['vorraete', 'Vorräte — ManaWG'],
+] as const;
+
+/** WCAG 2.4.2: each WG feature segment must publish its own descriptive title. */
+test('WG feature pages get distinct, descriptive document titles', async ({ page }) => {
+	await setupMember(page);
+	for (const [feature, title] of wgFeatureTitles) {
+		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/${feature}`);
+		await dismissOnboarding(page);
+		await expect.poll(() => page.title()).toBe(title);
+	}
+});
+
+/**
+ * Guards metadata replacement through SPA navigation: feature title, another
+ * feature title, then the WG dashboard title from the parent layout.
+ */
+test('leaving a titled feature page via client-side navigation restores the WG dashboard title', async ({
+	page,
+}) => {
+	await setupMember(page);
+	await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/putzen`);
+	await dismissOnboarding(page);
+	await expect.poll(() => page.title()).toBe('Putzplan — ManaWG');
+
+	const bottomNav = page.getByRole('navigation', { name: 'WG Hauptnavigation' });
+	await bottomNav.getByRole('link', { name: 'Finanzen' }).click();
+	await expect(page).toHaveURL(new RegExp(`/wg/${FIXTURE_WG.shareCode}/ausgaben`));
+	await expect.poll(() => page.title()).toBe('Ausgaben — ManaWG');
+
+	await bottomNav.getByRole('link', { name: 'Start' }).click();
+	await expect(page).toHaveURL(new RegExp(`/wg/${FIXTURE_WG.shareCode}$`));
+	// Fixture WG name (E2E_EXISTING_WG.name in e2e-db-down.ts) is "sadf".
+	await expect.poll(() => page.title()).toBe('sadf — ManaWG');
 });

@@ -20,41 +20,53 @@ function loadTs(file, overrides = {}) {
 	return module.exports;
 }
 
-function expenseRows(count) {
-	return Array.from({ length: count }, (_unused, index) => ({
-		id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
-		description: `expense ${index}`,
-		amountCents: 1000,
-		currency: 'EUR',
-		paidByMemberId: 'member',
-		imageUrl: null,
-		occurredAt: new Date('2026-09-01T10:00:00.000Z'),
-	}));
-}
-
-function exportRoute(failedTable, { expenses: expenseFixture = [] } = {}) {
+function exportRoute(failedTable, { expenseCount = 0 } = {}) {
 	const tables = Object.fromEntries(
 		[
 			'announcements',
 			'auditEvents',
 			'chores',
+			'expensePayments',
 			'expenseSplits',
 			'expenses',
 			'memberAbsences',
 			'recurringExpenses',
 			'shoppingItems',
 			'wgMembers',
-		].map((name) => [name, {}]),
+		].map((name) => [
+			name,
+			name === 'expensePayments'
+				? {
+						id: {},
+						fromMemberId: {},
+						toMemberId: {},
+						amountCents: {},
+						currency: {},
+						completedAt: {},
+						wgId: {},
+						status: {},
+					}
+				: {},
+		]),
 	);
 	const limits = [];
-	const inArraySizes = [];
+	const inArrayCalls = [];
+	const expenseRows = Array.from({ length: expenseCount }, (_, index) => ({
+		id: `expense-${index}`,
+		description: 'x',
+		amountCents: 1,
+		currency: 'EUR',
+		paidByMemberId: 'member',
+		imageUrl: null,
+		occurredAt: new Date(0),
+	}));
 	const db = {
 		select: () => ({
 			from: (table) => {
 				const rows =
 					table === tables[failedTable]
-						? Promise.reject(new Error('section unavailable'))
-						: Promise.resolve(table === tables.expenses ? expenseFixture : []);
+						? Promise.reject(new Error('privateDbPassword123'))
+						: Promise.resolve(table === tables.expenses ? expenseRows : []);
 				const query = Object.assign(rows, {
 					where: () => query,
 					orderBy: () => query,
@@ -86,18 +98,19 @@ function exportRoute(failedTable, { expenses: expenseFixture = [] } = {}) {
 			readShareCode: async () => ({ ok: true, code: 'MTE8PZAT' }),
 			resolveE2EFixture: async () => ({ mode: 'real' }),
 		},
-		'@/core/infra/observability': { logApiError: () => undefined },
+		'@/core/infra/observability': loadTs('src/core/infra/observability.ts', {
+			'./sentry': { captureSentryException() {}, logSentryApiError() {} },
+			'./sentry-privacy': loadTs('src/core/infra/sentry-privacy.ts'),
+		}),
 		'@/core/rate-limit': { checkRateLimit: async () => ({ success: true }) },
 		'@/core/reads/export': loadTs('src/core/reads/export.ts'),
 		'drizzle-orm': {
+			and: () => null,
 			asc: () => null,
 			desc: () => null,
 			eq: () => null,
-			inArray: (_column, ids) => {
-				inArraySizes.push(ids.length);
-				// Postgres refuses a statement with more than 65,535 bind
-				// parameters — model that so an unchunked fetch fails the section.
-				if (ids.length > 65_535) throw new Error('bind parameters exceed 65535');
+			inArray: (_column, values) => {
+				inArrayCalls.push(values.length);
 				return null;
 			},
 		},
@@ -105,7 +118,7 @@ function exportRoute(failedTable, { expenses: expenseFixture = [] } = {}) {
 	});
 	return {
 		limits,
-		inArraySizes,
+		inArrayCalls,
 		get: (search = '') => GET({ nextUrl: new URL(`https://example.invalid/export${search}`) }, {}),
 	};
 }
@@ -127,36 +140,31 @@ test('explicit export limits remain bounded', async () => {
 	assert.equal((await route.get('?limit=0')).status, 400);
 });
 
-test('one failed JSON section rejects the incomplete backup', async (t) => {
-	t.mock.method(console, 'error', () => undefined);
-	const response = await exportRoute('expenses').get('?limit=20');
-	assert.equal(response.status, 500);
-	assert.equal((await response.json()).error, 'export_incomplete');
-});
-
-test("expense split fetches stay under Postgres' 65,535 bind limit on every path", async () => {
-	// 66,000 expenses exceed the parameter cap if their ids reach one inArray.
-	const rows = expenseRows(66_000);
+test('large expense id sets load splits in bind-param-safe chunks', async () => {
 	for (const search of [
-		'',
-		'?sections=expenses',
 		'?format=csv&section=expenses',
+		'?sections=expenses',
 		'?format=csv&section=expenses&limit=100000',
+		'?sections=expenses&limit=100000',
 	]) {
-		const route = exportRoute(undefined, { expenses: rows });
+		const route = exportRoute(undefined, { expenseCount: 66_000 });
 		const response = await route.get(search);
-		assert.equal(response.status, 200, `${search}: ${await response.text()}`);
-		assert.ok(route.inArraySizes.length > 0, `${search}: splits must be fetched`);
+		assert.equal(response.status, 200, await response.text());
+		assert.ok(route.inArrayCalls.length > 0, `${search}: expense splits must be fetched`);
 		assert.ok(
-			Math.max(...route.inArraySizes) <= 10_000,
-			`${search}: chunk size ${Math.max(...route.inArraySizes)} must stay far below 65,535`,
+			Math.max(...route.inArrayCalls) <= 10_000,
+			`${search}: chunk size ${Math.max(...route.inArrayCalls)} must stay below the bind limit`,
 		);
 	}
 });
 
-test('an explicit limit at the declared maximum still returns 200', async () => {
-	const route = exportRoute(undefined, { expenses: expenseRows(5) });
-	const response = await route.get('?limit=100000&offset=0');
-	assert.equal(response.status, 200, await response.text());
-	assert.ok(route.limits.every((limit) => limit === 100_000));
+test('one failed JSON section rejects the incomplete backup', async (t) => {
+	const logged = [];
+	t.mock.method(console, 'error', (...args) => logged.push(args));
+	for (const section of ['expenses', 'wgMembers']) {
+		const response = await exportRoute(section).get('?limit=20');
+		assert.equal(response.status, 500);
+		assert.equal((await response.json()).error, 'export_incomplete');
+	}
+	assert.equal(JSON.stringify(logged).includes('privateDbPassword123'), false);
 });

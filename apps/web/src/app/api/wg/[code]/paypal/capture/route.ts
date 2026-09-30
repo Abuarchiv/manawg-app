@@ -1,5 +1,6 @@
 import { recordAuditEvent } from '@/core/audit';
 import { db, expensePayments, wgMembers } from '@/core/db';
+import { lockActiveAccountMember } from '@/core/db/account-deletion';
 import {
 	badRequest,
 	conflict,
@@ -19,12 +20,18 @@ import {
 } from '@/core/infra/paypal';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { computeNetBalances, simplifyDebts } from '@/features/expenses/debt-reduction';
+import { computeBalances } from '@/features/expenses/debts';
 import {
+	hasCapturingExpensePayment,
 	loadCompletedExpensePayments,
 	withExpensePaymentLock,
 } from '@/features/expenses/expense-payments';
 import { loadOpenExpenses } from '@/features/expenses/open-expenses';
-import { isPayPalCaptureDebtChanged } from '@/features/expenses/paypal-settlement';
+import {
+	isPayPalCaptureDebtChanged,
+	parsePayPalAmountCents,
+	terminalPayPalCaptureOutcome,
+} from '@/features/expenses/paypal-settlement';
 import { and, eq, gt } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -77,6 +84,13 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 		}
 
 		const captureState = await withExpensePaymentLock(auth.wg.id, async (tx) => {
+			const actor = await lockActiveAccountMember(
+				tx,
+				auth.wg.id,
+				auth.member.memberId,
+				auth.authUserId,
+			);
+			if (!actor) return { kind: 'member_inactive' as const };
 			const [current] = await tx
 				.select()
 				.from(expensePayments)
@@ -84,7 +98,20 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 				.limit(1);
 			if (!current) return { kind: 'missing' as const };
 			if (current.status === 'completed') return { kind: 'completed' as const, payment: current };
-			if (current.status === 'capturing') return { kind: 'capture' as const, payment: current };
+			if (current.providerOrderId.startsWith('pending:')) {
+				if (current.status === 'capturing') {
+					await tx
+						.update(expensePayments)
+						.set({ status: 'failed' })
+						.where(
+							and(eq(expensePayments.id, current.id), eq(expensePayments.status, 'capturing')),
+						);
+				}
+				return { kind: 'unavailable' as const };
+			}
+			if (current.status === 'capturing') {
+				return { kind: 'capture' as const, payment: current, reconcileFirst: true };
+			}
 			if (current.status !== 'created') return { kind: 'unavailable' as const };
 
 			const now = new Date();
@@ -94,6 +121,42 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 					.set({ status: 'failed' })
 					.where(and(eq(expensePayments.id, current.id), eq(expensePayments.status, 'created')));
 				return { kind: 'expired' as const };
+			}
+			// ponytail: one unresolved PayPal capture per WG; per-account starts if throughput needs it.
+			if (await hasCapturingExpensePayment(tx, auth.wg.id)) return { kind: 'busy' as const };
+			const [members, expenses, payments] = await Promise.all([
+				tx
+					.select({ id: wgMembers.id, name: wgMembers.name, color: wgMembers.color })
+					.from(wgMembers)
+					.where(eq(wgMembers.wgId, auth.wg.id)),
+				loadOpenExpenses(auth.wg.id, tx),
+				loadCompletedExpensePayments(auth.wg.id, tx),
+			]);
+			const debt = simplifyDebts(computeNetBalances(expenses, members, payments)).find(
+				(item) =>
+					item.fromId === current.fromMemberId &&
+					item.toId === current.toMemberId &&
+					(item.currency ?? 'EUR') === current.currency,
+			);
+			if (isPayPalCaptureDebtChanged(debt?.cents, current.amountCents)) {
+				await tx
+					.update(expensePayments)
+					.set({ status: 'failed' })
+					.where(and(eq(expensePayments.id, current.id), eq(expensePayments.status, 'created')));
+				return { kind: 'debt_changed' as const };
+			}
+			const directDebt = computeBalances(expenses, payments).find(
+				(item) =>
+					item.debtorId === current.fromMemberId &&
+					item.creditorId === current.toMemberId &&
+					item.currency === current.currency,
+			);
+			if (!directDebt || directDebt.amountCents < current.amountCents) {
+				await tx
+					.update(expensePayments)
+					.set({ status: 'failed' })
+					.where(and(eq(expensePayments.id, current.id), eq(expensePayments.status, 'created')));
+				return { kind: 'debt_changed' as const };
 			}
 
 			const [capturing] = await tx
@@ -108,9 +171,16 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 				)
 				.returning();
 			return capturing
-				? { kind: 'capture' as const, payment: capturing }
+				? { kind: 'capture' as const, payment: capturing, reconcileFirst: false }
 				: { kind: 'unavailable' as const };
 		});
+		if (captureState.kind === 'member_inactive') return forbidden('member_deactivated');
+		if (captureState.kind === 'busy') {
+			return NextResponse.json(
+				{ status: 'PENDING', amountCents: payment.amountCents, currency: payment.currency },
+				{ status: 202 },
+			);
+		}
 		if (captureState.kind === 'completed') {
 			return NextResponse.json({
 				status: 'COMPLETED',
@@ -121,63 +191,125 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 		if (captureState.kind === 'expired') return conflict('paypal_order_expired');
 		if (captureState.kind === 'missing') return conflict('paypal_order_not_found');
 		if (captureState.kind === 'unavailable') return conflict('paypal_order_unavailable');
+		if (captureState.kind === 'debt_changed') return conflict('debt_changed');
 		const capturePayment = captureState.payment;
 
-		const debtChanged = await withExpensePaymentLock(auth.wg.id, async (tx) => {
-			const [members, expenses, payments] = await Promise.all([
-				tx
-					.select({ id: wgMembers.id, name: wgMembers.name, color: wgMembers.color })
-					.from(wgMembers)
-					.where(eq(wgMembers.wgId, auth.wg.id)),
-				loadOpenExpenses(auth.wg.id, tx),
-				loadCompletedExpensePayments(auth.wg.id, tx),
-			]);
-			const debt = simplifyDebts(computeNetBalances(expenses, members, payments)).find(
-				(item) =>
-					item.fromId === capturePayment.fromMemberId &&
-					item.toId === capturePayment.toMemberId &&
-					(item.currency ?? 'EUR') === capturePayment.currency,
+		let order: PayPalOrderResponse = {};
+		let orderSource: 'capture' | 'get' = captureState.reconcileFirst ? 'get' : 'capture';
+		const pendingResponse = () =>
+			NextResponse.json(
+				{
+					status: 'PENDING',
+					amountCents: capturePayment.amountCents,
+					currency: capturePayment.currency,
+				},
+				{ status: 202 },
 			);
-			if (!isPayPalCaptureDebtChanged(debt?.cents, capturePayment.amountCents)) return false;
-			await tx
-				.update(expensePayments)
-				.set({ status: 'failed' })
-				.where(
-					and(eq(expensePayments.id, capturePayment.id), eq(expensePayments.status, 'capturing')),
-				);
-			return true;
-		});
-		if (debtChanged) {
-			return conflict('debt_changed');
-		}
-
-		let order: PayPalOrderResponse | undefined;
-		try {
+		const readProviderOrder = async () => {
+			order = await getPayPalOrder(capturePayment.providerOrderId, capturePayment.payeeMerchantId);
+			orderSource = 'get';
+		};
+		const captureProviderOrder = async () => {
 			order = await capturePayPalOrder(
 				capturePayment.providerOrderId,
 				capturePayment.payeeMerchantId,
 			);
-		} catch (captureError) {
-			// A network/5xx response does not tell us whether PayPal captured the
-			// order. Re-read the order before returning so an approved capture can
-			// still be committed locally without creating a second payment.
+			orderSource = 'capture';
+		};
+
+		if (captureState.reconcileFirst) {
 			try {
-				order = await getPayPalOrder(
-					capturePayment.providerOrderId,
-					capturePayment.payeeMerchantId,
-				);
+				await readProviderOrder();
 			} catch (statusError) {
-				logApiError('[paypal capture] status recovery failed', captureError, statusError);
-				return conflict('paypal_capture_pending');
+				logApiError('[paypal capture] status recovery failed', statusError);
+				return pendingResponse();
+			}
+			if (!order.status || !order.purchase_units) return pendingResponse();
+			const hasProviderCapture = order.purchase_units.some(
+				(unit) => (unit.payments?.captures?.length ?? 0) > 0,
+			);
+			if (order.status === 'APPROVED' && !hasProviderCapture) {
+				try {
+					await captureProviderOrder();
+				} catch (captureError) {
+					try {
+						await readProviderOrder();
+					} catch (statusError) {
+						logApiError('[paypal capture] status recovery failed', captureError, statusError);
+						return pendingResponse();
+					}
+				}
+			}
+		} else {
+			try {
+				await captureProviderOrder();
+			} catch (captureError) {
+				// The capture response is ambiguous; reconcile the same persisted order.
+				try {
+					await readProviderOrder();
+				} catch (statusError) {
+					logApiError('[paypal capture] status recovery failed', captureError, statusError);
+					return pendingResponse();
+				}
 			}
 		}
-		const capture = order.purchase_units
-			?.flatMap((unit) => unit.payments?.captures ?? [])
-			.find((item) => item.status === 'COMPLETED');
-		const capturedCents = capture?.amount?.value
-			? Math.round(Number(capture.amount.value) * 100)
-			: 0;
+
+		const hasCompleteCaptureDetails = () => {
+			const unit = order.purchase_units?.find((item) =>
+				item.payments?.captures?.some((capture) => capture.status === 'COMPLETED'),
+			);
+			const completedCapture = unit?.payments?.captures?.find(
+				(capture) => capture.status === 'COMPLETED',
+			);
+			return Boolean(
+				unit?.payee?.merchant_id &&
+					completedCapture?.amount?.value &&
+					completedCapture.amount.currency_code,
+			);
+		};
+		const hasProviderCapture = order.purchase_units?.some(
+			(unit) => (unit.payments?.captures?.length ?? 0) > 0,
+		);
+		const hasCompletedCapture = order.purchase_units?.some((unit) =>
+			unit.payments?.captures?.some((capture) => capture.status === 'COMPLETED'),
+		);
+		if (
+			orderSource === 'capture' &&
+			(!order.status ||
+				(order.status === 'COMPLETED' &&
+					(!order.purchase_units?.length ||
+						!hasProviderCapture ||
+						(hasCompletedCapture && !hasCompleteCaptureDetails()))))
+		) {
+			try {
+				await readProviderOrder();
+			} catch (statusError) {
+				logApiError('[paypal capture] status recovery failed', statusError);
+				return pendingResponse();
+			}
+		}
+		if (order.id !== capturePayment.providerOrderId) return pendingResponse();
+		const purchaseUnits = order.purchase_units ?? [];
+		const captures = purchaseUnits.flatMap((unit) => unit.payments?.captures ?? []);
+		const captureUnit = purchaseUnits.find((unit) =>
+			unit.payments?.captures?.some((item) => item.status === 'COMPLETED'),
+		);
+		const capture = captureUnit?.payments?.captures?.find((item) => item.status === 'COMPLETED');
 		if (order.status !== 'COMPLETED' || !capture) {
+			const terminalOutcome = terminalPayPalCaptureOutcome(
+				order.status,
+				captures.map((item) => item.status),
+			);
+			if (!terminalOutcome) {
+				return NextResponse.json(
+					{
+						status: 'PENDING',
+						amountCents: capturePayment.amountCents,
+						currency: capturePayment.currency,
+					},
+					{ status: 202 },
+				);
+			}
 			await withExpensePaymentLock(auth.wg.id, (tx) =>
 				tx
 					.update(expensePayments)
@@ -186,9 +318,16 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 						and(eq(expensePayments.id, capturePayment.id), eq(expensePayments.status, 'capturing')),
 					),
 			);
-			return conflict('paypal_payment_not_completed');
+			return NextResponse.json({
+				status: terminalOutcome,
+				amountCents: capturePayment.amountCents,
+				currency: capturePayment.currency,
+			});
 		}
+		const capturedCents = parsePayPalAmountCents(capture.amount?.value);
 		if (
+			purchaseUnits.length !== 1 ||
+			captureUnit?.payee?.merchant_id !== capturePayment.payeeMerchantId ||
 			capturedCents !== capturePayment.amountCents ||
 			capture.amount?.currency_code !== capturePayment.currency
 		) {

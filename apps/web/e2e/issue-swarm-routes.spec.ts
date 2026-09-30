@@ -11,7 +11,7 @@ async function readSource(relativePath: string): Promise<string> {
 	return readFile(pathModule.join(process.cwd(), 'src', relativePath), 'utf8');
 }
 
-test('apiFetch rejects non-empty non-JSON success responses', async () => {
+test('apiFetch treats non-JSON success responses as ambiguous', async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = async () =>
 		new Response('not json', {
@@ -22,15 +22,15 @@ test('apiFetch rejects non-empty non-JSON success responses', async () => {
 	try {
 		await expect(apiFetch('/api/test')).resolves.toEqual({
 			ok: false,
-			status: 200,
-			error: 'OK',
+			status: 0,
+			error: 'Unerwartete Serverantwort',
 		});
 	} finally {
 		globalThis.fetch = originalFetch;
 	}
 });
 
-test('apiFetch preserves the HTTP status when a JSON success body is malformed', async () => {
+test('apiFetch treats malformed JSON success responses as ambiguous', async () => {
 	const originalFetch = globalThis.fetch;
 	globalThis.fetch = async () =>
 		new Response('{', {
@@ -41,8 +41,8 @@ test('apiFetch preserves the HTTP status when a JSON success body is malformed',
 	try {
 		await expect(apiFetch('/api/test')).resolves.toEqual({
 			ok: false,
-			status: 200,
-			error: 'OK',
+			status: 0,
+			error: 'Unerwartete Serverantwort',
 		});
 	} finally {
 		globalThis.fetch = originalFetch;

@@ -47,28 +47,32 @@ export function AbosList({
 	onTogglePause,
 	onDelete,
 }: AbosListProps) {
-	const filtered = applyFilter(abos, filter);
+	// Der Filter lohnt erst, wenn es pausierte Abos gibt.
+	const showFilter = abos.some((abo) => abo.pausedAt !== null);
+	const filtered = applyFilter(abos, showFilter ? filter : 'all');
 
 	return (
 		<section className="flex flex-col gap-4">
-			<ToggleGroup
-				variant="segmented"
-				value={[filter]}
-				onValueChange={(values) => {
-					const value = values[0];
-					if (value === 'active' || value === 'paused' || value === 'all') onFilterChange(value);
-				}}
-				className="w-full"
-				aria-label="Abos filtern"
-			>
-				{FILTER_OPTIONS.map((option) => (
-					<ToggleGroupItem key={option.value} value={option.value} className="min-h-11 flex-1">
-						{option.label}
-					</ToggleGroupItem>
-				))}
-			</ToggleGroup>
+			{showFilter && (
+				<ToggleGroup
+					variant="segmented"
+					value={[filter]}
+					onValueChange={(values) => {
+						const value = values[0];
+						if (value === 'active' || value === 'paused' || value === 'all') onFilterChange(value);
+					}}
+					className="w-full"
+					aria-label="Fixkosten filtern"
+				>
+					{FILTER_OPTIONS.map((option) => (
+						<ToggleGroupItem key={option.value} value={option.value} className="flex-1">
+							{option.label}
+						</ToggleGroupItem>
+					))}
+				</ToggleGroup>
+			)}
 			<output aria-live="polite" className="sr-only">
-				{filtered.length} Abos sichtbar
+				{filtered.length} Fixkosten sichtbar
 			</output>
 			{filtered.length === 0 ? (
 				<Empty>
@@ -78,22 +82,22 @@ export function AbosList({
 						</EmptyMedia>
 						<EmptyTitle>
 							{loadError && abos.length === 0
-								? 'Abos noch nicht geladen'
+								? 'Fixkosten noch nicht geladen'
 								: abos.length === 0
-									? 'Noch keine Abos angelegt'
-									: `Keine ${filter === 'paused' ? 'pausierten' : 'aktiven'} Abos`}
+									? 'Noch keine Fixkosten'
+									: `Keine ${filter === 'paused' ? 'pausierten' : 'aktiven'} Fixkosten`}
 						</EmptyTitle>
 						<EmptyDescription>
 							{loadError && abos.length === 0
 								? 'Versuche es erneut.'
 								: abos.length === 0
-									? 'Mit „Neues Abo“ regelmäßige Ausgaben vorbereiten.'
+									? 'Miete, Internet oder Streaming über das Plus unten rechts anlegen.'
 									: 'Wähle einen anderen Filter.'}
 						</EmptyDescription>
 					</EmptyHeader>
 				</Empty>
 			) : (
-				<ul className="flex flex-col gap-3">
+				<ul className="divide-y overflow-hidden rounded-xl border">
 					{filtered.map((abo) => (
 						<AboRow
 							key={abo.id}

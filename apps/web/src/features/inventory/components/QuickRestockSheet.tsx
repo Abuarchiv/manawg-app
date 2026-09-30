@@ -18,7 +18,7 @@ import { ItemGroup } from '@/components/ui/item';
 import { Spinner } from '@/components/ui/spinner';
 import { apiFetch } from '@/core/infra/api-client';
 import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
-import type { InventoryItemDto } from '@/features/inventory/inventory';
+import type { InventoryItemDto, InventoryMutationItemDto } from '@/features/inventory/inventory';
 import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
 
@@ -29,7 +29,7 @@ interface QuickRestockSheetProps {
 	memberId: string;
 	memberToken?: string | undefined;
 	onClose: () => void;
-	onChanged: () => void;
+	onChanged: (item: InventoryMutationItemDto) => void;
 }
 
 const QUICK_RESTOCK_LIMIT = 5;
@@ -65,7 +65,7 @@ export function QuickRestockSheet({
 			return;
 		}
 		restockRequestKeysRef.current.set(item.id, idempotencyKey);
-		const res = await apiFetch(
+		const res = await apiFetch<{ item: InventoryMutationItemDto }>(
 			`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(item.id)}`,
 			{
 				method: 'PATCH',
@@ -78,7 +78,7 @@ export function QuickRestockSheet({
 		setPendingId(null);
 		if (res.ok) {
 			restockRequestKeysRef.current.delete(item.id);
-			onChanged();
+			onChanged(res.data.item);
 		} else {
 			if (res.status > 0 && res.status < 500) restockRequestKeysRef.current.delete(item.id);
 			setError('Aktualisierung fehlgeschlagen.');

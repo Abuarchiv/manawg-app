@@ -21,12 +21,17 @@ const alertVariants = cva(
 function Alert({
 	className,
 	variant,
+	role,
 	...props
 }: React.ComponentProps<'div'> & VariantProps<typeof alertVariants>) {
 	return (
 		<div
 			data-slot="alert"
-			role="alert"
+			// WCAG 4.1.3: only a destructive (error) alert is assertive; every
+			// other alert is a status message and must not interrupt. Callers
+			// with a real status/success/error distinction of their own (e.g.
+			// Toast) still pass an explicit role and win over this default.
+			role={role ?? (variant === 'destructive' ? 'alert' : 'status')}
 			className={cn(alertVariants({ variant }), className)}
 			{...props}
 		/>

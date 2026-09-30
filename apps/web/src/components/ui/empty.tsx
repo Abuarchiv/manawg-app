@@ -28,7 +28,7 @@ function EmptyHeader({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 const emptyMediaVariants = cva(
-	'mb-2 flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0',
+	'mb-1 flex shrink-0 items-center justify-center [&_svg]:pointer-events-none [&_svg]:shrink-0',
 	{
 		variants: {
 			variant: {
@@ -62,7 +62,7 @@ function EmptyTitle({ className, ...props }: React.ComponentProps<'div'>) {
 		<div
 			data-slot="empty-title"
 			className={cn(
-				'min-w-0 max-w-full text-base font-semibold [overflow-wrap:anywhere]',
+				'min-w-0 max-w-full text-[14px] font-semibold [overflow-wrap:anywhere]',
 				className,
 			)}
 			{...props}
@@ -75,7 +75,7 @@ function EmptyDescription({ className, ...props }: React.ComponentProps<'p'>) {
 		<div
 			data-slot="empty-description"
 			className={cn(
-				'min-w-0 max-w-full text-sm/relaxed text-muted-foreground [overflow-wrap:anywhere] [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary',
+				'min-w-0 max-w-full text-[12px]/normal text-muted-foreground [overflow-wrap:anywhere] [&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary',
 				className,
 			)}
 			{...props}

@@ -212,8 +212,11 @@ test('shows personal actions and a separate Berlin week agenda', async ({ page }
 	await expect(agenda.getByText('WG-Abendessen', { exact: true })).toBeVisible();
 	await expect(agenda.getByText('Bad putzen', { exact: true })).toHaveCount(0);
 
+	const weekHeader = agenda.locator(':scope > div').first();
+	const weekHeading = agenda.getByRole('heading', { name: 'Diese Woche' });
+	const calendarLink = agenda.getByRole('link', { name: 'Kalender' });
 	for (const theme of ['light', 'dark'] as const) {
-		for (const width of [320, 390]) {
+		for (const width of [320, 360, 390]) {
 			await page.setViewportSize({ width, height: 844 });
 			await page.emulateMedia({ colorScheme: theme });
 			await expect
@@ -225,13 +228,37 @@ test('shows personal actions and a separate Berlin week agenda', async ({ page }
 				page: document.documentElement.scrollWidth,
 			}));
 			expect(layout.page).toBeLessThanOrEqual(layout.viewport);
+			await expect(calendarLink).toBeVisible();
+			const [rootFontSize, hitTarget] = await Promise.all([
+				page.locator('html').evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize)),
+				calendarLink.evaluate((node) => {
+					const target = getComputedStyle(node, '::after');
+					return {
+						height: Number.parseFloat(target.height),
+						minWidth: Number.parseFloat(target.minWidth),
+					};
+				}),
+			]);
+			expect(rootFontSize).toBeLessThan(32);
+			expect(hitTarget.height).toBeGreaterThanOrEqual(44);
+			expect(hitTarget.minWidth).toBeGreaterThanOrEqual(44);
+			await calendarLink.focus();
+			await expect(calendarLink).toBeFocused();
+			await weekHeader.screenshot({
+				path: testInfo.outputPath(`week-header-${width}-${theme}.png`),
+				animations: 'disabled',
+			});
 			await page.screenshot({
 				path: testInfo.outputPath(`home-${width}-${theme}.png`),
 				animations: 'disabled',
 			});
 
 			const lastAgendaRow = agenda.getByText('WG-Abendessen', { exact: true });
-			await lastAgendaRow.scrollIntoViewIfNeeded();
+			// Ganz nach unten scrollen wie ein Nutzer: die Seite hält unten Platz für die Navigation frei.
+			// `instant`: html has scroll-behavior:smooth, so a plain scrollTo would still be animating.
+			await page.evaluate(() =>
+				window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }),
+			);
 			const [rowBounds, navBounds] = await Promise.all([
 				lastAgendaRow.evaluate((node) => node.getBoundingClientRect().toJSON()),
 				page
@@ -241,6 +268,53 @@ test('shows personal actions and a separate Berlin week agenda', async ({ page }
 			expect(rowBounds.bottom).toBeLessThanOrEqual(navBounds.top);
 			await page.screenshot({
 				path: testInfo.outputPath(`home-agenda-${width}-${theme}.png`),
+				animations: 'disabled',
+			});
+		}
+	}
+
+	for (const theme of ['light', 'dark'] as const) {
+		for (const width of [320, 360, 390]) {
+			await page.setViewportSize({ width, height: 844 });
+			await page.emulateMedia({ colorScheme: theme });
+			await expect
+				.poll(() => page.locator('html').evaluate((node) => node.classList.contains('dark')))
+				.toBe(theme === 'dark');
+			await page.locator('html').evaluate((node) => {
+				node.style.fontSize = '32px';
+			});
+			await page.evaluate(() => window.scrollTo(0, 0));
+
+			await expect(calendarLink).toBeVisible();
+			const [rootFontSize, headingFontSize, hitTarget] = await Promise.all([
+				page.locator('html').evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize)),
+				weekHeading.evaluate((node) => Number.parseFloat(getComputedStyle(node).fontSize)),
+				calendarLink.evaluate((node) => {
+					const target = getComputedStyle(node, '::after');
+					return {
+						height: Number.parseFloat(target.height),
+						minWidth: Number.parseFloat(target.minWidth),
+					};
+				}),
+			]);
+			expect(rootFontSize).toBe(32);
+			expect(headingFontSize).toBeGreaterThanOrEqual(26);
+			expect(hitTarget.height).toBeGreaterThanOrEqual(44);
+			expect(hitTarget.minWidth).toBeGreaterThanOrEqual(44);
+			await calendarLink.focus();
+			await expect(calendarLink).toBeFocused();
+
+			const layout = await page.evaluate(() => ({
+				viewport: document.documentElement.clientWidth,
+				page: document.documentElement.scrollWidth,
+			}));
+			expect(layout.page).toBeLessThanOrEqual(layout.viewport);
+			await weekHeader.screenshot({
+				path: testInfo.outputPath(`week-header-32px-${width}-${theme}.png`),
+				animations: 'disabled',
+			});
+			await page.screenshot({
+				path: testInfo.outputPath(`home-32px-${width}-${theme}.png`),
 				animations: 'disabled',
 			});
 		}
@@ -337,6 +411,50 @@ test('keeps one completion key across 5xx, 429, and offline retries', async ({ p
 	await expect.poll(() => idempotencyKeys.length).toBe(4);
 	expect(new Set(idempotencyKeys).size).toBe(1);
 	await expect(page.getByText('Bad putzen', { exact: true })).toHaveCount(0);
+});
+
+test('shows a saving label instead of "tap again" while a completion request is in flight', async ({
+	page,
+}) => {
+	await setupMember(page);
+	const chore = {
+		id: 'mine',
+		title: 'Bad putzen',
+		nextDueAt: atBerlin(getBerlinWeekWindow(Date.now()).todayKey, 23 * 60),
+		overdue: false,
+		assignedMemberId: FIXTURE_WG.memberId,
+		assignedMemberName: FIXTURE_WG.memberName,
+		assignedColor: null,
+	};
+	await mockDashboard(page, [chore]);
+	await page.route(/\/api\/wg\/MTE8PZAT\/events\?/, (route) =>
+		route.fulfill({ status: 200, json: { events: [] } }),
+	);
+	let resolveComplete: (() => void) | undefined;
+	const held = new Promise<void>((resolve) => {
+		resolveComplete = resolve;
+	});
+	await page.route(/\/api\/wg\/MTE8PZAT\/chores\/mine\/complete$/, async (route) => {
+		await held;
+		return route.fulfill({ status: 200, json: { ok: true } });
+	});
+
+	await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}`);
+	await dismissOnboarding(page);
+	await page.getByRole('button', { name: 'Abhaken: Bad putzen' }).click();
+	await page.getByRole('button', { name: 'Bestätigen: Bad putzen erledigt' }).click();
+
+	// While the request is in flight the button is disabled (still labelled
+	// as the armed "confirm" action for a11y) but the subtitle must say it is
+	// saving, not repeat the now-stale "tap again to confirm" instruction.
+	await expect(
+		page.getByRole('button', { name: 'Bestätigen: Bad putzen erledigt' }),
+	).toBeDisabled();
+	await expect(page.getByText('Wird gespeichert …')).toBeVisible();
+	await expect(page.getByText('Nochmal tippen zum Bestätigen')).toHaveCount(0);
+
+	resolveComplete?.();
+	await expect(page.getByText('Bad putzen erledigt.')).toBeVisible();
 });
 
 test('does not show a settled or empty state when the dashboard read fails', async ({ page }) => {

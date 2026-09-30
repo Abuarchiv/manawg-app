@@ -7,6 +7,9 @@
  */
 export const MEMBER_ID_HEADER = 'x-manawg-member-id';
 
+/** Client's expected identity scope, checked against the cookie-authenticated membership. */
+export const EXPECTED_MEMBER_ID_HEADER = 'x-manawg-expected-member-id';
+
 /**
  * Header carrying the HMAC session token derived from
  * `MEMBER_SESSION_SECRET` (see `@/lib/wg/member-token`). Optional on most

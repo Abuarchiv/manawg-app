@@ -14,7 +14,7 @@ const queuedAction = {
 	wgId: FIXTURE_WG.id,
 	shareCode: FIXTURE_WG.shareCode,
 	memberId: FIXTURE_WG.memberId,
-	createdAt: '2026-09-19T10:00:00.000Z',
+	createdAt: new Date().toISOString(),
 	payload: { name: 'Milch', quantity: '1L' },
 };
 
@@ -46,6 +46,8 @@ test.describe('Offline fallback page', () => {
 	test('shows an honest "checking" state instead of a false reconnected message', async ({
 		page,
 	}) => {
+		const pageErrors: string[] = [];
+		page.on('pageerror', (error) => pageErrors.push(error.message));
 		let resolveRoute: (() => void) | undefined;
 		const gate = new Promise<void>((resolve) => {
 			resolveRoute = resolve;
@@ -63,6 +65,7 @@ test.describe('Offline fallback page', () => {
 		resolveRoute?.();
 		await navigation;
 		await expect(page.getByRole('heading', { name: 'Du bist wieder verbunden.' })).toBeVisible();
+		expect(pageErrors).toEqual([]);
 	});
 
 	test('keeps queued actions visible when the browser is offline', async ({ page, context }) => {

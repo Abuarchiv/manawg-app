@@ -95,6 +95,7 @@ export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps)
 						autoComplete="new-password"
 						minLength={NEW_PASSWORD_MIN_LENGTH}
 						required
+						enterKeyHint="next"
 						aria-describedby={error ? 'reset-password-error' : undefined}
 						aria-invalid={error ? true : undefined}
 						className="text-base"
@@ -111,6 +112,7 @@ export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps)
 						autoComplete="new-password"
 						minLength={NEW_PASSWORD_MIN_LENGTH}
 						required
+						enterKeyHint="done"
 						aria-describedby={error ? 'reset-password-error' : undefined}
 						aria-invalid={error ? true : undefined}
 						className="text-base"

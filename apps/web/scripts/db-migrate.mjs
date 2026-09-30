@@ -207,6 +207,12 @@ export function validateDatabaseUrl(url, label) {
 			`${label} must not use port 6543 (Supavisor Transaction Pooler). Use port 5432 or omit the port for local/Direct connections.`,
 		);
 	}
+	if ([...parsed.searchParams.keys()].some((key) => key !== 'sslmode')) {
+		throw new Error(`${label} must not include unsupported PostgreSQL query parameters.`);
+	}
+	if (parsed.searchParams.getAll('sslmode').length > 1) {
+		throw new Error(`${label} must specify sslmode at most once.`);
+	}
 	const host = parsed.hostname.toLowerCase();
 	const isLocal = LOCAL_HOSTS.has(host) || host.endsWith('.local');
 	if (!isLocal && !parsed.port) {

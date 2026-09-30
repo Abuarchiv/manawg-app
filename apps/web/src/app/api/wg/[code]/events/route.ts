@@ -306,6 +306,7 @@ export const POST = withWgRoute('events POST', async (req, { code }) => {
 			eventId: row.id,
 			title: row.title,
 			startsAt: row.startsAt.toISOString(),
+			allDay: row.allDay,
 			actorName: auth.member.name,
 		},
 		excludeMemberId: auth.member.memberId,

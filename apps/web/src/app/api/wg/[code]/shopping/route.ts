@@ -32,7 +32,7 @@ import {
 	shoppingCreateHttpResponse,
 	withShoppingCreatePostCommitFallback,
 } from '@/features/shopping/shopping-mutation';
-import { and, asc, eq, isNotNull } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -68,13 +68,24 @@ export const GET = withWgRoute(
 			SHOPPING_ITEMS_LIST_LIMIT,
 			SHOPPING_ITEMS_LIST_LIMIT_MAX,
 		);
-		const items = await db
-			.select()
-			.from(shoppingItems)
-			.where(eq(shoppingItems.wgId, wgId))
-			.orderBy(asc(shoppingItems.boughtAt), asc(shoppingItems.createdAt))
-			.limit(listLimit);
-		return NextResponse.json({ items });
+		// Open items always ship in full (bounded only by the hard ceiling); the
+		// list limit caps the bought history, newest first, so a long purchase
+		// history can never push open items out of the response.
+		const [openItems, boughtItems] = await Promise.all([
+			db
+				.select()
+				.from(shoppingItems)
+				.where(and(eq(shoppingItems.wgId, wgId), isNull(shoppingItems.boughtAt)))
+				.orderBy(asc(shoppingItems.createdAt))
+				.limit(SHOPPING_ITEMS_LIST_LIMIT_MAX),
+			db
+				.select()
+				.from(shoppingItems)
+				.where(and(eq(shoppingItems.wgId, wgId), isNotNull(shoppingItems.boughtAt)))
+				.orderBy(desc(shoppingItems.boughtAt), asc(shoppingItems.createdAt))
+				.limit(listLimit),
+		]);
+		return NextResponse.json({ items: [...openItems, ...boughtItems] });
 	},
 	{ fixture: () => NextResponse.json({ items: [] }) },
 );

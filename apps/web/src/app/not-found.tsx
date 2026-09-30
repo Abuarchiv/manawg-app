@@ -20,7 +20,7 @@ export default function NotFound() {
 		<main
 			id="main"
 			tabIndex={-1}
-			className="flex min-h-svh flex-col items-center justify-center bg-background px-4 pb-[env(safe-area-inset-bottom)] text-center focus:outline-none"
+			className="flex min-h-svh flex-col items-center justify-center bg-background px-4 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] text-center focus:outline-none"
 		>
 			<div className="w-full max-w-md">
 				<Empty>

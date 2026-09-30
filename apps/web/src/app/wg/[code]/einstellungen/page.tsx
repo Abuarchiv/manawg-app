@@ -102,8 +102,26 @@ export default function EinstellungenPage() {
 		return () => window.removeEventListener('hashchange', update);
 	}, []);
 
+	// WCAG 2.4.11: measure the sticky tab strip so the scroll-padding rule in
+	// globals.css (html:has([data-sticky-tabs])) clears exactly its height,
+	// including when text scaling wraps it onto a second line.
+	useEffect(() => {
+		const tabsList = document.querySelector<HTMLElement>('[data-sticky-tabs]');
+		if (!tabsList) return;
+		const setHeight = () => {
+			document.documentElement.style.setProperty(
+				'--settings-tabs-height',
+				`${tabsList.getBoundingClientRect().height}px`,
+			);
+		};
+		setHeight();
+		const observer = new ResizeObserver(setHeight);
+		observer.observe(tabsList);
+		return () => observer.disconnect();
+	}, []);
+
 	return (
-		<div className="mx-auto min-w-0 w-full max-w-3xl px-4 pb-[env(safe-area-inset-bottom,0px)]">
+		<div className="mx-auto min-w-0 w-full max-w-3xl px-[16px] pb-[env(safe-area-inset-bottom,0px)]">
 			<div className="min-w-0 py-4">
 				<header className="mb-4 flex items-center gap-2">
 					<Link
@@ -114,7 +132,7 @@ export default function EinstellungenPage() {
 						<ArrowLeft aria-hidden />
 						<span className="sr-only">Zurück zum Dashboard</span>
 					</Link>
-					<h1 className="font-heading min-w-0 flex-1 text-xl font-semibold tracking-tight break-words text-foreground">
+					<h1 className="font-heading min-w-0 flex-1 text-lg font-semibold tracking-tight break-words text-foreground">
 						Einstellungen
 					</h1>
 				</header>
@@ -130,15 +148,18 @@ export default function EinstellungenPage() {
 					}}
 				>
 					<TabsList
-						className="sticky z-10 grid h-auto min-w-0 max-w-full w-full grid-cols-4 gap-1 rounded-xl p-1"
-						style={{ top: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)' }}
+						data-sticky-tabs
+						className="sticky z-10 grid h-auto min-w-0 max-w-full w-full grid-cols-[repeat(auto-fit,minmax(min(100%,4rem),1fr))] gap-1 rounded-xl p-1"
+						style={{
+							top: 'calc(env(safe-area-inset-top, 0px) + var(--offline-banner-height, 0px) + 0.5rem)',
+						}}
 					>
 						{SETTINGS_TABS.map((tab) => (
 							<TabsTrigger
 								key={tab.id}
 								value={tab.id}
 								id={`tab-${tab.id}`}
-								className="min-h-[44px] w-full min-w-0 whitespace-normal px-1 text-center text-xs"
+								className="w-full min-w-0 whitespace-normal px-1 text-center text-xs"
 							>
 								{tab.id === 'notifications' ? 'Hinweise' : tab.label}
 							</TabsTrigger>

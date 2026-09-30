@@ -20,12 +20,10 @@ export interface TodayImportantItem {
 	tone: 'danger' | 'accent' | 'neutral';
 	isPersonal: boolean;
 	entityId?: string;
+	expectedNextDueAt?: string;
+	expectedAssignedMemberId?: string | null;
 	amountCents?: number;
 	currency?: string;
-}
-
-export interface TodayFocusItem extends TodayImportantItem {
-	actionLabel: string;
 }
 
 export interface TodayImportantInput {
@@ -70,23 +68,6 @@ export interface TodayImportantInput {
 	now?: number;
 }
 
-interface EmptyWgAction {
-	id: string;
-	title: string;
-	detail: string;
-	href: string;
-}
-
-interface EmptyWgActionInput {
-	shareCode: string;
-	memberCount: number;
-	choreCount: number;
-	hasExpense: boolean;
-	hasShoppingItem: boolean;
-	hasAnnouncement: boolean;
-	notificationsEnabled: boolean;
-}
-
 interface WgHealthInput {
 	shareCode: string;
 	openShoppingCount: number;
@@ -115,11 +96,6 @@ function formatCurrencyTotals(totals: Readonly<Record<string, number>>): string 
 	return entries.length > 0
 		? entries.map(([currency, cents]) => formatEuro(cents, currency)).join(' · ')
 		: formatEuro(0);
-}
-
-function withQuery(path: string, params: Record<string, string>): string {
-	const searchParams = new URLSearchParams(params);
-	return `${path}?${searchParams.toString()}`;
 }
 
 function calendarDayDistance(iso: string, now: number): number | null {
@@ -183,6 +159,8 @@ export function getTodayImportantItems(input: TodayImportantInput): TodayImporta
 					tone: urgency === 0 ? ('danger' as const) : ('accent' as const),
 					isPersonal,
 					entityId: chore.id,
+					expectedNextDueAt: chore.nextDueAt,
+					expectedAssignedMemberId: chore.assignedMemberId ?? null,
 				},
 				urgency,
 				isPersonal,
@@ -457,93 +435,6 @@ export function getWeekAgenda(input: {
 		overdue: overdue.sort(sortByDate),
 		upcoming: upcoming.sort(sortByDate),
 	};
-}
-
-export function getTodayFocus(items: TodayImportantItem[]): TodayFocusItem | null {
-	const [focus] = items;
-	if (!focus) return null;
-	return {
-		...focus,
-		actionLabel:
-			{
-				chore: 'Aufgabe ansehen',
-				shopping: 'Einkaufsliste öffnen',
-				announcement: 'Beitrag ansehen',
-				recurring: 'Buchung prüfen',
-				absence: 'Abwesenheit ansehen',
-				debt: 'Finanzen öffnen',
-			}[focus.kind] ?? 'Öffnen',
-	};
-}
-
-export function getTodayListItems(
-	items: TodayImportantItem[],
-	focus: TodayFocusItem | null,
-): TodayImportantItem[] {
-	if (!focus) return items;
-	return items.filter(
-		(item) =>
-			item.kind !== focus.kind ||
-			item.href !== focus.href ||
-			item.title !== focus.title ||
-			item.detail !== focus.detail,
-	);
-}
-
-export function getEmptyWgActions(input: EmptyWgActionInput): EmptyWgAction[] {
-	const base = `/wg/${encodeURIComponent(input.shareCode)}`;
-	const actions: EmptyWgAction[] = [];
-
-	if (input.memberCount < 2) {
-		actions.push({
-			id: 'invite',
-			title: 'Mitbewohner einladen',
-			detail: 'Einladungslink in den WG-Einstellungen teilen.',
-			href: `${base}/einstellungen#zugang`,
-		});
-	}
-	if (input.choreCount === 0) {
-		actions.push({
-			id: 'chores',
-			title: 'Erste Aufgabe anlegen',
-			detail: 'Beispiel ist vorausgefüllt, damit nichts liegen bleibt.',
-			href: withQuery(`${base}/putzen`, { title: 'Bad putzen' }),
-		});
-	}
-	if (!input.hasExpense) {
-		actions.push({
-			id: 'expense',
-			title: 'Erste Ausgabe eintragen',
-			detail: 'Beschreibung, Betrag und Aufteilung vor dem Speichern prüfen.',
-			href: withQuery(`${base}/ausgaben`, { desc: 'Gemeinsame Ausgabe' }),
-		});
-	}
-	if (!input.hasShoppingItem) {
-		actions.push({
-			id: 'shopping',
-			title: 'Einkaufsliste füllen',
-			detail: 'Milch ist vorausgefüllt, damit die Liste sofort nutzbar wird.',
-			href: `${base}/einkauf?name=Milch`,
-		});
-	}
-	if (!input.hasAnnouncement) {
-		actions.push({
-			id: 'announcement',
-			title: 'Ersten Pinnwand-Beitrag schreiben',
-			detail: 'Paket im Flur ist vorausgefüllt und kann direkt ersetzt werden.',
-			href: withQuery(`${base}/pinnwand`, { content: 'Paket im Flur', kind: 'question' }),
-		});
-	}
-	if (!input.notificationsEnabled) {
-		actions.push({
-			id: 'notifications',
-			title: 'Benachrichtigungen prüfen',
-			detail: 'Nur wichtige WG-Sachen landen rechtzeitig bei dir.',
-			href: `${base}/einstellungen#benachrichtigungen`,
-		});
-	}
-
-	return actions.slice(0, 5);
 }
 
 export function getWgHealth(input: WgHealthInput): WgHealth {

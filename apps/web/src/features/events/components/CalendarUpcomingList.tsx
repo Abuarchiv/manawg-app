@@ -1,6 +1,5 @@
 'use client';
 
-import { Badge } from '@/components/ui/badge';
 import {
 	Empty,
 	EmptyDescription,
@@ -11,9 +10,10 @@ import {
 import {
 	type EventOccurrence,
 	eventDateForDisplay,
-	formatEventTimeRange,
+	formatEventTimeOfDay,
 } from '@/features/events/events';
 import { occurrenceToIcs } from '@/features/events/ics';
+import { cn } from '@/shared/lib/cn';
 import { CalendarClock, ChevronRight, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
@@ -29,13 +29,14 @@ interface CalendarUpcomingListProps {
 }
 
 const ROW_CLASS =
-	'flex min-h-14 w-full min-w-0 items-center gap-3 px-3 py-2 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 active:bg-muted';
+	'flex min-h-11 w-full min-w-0 items-center gap-2 py-1.5 pr-3 pl-1 text-left outline-none transition-colors hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-inset focus-visible:ring-ring/50 active:bg-muted';
 
 const DAY_FORMATTER = new Intl.DateTimeFormat('de-DE', {
 	weekday: 'long',
 	day: 'numeric',
 	month: 'long',
 });
+const WEEKDAY_FORMATTER = new Intl.DateTimeFormat('de-DE', { weekday: 'short' });
 
 function formatDayLabel(date: Date, now = new Date()): string {
 	const dayMs = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -92,73 +93,94 @@ export function CalendarUpcomingList({
 		);
 	}
 
-	const days = new Map<string, { label: string; entries: typeof entries }>();
+	const days = new Map<string, { label: string; date: Date; entries: typeof entries }>();
 	for (const entry of entries) {
 		const date =
 			entry.kind === 'event'
 				? eventDateForDisplay(entry.startsAt, entry.occurrence.allDay)
 				: new Date(entry.startsAt);
 		const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
-		const day = days.get(key) ?? { label: formatDayLabel(date), entries: [] };
+		const day = days.get(key) ?? { label: formatDayLabel(date), date, entries: [] };
 		day.entries.push(entry);
 		days.set(key, day);
 	}
 
+	// Eine Liste, Datum links: Tage lassen sich wie in einem Taschenkalender überfliegen.
 	return (
-		<div className="flex flex-col gap-4">
-			{[...days.entries()].map(([key, day]) => (
-				<section key={key} aria-label={day.label} className="flex flex-col gap-1">
-					<h3 className="pt-1 text-sm font-semibold">{day.label}</h3>
-					<ul className="flex flex-col divide-y divide-border/60 rounded-xl border">
-						{day.entries.map((entry) =>
-							entry.kind === 'chore' ? (
-								<li key={`chore-${entry.chore.choreId}-${entry.chore.startsAt}`}>
-									<Link
-										href={`${wgBaseHref}/putzen?highlight=${encodeURIComponent(entry.chore.choreId)}`}
-										aria-label={`Putzaufgabe öffnen: ${entry.chore.title}`}
-										className={ROW_CLASS}
-									>
-										<Sparkles className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="font-medium break-words">{entry.chore.title}</span>
-											<span className="text-sm text-muted-foreground">Putzplan</span>
-										</span>
-										<ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-									</Link>
-								</li>
-							) : (
-								<li key={`${entry.occurrence.eventId}-${entry.occurrence.occurrenceIndex}`}>
-									<button
-										type="button"
-										onClick={() => onSelect(entry.occurrence)}
-										aria-label={`Termin bearbeiten: ${entry.occurrence.title}`}
-										className={ROW_CLASS}
-									>
-										<CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-										<span className="flex min-w-0 flex-1 flex-col">
-											<span className="font-medium break-words">{entry.occurrence.title}</span>
-											<span className="text-sm text-muted-foreground">
-												{formatEventTimeRange(entry.occurrence)}
-											</span>
-											{entry.occurrence.location && (
-												<span className="text-sm break-words text-muted-foreground">
-													{entry.occurrence.location}
+		<ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
+			{[...days.entries()].map(([key, day]) => {
+				const isToday = day.label.startsWith('Heute');
+				return (
+					<li key={key} className="grid grid-cols-[3.25rem_minmax(0,1fr)]">
+						<h3
+							className={cn(
+								'flex flex-col items-center pt-2 leading-tight',
+								isToday ? 'text-foreground' : 'text-muted-foreground',
+							)}
+						>
+							<span className="sr-only">{day.label}</span>
+							<span aria-hidden className="text-[11px] uppercase">
+								{isToday ? 'Heute' : WEEKDAY_FORMATTER.format(day.date).replace('.', '')}
+							</span>
+							<span
+								aria-hidden
+								className={cn('text-base font-semibold tabular-nums', isToday && 'text-foreground')}
+							>
+								{day.date.getDate()}
+							</span>
+						</h3>
+						<ul aria-label={day.label} className="flex min-w-0 flex-col divide-y divide-border/60">
+							{day.entries.map((entry) =>
+								entry.kind === 'chore' ? (
+									<li key={`chore-${entry.chore.choreId}-${entry.chore.startsAt}`}>
+										<Link
+											href={`${wgBaseHref}/putzen?highlight=${encodeURIComponent(entry.chore.choreId)}`}
+											aria-label={`Putzaufgabe öffnen: ${entry.chore.title}`}
+											className={ROW_CLASS}
+										>
+											<span className="flex min-w-0 flex-1 flex-col">
+												<span className="text-[14px] font-medium break-words">
+													{entry.chore.title}
 												</span>
-											)}
-											{entry.occurrence.recurring && (
-												<Badge variant="secondary" className="mt-1 w-fit">
-													Wiederholend
-												</Badge>
-											)}
-										</span>
-										<ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-									</button>
-								</li>
-							),
-						)}
-					</ul>
-				</section>
-			))}
-		</div>
+												<span className="inline-flex items-center gap-1 text-[12px] text-muted-foreground">
+													<Sparkles className="size-3.5 shrink-0" aria-hidden />
+													Putzplan
+												</span>
+											</span>
+											<ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+										</Link>
+									</li>
+								) : (
+									<li key={`${entry.occurrence.eventId}-${entry.occurrence.occurrenceIndex}`}>
+										<button
+											type="button"
+											onClick={() => onSelect(entry.occurrence)}
+											aria-label={`Termin bearbeiten: ${entry.occurrence.title}`}
+											className={ROW_CLASS}
+										>
+											<span className="flex min-w-0 flex-1 flex-col">
+												<span className="text-[14px] font-medium break-words">
+													{entry.occurrence.title}
+												</span>
+												<span className="text-[12px] break-words text-muted-foreground">
+													<CalendarClock
+														className="mr-1 inline size-3.5 align-[-2px]"
+														aria-hidden
+													/>
+													{formatEventTimeOfDay(entry.occurrence)}
+													{entry.occurrence.location && ` · ${entry.occurrence.location}`}
+													{entry.occurrence.recurring && ' · wiederholt sich'}
+												</span>
+											</span>
+											<ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+										</button>
+									</li>
+								),
+							)}
+						</ul>
+					</li>
+				);
+			})}
+		</ul>
 	);
 }

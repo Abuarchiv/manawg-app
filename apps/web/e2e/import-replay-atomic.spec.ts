@@ -41,6 +41,7 @@ function harness(initialSlot: unknown) {
 		notices: 0,
 		audits: 0,
 		dispatches: 0,
+		capturing: false,
 		failReplayWrite: false,
 	};
 	let prior = Promise.resolve();
@@ -116,7 +117,10 @@ function harness(initialSlot: unknown) {
 			},
 		},
 		'@/core/utils/money': { formatEuroCents: () => '0,00 €' },
-		'@/features/expenses/expense-payments': { withExpensePaymentLock },
+		'@/features/expenses/expense-payments': {
+			hasCapturingExpensePayment: async () => state.capturing,
+			withExpensePaymentLock,
+		},
 		'@/features/expenses/split-math': { settledAtForOwnShare: () => null },
 		'drizzle-orm': {
 			and: (...parts: unknown[]) => parts,
@@ -153,6 +157,14 @@ function input(count = 1, skip = true) {
 		replay: { scope: 'import-commit:wg:member', key: 'key' },
 	};
 }
+
+test('import waits for PayPal capture without writing an expense', async () => {
+	const { state, commitImport } = harness({ _claimed: true });
+	state.capturing = true;
+	await expect(commitImport(input())).rejects.toThrow('paypal_payment_pending');
+	expect(state.imports).toBe(0);
+	expect(state.slot).toEqual({ _claimed: true });
+});
 
 test('lost response and notification failure replay the one committed import', async () => {
 	const { state, commitImport } = harness({ _claimed: true });

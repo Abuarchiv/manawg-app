@@ -29,6 +29,7 @@ async function initialize(env, failImport = false, failInit = false) {
 			process: { env },
 			console: { warn() {}, error() {} },
 			require(name) {
+				if (name === '@/core/infra/sentry') return { initializeSentry() {} };
 				assert.equal(name, 'posthog-js');
 				imports++;
 				if (failImport) throw new Error('provider blocked');

@@ -207,23 +207,17 @@ function sampleAction(type) {
 	};
 }
 
-test('#513: queue edit links route to the page that owns the draft', () => {
+test('#513: queue edit links route only when an owning form exists', () => {
 	assert.equal(
 		drafts.buildQueueEditActionHref(SHARE_CODE, 'shopping.create'),
 		`/wg/${SHARE_CODE}/einkauf`,
 	);
-	assert.equal(
-		drafts.buildQueueEditActionHref(SHARE_CODE, 'shopping.update'),
-		`/wg/${SHARE_CODE}/einkauf`,
-	);
+	assert.equal(drafts.buildQueueEditActionHref(SHARE_CODE, 'shopping.update'), null);
 	assert.equal(
 		drafts.buildQueueEditActionHref(SHARE_CODE, 'expense.create'),
 		`/wg/${SHARE_CODE}/ausgaben`,
 	);
-	assert.equal(
-		drafts.buildQueueEditActionHref(SHARE_CODE, 'expense.update'),
-		`/wg/${SHARE_CODE}/ausgaben`,
-	);
+	assert.equal(drafts.buildQueueEditActionHref(SHARE_CODE, 'expense.update'), null);
 	assert.equal(
 		drafts.buildQueueEditActionHref(SHARE_CODE, 'recurring.create'),
 		`/wg/${SHARE_CODE}/ausgaben`,

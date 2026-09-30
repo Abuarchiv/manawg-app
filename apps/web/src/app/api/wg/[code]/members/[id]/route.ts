@@ -1,27 +1,20 @@
 import { recordAuditEvent } from '@/core/audit';
-import { db, wgMembers } from '@/core/db';
-import { lockActiveAccountMember } from '@/core/db/account-deletion';
-import { withTransaction } from '@/core/db/transaction';
-import {
-	apiError,
-	badRequest,
-	forbidden,
-	notFound,
-	requireVerifiedMember,
-	tooMany,
-} from '@/core/errors';
+import { db, pushSubscriptions, wgMembers } from '@/core/db';
+import { hasCapturingMemberPayment, lockActiveAccountMember } from '@/core/db/account-deletion';
+import { apiError, badRequest, conflict, forbidden, notFound, tooMany } from '@/core/errors';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { computeBalances } from '@/features/expenses/debts';
-import { loadCompletedExpensePayments } from '@/features/expenses/expense-payments';
+import {
+	loadCompletedExpensePayments,
+	withExpensePaymentLock,
+} from '@/features/expenses/expense-payments';
 import { loadOpenExpenses } from '@/features/expenses/open-expenses';
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-
-const PAYPAL_MERCHANT_ID_PATTERN = /^[2-9A-HJ-NP-Z]{13}$/;
 
 /** One open debt of the member being viewed, from their own perspective. */
 interface OpenBalanceDto {
@@ -109,15 +102,9 @@ export const GET = withWgRoute<{ id: string }>('members/[id] GET', async (req, {
 const patchSchema = z
 	.object({
 		active: z.boolean().optional(),
-		paypalMerchantId: z
-			.string()
-			.trim()
-			.toUpperCase()
-			.regex(PAYPAL_MERCHANT_ID_PATTERN)
-			.nullable()
-			.optional(),
 	})
-	.refine((value) => value.active !== undefined || value.paypalMerchantId !== undefined);
+	.strict()
+	.refine((value) => value.active !== undefined);
 
 /**
  * PATCH toggles a member between active and deactivated ("Auszug"). Deactivation
@@ -136,31 +123,18 @@ export const PATCH = withWgRoute<{ id: string }>(
 			return badRequest('invalid_json');
 		}
 		const parsed = patchSchema.safeParse(raw);
-		if (!parsed.success) {
-			return badRequest(
-				parsed.error.issues.some((issue) => issue.path[0] === 'paypalMerchantId')
-					? 'paypal_merchant_id_invalid'
-					: 'active_invalid',
-			);
-		}
-		const { active, paypalMerchantId } = parsed.data;
+		if (!parsed.success) return badRequest('active_invalid');
+		const { active } = parsed.data;
 		const auth = await requireWgMember(req, code);
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;
-		if (paypalMerchantId !== undefined) {
-			const verified = requireVerifiedMember(auth.member);
-			if (verified) return verified;
-			if (auth.member.memberId !== id) {
-				return forbidden('paypal_merchant_id_owner_only', 'paypal_merchant_id_owner_only');
-			}
-		}
 		const limited = await checkRateLimit(
 			wgWriteLimiter,
 			`member-update:${wgId}:${auth.member.memberId}`,
 		);
 		if (!limited.success) return tooMany();
 
-		const result = await withTransaction(async (tx) => {
+		const result = await withExpensePaymentLock(wgId, async (tx) => {
 			const actor = await lockActiveAccountMember(tx, wgId, auth.member.memberId, auth.authUserId);
 			if (!actor) return { ok: false as const, response: apiError('member_deactivated', 401) };
 			const [target] = await tx
@@ -181,26 +155,24 @@ export const PATCH = withWgRoute<{ id: string }>(
 			if (active !== undefined && !verifiedOwner && !verifiedAdmin) {
 				return { ok: false as const, response: forbidden('not_owner', 'not_owner') };
 			}
-			if (paypalMerchantId !== undefined && !verifiedOwner) {
-				return {
-					ok: false as const,
-					response: forbidden('paypal_merchant_id_owner_only', 'paypal_merchant_id_owner_only'),
-				};
-			}
 			if (active === false && target.role === 'admin') {
 				return { ok: false as const, response: forbidden('admin_required', 'admin_required') };
 			}
 
+			if (
+				active === false &&
+				target.deactivatedAt === null &&
+				(await hasCapturingMemberPayment(tx, wgId, id))
+			) {
+				return { ok: false as const, response: conflict('paypal_payment_pending') };
+			}
 			const activeUnchanged = active === undefined || active === (target.deactivatedAt === null);
-			const paypalUnchanged =
-				paypalMerchantId === undefined || paypalMerchantId === (target.paypalMerchantId ?? null);
-			if (activeUnchanged && paypalUnchanged) {
+			if (activeUnchanged) {
 				return { ok: true as const, changedActive: false, member: target };
 			}
 
 			const updateValues = {
 				...(active !== undefined ? { deactivatedAt: active ? null : new Date() } : {}),
-				...(paypalMerchantId !== undefined ? { paypalMerchantId } : {}),
 			};
 			const [updated] = await tx
 				.update(wgMembers)
@@ -213,6 +185,11 @@ export const PATCH = withWgRoute<{ id: string }>(
 					paypalMerchantId: wgMembers.paypalMerchantId,
 				});
 			if (!updated) return { ok: false as const, response: notFound('member_not_found') };
+			// A moved-out member must not keep receiving pushes, and their browser
+			// endpoint has to be free for the next WG on the same device.
+			if (active === false) {
+				await tx.delete(pushSubscriptions).where(eq(pushSubscriptions.memberId, id));
+			}
 			return {
 				ok: true as const,
 				changedActive: active !== undefined && active !== (target.deactivatedAt === null),

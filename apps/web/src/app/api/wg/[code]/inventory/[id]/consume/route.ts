@@ -11,6 +11,7 @@ import {
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { getCachedResponse, readIdempotencyKey, releaseResponseSlot } from '@/core/idempotency';
+import { logApiError } from '@/core/infra/observability';
 import { dispatchNotificationSafely } from '@/core/notifications/notification-dispatch';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { consumeInventoryMutation } from '@/features/inventory/consume-mutation';
@@ -170,7 +171,7 @@ export const POST = withWgRoute<{ id: string }>('inventory consume', async (req,
 				);
 				if (!persisted) throw new Error('replay_row_missing');
 			} catch (warningError) {
-				console.error('[inventory/consume] replay warning persistence failed:', warningError);
+				logApiError('[inventory/consume] replay warning persistence failed', warningError);
 				warning = null;
 			}
 		}

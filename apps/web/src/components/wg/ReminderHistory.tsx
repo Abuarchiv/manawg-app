@@ -27,6 +27,7 @@ export interface ReminderHistoryItem {
 interface ReminderHistoryProps {
 	items: ReadonlyArray<ReminderHistoryItem>;
 	memberName: (id: string) => string;
+	currentMemberId?: string;
 }
 
 // The API stores internal channel codes ('push' | 'inapp'); an unmapped
@@ -40,7 +41,7 @@ function channelLabel(channel: string): string {
 	return CHANNEL_LABELS[channel] ?? channel;
 }
 
-export function ReminderHistory({ items, memberName }: ReminderHistoryProps) {
+export function ReminderHistory({ items, memberName, currentMemberId }: ReminderHistoryProps) {
 	if (items.length === 0)
 		return (
 			<Empty>
@@ -59,7 +60,12 @@ export function ReminderHistory({ items, memberName }: ReminderHistoryProps) {
 				<Item key={item.id} variant="outline" size="sm">
 					<ItemContent className="min-w-0">
 						<ItemTitle className="line-clamp-none break-words">
-							{memberName(item.debtorMemberId)} schuldet {memberName(item.creditorMemberId)}
+							{item.debtorMemberId === currentMemberId
+								? 'Du schuldest'
+								: `${memberName(item.debtorMemberId)} schuldet`}{' '}
+							{item.creditorMemberId === currentMemberId
+								? 'dir'
+								: memberName(item.creditorMemberId)}
 						</ItemTitle>
 						<ItemDescription>
 							<time dateTime={item.sentAt} title={formatTimeFull(item.sentAt)}>

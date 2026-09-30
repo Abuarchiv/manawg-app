@@ -27,6 +27,7 @@ import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
 import { inputDateToIso } from '@/core/utils/local-date';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { SplitReview } from '@/features/expenses/components/ausgaben/SplitReview';
+import { splitInputErrorMessage } from '@/features/expenses/expense-errors';
 import { useEffect, useMemo, useState } from 'react';
 
 const DESCRIPTION_MAX = 200;
@@ -61,6 +62,12 @@ interface AboFormProps {
 }
 
 type SplitMode = 'equal' | 'manual';
+type AboSplitBuildError =
+	| 'amount_invalid'
+	| 'invalid_share'
+	| 'no_members'
+	| 'splits_empty'
+	| 'splits_mismatch';
 
 function buildEqualSplits(members: MemberOption[], amountCents: number): AboSplit[] {
 	// Only active members carry a share of a new equal split; members who
@@ -155,6 +162,7 @@ export function AboForm({
 		initialManualMap(initial),
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [splitError, setSplitError] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!initial) return;
@@ -165,6 +173,7 @@ export function AboForm({
 		setNextDueAt(isoDateToInput(initial.nextDueAt));
 		setSplitMode(initialSplitMode(initial, activeMembers));
 		setManualSplits(initialManualMap(initial));
+		setSplitError(null);
 	}, [initial, activeMembers]);
 
 	const parsedAmountCents = useMemo(() => {
@@ -197,7 +206,7 @@ export function AboForm({
 		);
 	}, [activeMembers, members, splitMode, manualSplits]);
 
-	function buildSplits(): AboSplit[] | string {
+	function buildSplits(): AboSplit[] | AboSplitBuildError {
 		if (parsedAmountCents === null) return 'amount_invalid';
 		if (splitMode === 'equal') {
 			const equal = buildEqualSplits(activeMembers, parsedAmountCents);
@@ -210,7 +219,8 @@ export function AboForm({
 			const raw = manualSplits[member.id] ?? '';
 			if (raw.trim().length === 0) continue;
 			const value = parseEuroAmount(raw);
-			if (value === null || value <= 0) continue;
+			if (value === null || value < 0) return 'invalid_share';
+			if (value === 0) continue;
 			const cents = Math.round(value * CENTS_PER_EURO);
 			splits.push({ debtorMemberId: member.id, amountCents: cents });
 			sum += cents;
@@ -223,6 +233,7 @@ export function AboForm({
 	function handleSubmit(event: React.FormEvent<HTMLFormElement>): void {
 		event.preventDefault();
 		setError(null);
+		setSplitError(null);
 		const trimmedDescription = description.trim();
 		if (trimmedDescription.length === 0 || trimmedDescription.length > DESCRIPTION_MAX) {
 			setError('Beschreibung fehlt.');
@@ -244,11 +255,8 @@ export function AboForm({
 		const splits = buildSplits();
 		if (typeof splits === 'string') {
 			if (splits === 'amount_invalid') setError('Betrag ungültig.');
-			else if (splits === 'splits_empty')
-				setError('Aufteilung leer — gib mindestens einen Betrag ein.');
-			else if (splits === 'splits_mismatch')
-				setError('Beträge stimmen nicht überein — Summe muss exakt dem Gesamtbetrag entsprechen.');
-			else setError('Keine Mitglieder vorhanden.');
+			else if (splits === 'no_members') setError('Keine Mitglieder vorhanden.');
+			else setSplitError(splitInputErrorMessage(splits));
 			return;
 		}
 		onSubmit({
@@ -274,6 +282,7 @@ export function AboForm({
 						onChange={(event) => setDescription(event.target.value)}
 						placeholder="z. B. Netflix"
 						disabled={submitting}
+						enterKeyHint="next"
 						className="text-base"
 						aria-invalid={Boolean(descriptionError)}
 						aria-describedby={descriptionError ? 'abo-description-error' : undefined}
@@ -288,9 +297,13 @@ export function AboForm({
 							type="text"
 							inputMode="decimal"
 							value={amountStr}
-							onChange={(event) => setAmountStr(event.target.value)}
+							onChange={(event) => {
+								setAmountStr(event.target.value);
+								setSplitError(null);
+							}}
 							placeholder="0,00"
 							disabled={submitting}
+							enterKeyHint="next"
 							className="min-h-11 font-mono tabular-nums text-base"
 							aria-invalid={Boolean(amountError)}
 							aria-describedby={amountError ? 'abo-amount-error' : undefined}
@@ -355,50 +368,57 @@ export function AboForm({
 					/>
 					<FieldError id="abo-next-due-error">{nextDueError}</FieldError>
 				</Field>
-				<FieldSet disabled={submitting}>
+				<FieldSet disabled={submitting} data-invalid={Boolean(splitError)}>
 					<FieldLegend>Beteiligte & Aufteilung</FieldLegend>
 					<ToggleGroup
 						variant="segmented"
 						value={[splitMode]}
 						onValueChange={(values) => {
 							const value = values[0];
-							if (value === 'equal' || value === 'manual') setSplitMode(value);
+							if (value === 'equal' || value === 'manual') {
+								setSplitMode(value);
+								setSplitError(null);
+							}
 						}}
 						className="w-full"
-						aria-label="Abo-Aufteilung"
+						aria-label="Fixkosten-Aufteilung"
 					>
-						<ToggleGroupItem value="equal" className="min-h-11 flex-1">
+						<ToggleGroupItem value="equal" className="flex-1">
 							Gleichmäßig
 						</ToggleGroupItem>
-						<ToggleGroupItem value="manual" className="min-h-11 flex-1">
+						<ToggleGroupItem value="manual" className="flex-1">
 							Manuell
 						</ToggleGroupItem>
 					</ToggleGroup>
 					{splitMode === 'manual' && (
-						<FieldGroup className="gap-3">
-							{splitCandidates.map((member) => (
-								<Field key={member.id} orientation="horizontal">
+						<FieldGroup className={splitError ? 'block space-y-3' : 'gap-3'}>
+							{splitCandidates.map((member, index) => (
+								<Field key={member.id} orientation="responsive">
 									<FieldLabel
 										htmlFor={`abo-share-${member.id}`}
 										className="min-w-0 flex-1 break-words"
 									>
 										{member.name}
 									</FieldLabel>
-									<InputGroup className="w-32 shrink-0">
+									<InputGroup className="w-full min-w-32 shrink-0 @md/field-group:max-w-32">
 										<InputGroupInput
 											id={`abo-share-${member.id}`}
 											type="text"
 											inputMode="decimal"
 											value={manualSplits[member.id] ?? ''}
-											onChange={(event) =>
+											onChange={(event) => {
 												setManualSplits((current) => ({
 													...current,
 													[member.id]: event.target.value,
-												}))
-											}
+												}));
+												setSplitError(null);
+											}}
 											placeholder="0,00"
+											enterKeyHint={index === splitCandidates.length - 1 ? 'done' : 'next'}
 											aria-label={`Anteil ${member.name} in Euro`}
 											disabled={submitting}
+											aria-invalid={Boolean(splitError)}
+											aria-describedby={splitError ? 'abo-splits-error' : undefined}
 											className="min-h-11 font-mono tabular-nums text-base"
 										/>
 										<InputGroupAddon align="inline-end">
@@ -412,6 +432,7 @@ export function AboForm({
 							</FieldDescription>
 						</FieldGroup>
 					)}
+					{splitError && <FieldError id="abo-splits-error">{splitError}</FieldError>}
 					{splitMode !== 'manual' && (
 						<SplitReview
 							members={splitCandidates}
@@ -432,12 +453,18 @@ export function AboForm({
 					{intervalMonths === 1 ? 'Monatlich' : `Alle ${intervalMonths} Monate`} · keine
 					automatische Überweisung.
 				</p>
-				<div className="flex gap-2">
-					<Button type="submit" className="flex-1" disabled={submitting}>
+				<div className="flex flex-col gap-2">
+					<Button type="submit" className="w-full" disabled={submitting}>
 						{submitting && <Spinner data-icon="inline-start" />}
-						{mode === 'create' ? 'Abo anlegen' : 'Speichern'}
+						{mode === 'create' ? 'Fixkosten anlegen' : 'Speichern'}
 					</Button>
-					<Button type="button" variant="ghost" onClick={onCancel} disabled={submitting}>
+					<Button
+						type="button"
+						variant="ghost"
+						className="w-full"
+						onClick={onCancel}
+						disabled={submitting}
+					>
 						Abbrechen
 					</Button>
 				</div>

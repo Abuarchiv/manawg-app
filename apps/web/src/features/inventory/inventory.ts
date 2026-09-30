@@ -47,6 +47,10 @@ export interface InventoryItemDto {
 	updatedAt: string;
 }
 
+export type InventoryMutationItemDto = Omit<InventoryItemDto, 'decrementCount30d'> & {
+	decrementCount30d?: number;
+};
+
 interface InventoryItemForThresholdCheck {
 	quantity: number;
 	threshold: number;
@@ -56,25 +60,8 @@ export function isBelowThreshold(item: InventoryItemForThresholdCheck): boolean 
 	return item.quantity <= item.threshold;
 }
 
-interface ShoppingItemMatch {
-	name: string;
-	boughtAt: Date | null;
-}
-
 export function normalizeForMatch(name: string): string {
 	return name.trim().toLowerCase();
-}
-
-export function shouldAutoPushToShopping(
-	item: InventoryItemForThresholdCheck & { name: string },
-	existingShoppingItems: ShoppingItemMatch[],
-): boolean {
-	if (!isBelowThreshold(item)) return false;
-	const target = normalizeForMatch(item.name);
-	const alreadyOpen = existingShoppingItems.some(
-		(entry) => entry.boughtAt === null && normalizeForMatch(entry.name) === target,
-	);
-	return !alreadyOpen;
 }
 
 interface ShoppingPushPayload {

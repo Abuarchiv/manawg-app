@@ -7,6 +7,7 @@ import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
+import { isRecurringDueAtEditAllowed } from '@/core/validators/recurring-due-date';
 import { checkPaidByGuard } from '@/features/expenses/expenses';
 import {
 	parseRecurringSplits,
@@ -127,6 +128,12 @@ export const PATCH = withWgRoute<{ id: string }>(
 		if (!template) return notFound('recurring_expense_not_found');
 		const denied = await requireOwnerOrAdmin(wgId, auth.member, template.createdByMemberId);
 		if (denied) return denied;
+		if (
+			parsed.data.nextDueAt !== undefined &&
+			!isRecurringDueAtEditAllowed(parsed.data.nextDueAt, template.nextDueAt)
+		) {
+			return badRequest('due_date_invalid');
+		}
 
 		const onlyPauseRequest =
 			parsed.data.paused !== undefined &&

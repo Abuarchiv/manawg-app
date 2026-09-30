@@ -16,6 +16,7 @@ interface FieldProps {
 	required?: boolean;
 	invalid?: boolean;
 	describedBy?: string | undefined;
+	enterKeyHint?: 'done' | 'next' | 'go' | 'search' | 'send';
 }
 
 export function Field({
@@ -30,6 +31,7 @@ export function Field({
 	required = false,
 	invalid = false,
 	describedBy,
+	enterKeyHint,
 }: FieldProps) {
 	const nearLimit = value.length >= maxLength - 8;
 	const describedByProps = describedBy === undefined ? {} : { 'aria-describedby': describedBy };
@@ -59,6 +61,7 @@ export function Field({
 				autoFocus={autoFocus}
 				placeholder={placeholder}
 				autoComplete={autoComplete}
+				enterKeyHint={enterKeyHint}
 				aria-invalid={invalid}
 				{...describedByProps}
 				className="text-base"

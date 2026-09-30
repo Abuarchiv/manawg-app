@@ -1,5 +1,9 @@
 import { recordAuditEvent } from '@/core/audit';
 import { db, expenseSplits, expenses, wgMembers } from '@/core/db';
+import {
+	assertPrivateImageCanBeAttached,
+	revokePrivateImageIfUnreferenced,
+} from '@/core/db/private-image-deletions';
 import { TransactionAbort } from '@/core/db/transaction';
 import {
 	badRequest,
@@ -18,7 +22,10 @@ import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
 import { imageUrlSchema, isAllowedImageUrlForWg } from '@/core/validators/image-url';
 import { AMOUNT_MAX_CENTS, AMOUNT_MIN_CENTS } from '@/features/expenses/expense-constants';
-import { withExpensePaymentLock } from '@/features/expenses/expense-payments';
+import {
+	hasCapturingExpensePayment,
+	withExpensePaymentLock,
+} from '@/features/expenses/expense-payments';
 import {
 	settledAtForOwnShare,
 	splitValidationErrorCode,
@@ -70,6 +77,7 @@ export const DELETE = withWgRoute<{ id: string }>('expense DELETE', async (req, 
 				paidByMemberId: expenses.paidByMemberId,
 				description: expenses.description,
 				amountCents: expenses.amountCents,
+				imageUrl: expenses.imageUrl,
 			})
 			.from(expenses)
 			.where(and(eq(expenses.id, id), eq(expenses.wgId, wgId)))
@@ -89,6 +97,9 @@ export const DELETE = withWgRoute<{ id: string }>('expense DELETE', async (req, 
 			}
 		}
 
+		if (await hasCapturingExpensePayment(tx, wgId)) {
+			return { ok: false as const, response: conflict('paypal_payment_pending') };
+		}
 		const deleted = await tx
 			.delete(expenses)
 			.where(and(eq(expenses.id, id), eq(expenses.wgId, wgId)))
@@ -96,6 +107,7 @@ export const DELETE = withWgRoute<{ id: string }>('expense DELETE', async (req, 
 		if (deleted.length === 0) {
 			return { ok: false as const, response: notFound('expense_not_found') };
 		}
+		await revokePrivateImageIfUnreferenced(tx, wgId, row.imageUrl);
 		return { ok: true as const, row };
 	});
 	if (!deletion.ok) return deletion.response;
@@ -217,6 +229,23 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 	// and every balance wrong, whenever it failed itself.
 	try {
 		await withExpensePaymentLock(wgId, async (tx) => {
+			let previousImageUrl: string | null = null;
+			if (imageUrl !== undefined) {
+				const [currentImage] = await tx
+					.select({ imageUrl: expenses.imageUrl })
+					.from(expenses)
+					.where(and(eq(expenses.id, id), eq(expenses.wgId, wgId)))
+					.limit(1);
+				if (!currentImage) throw new TransactionAbort('expense_not_found');
+				previousImageUrl = currentImage.imageUrl;
+				await assertPrivateImageCanBeAttached(tx, wgId, imageUrl ?? null, previousImageUrl);
+			}
+			if (
+				(amountCents !== undefined || currency !== undefined || splits !== undefined) &&
+				(await hasCapturingExpensePayment(tx, wgId))
+			) {
+				throw new TransactionAbort('paypal_payment_pending');
+			}
 			const previousSplits = splits
 				? await tx
 						.select({
@@ -291,6 +320,9 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 					.limit(1);
 				throw new TransactionAbort(current ? 'expense_changed' : 'expense_not_found');
 			}
+			if (imageUrl !== undefined) {
+				await revokePrivateImageIfUnreferenced(tx, wgId, previousImageUrl, imageUrl ?? null);
+			}
 
 			if (!splits) return;
 
@@ -319,6 +351,8 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 		});
 	} catch (writeErr) {
 		if (writeErr instanceof TransactionAbort) {
+			if (writeErr.code === 'image_removed') return conflict('image_removed', 'image_removed');
+			if (writeErr.code === 'paypal_payment_pending') return conflict('paypal_payment_pending');
 			if (writeErr.code === 'expense_not_found') return notFound('expense_not_found');
 			if (writeErr.code === 'expense_changed')
 				return conflict('expense_changed', 'expense_conflict');

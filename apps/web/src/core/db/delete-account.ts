@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { lockAccount } from './account-deletion';
+import { hasCapturingMemberPayment, lockAccount } from './account-deletion';
 import { deleteWgCascade } from './delete-wg';
 import {
 	accountDeletions,
@@ -8,7 +8,7 @@ import {
 	wgMembers,
 	wgs,
 } from './schema';
-import type { DbTransaction } from './transaction';
+import { type DbTransaction, TransactionAbort, lockExpensePayments } from './transaction';
 
 export type LeftWg = { wgId: string; memberId: string; name: string; newAdminId: string | null };
 
@@ -38,6 +38,7 @@ export async function removeAccountFromWgs(
 		.where(eq(wgMembers.authUserId, authUserId))
 		.orderBy(asc(wgMembers.wgId));
 	const wgIds = [...new Set(membershipWgs.map(({ wgId }) => wgId))];
+	for (const wgId of wgIds) await lockExpensePayments(tx, wgId);
 	if (wgIds.length > 0) {
 		await tx
 			.select({ id: wgs.id })
@@ -56,6 +57,9 @@ export async function removeAccountFromWgs(
 	const left: LeftWg[] = [];
 	const deletedWgIds: string[] = [];
 	for (const membership of memberships) {
+		if (await hasCapturingMemberPayment(tx, membership.wgId, membership.id)) {
+			throw new TransactionAbort('paypal_payment_pending');
+		}
 		const [successor] = await tx
 			.select({ id: wgMembers.id })
 			.from(wgMembers)

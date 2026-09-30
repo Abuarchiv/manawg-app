@@ -77,7 +77,7 @@ export function MentionAutocomplete({
 							onSelect(member);
 						}}
 						onMouseEnter={() => onHoverIndex(index)}
-						className={`flex min-h-[44px] cursor-pointer items-center gap-2 px-3 py-2 text-[13px] transition-colors ${
+						className={`flex min-h-[44px] cursor-pointer items-center gap-2 px-3 py-2 text-[12px] transition-colors ${
 							isActive ? 'bg-muted' : 'hover:bg-muted active:bg-muted'
 						}`}
 					>

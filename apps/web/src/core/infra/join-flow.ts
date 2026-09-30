@@ -34,7 +34,3 @@ export function joinErrorMessage(status: number, error: string): string {
 	}
 	return 'Hat nicht geklappt. Bitte nochmal versuchen.';
 }
-
-export function shouldFallbackToDirectJoin(status: number, error: string): boolean {
-	return status === 401 && error !== 'member_id_required';
-}

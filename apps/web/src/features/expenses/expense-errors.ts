@@ -33,6 +33,9 @@ export function expenseSaveErrorMessage(error: string): string {
 	if (error === 'image_invalid') {
 		return 'Ausgabe konnte nicht gespeichert werden: Der Anhang ist ungültig.';
 	}
+	if (error === 'image_removed') {
+		return 'Ausgabe konnte nicht gespeichert werden: Der Anhang wurde entfernt. Lade ihn erneut hoch.';
+	}
 	if (error === 'expected_updated_at_invalid') {
 		return 'Ausgabe konnte nicht gespeichert werden: Lade die Liste neu und versuche es erneut.';
 	}
@@ -106,8 +109,14 @@ export function expenseActionErrorMessage(error: string): string {
 	if (error === 'id_invalid') {
 		return 'Diese Ausgabenaktion konnte nicht eindeutig zugeordnet werden.';
 	}
+	if (error === 'image_removed') {
+		return 'Der Anhang wurde entfernt. Lade ihn erneut hoch, bevor du die Ausgabe speicherst.';
+	}
 	if (error === 'settled_invalid') {
 		return 'Diese Zahlung konnte nicht markiert werden: Lade die Ausgaben neu und versuche es erneut.';
+	}
+	if (error === 'split_already_offset') {
+		return 'Dieser Anteil ist durch andere Ausgleiche ganz oder teilweise verrechnet. Den vollen Betrag als beglichen zu markieren würde den Saldo überschreiten; die Ausgabenliste wird aktualisiert.';
 	}
 	return 'Ausgabenaktion fehlgeschlagen.';
 }
@@ -213,9 +222,11 @@ export function recurringAdvanceWarningMessage(status: number, error: string): s
  * shows. Keyed by the reasons `buildSplitsFromForm` reports.
  */
 export function splitInputErrorMessage(
-	reason: 'splits_empty' | 'splits_mismatch' | 'no_members',
+	reason: 'invalid_share' | 'splits_empty' | 'splits_mismatch' | 'no_members',
 ): string {
 	switch (reason) {
+		case 'invalid_share':
+			return 'Mindestens ein Anteil ist ungültig. Gib einen gültigen Betrag ein oder lasse das Feld leer.';
 		case 'splits_empty':
 			return 'Aufteilung leer — gib mindestens einen Betrag ein.';
 		case 'splits_mismatch':

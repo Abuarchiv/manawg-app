@@ -1,12 +1,34 @@
 # ManaWG Release Readiness
 
-## Aktuelle Freigabelage — 2026-09-25
 
-- **Nicht release-ready.** Production zeigt den READY-Deploy von Basis-SHA `1250ae3`; die lokalen Korrekturen sind noch uncommitted und haben keinen exakten Hosted-Preview-Nachweis. Push, Merge und Deploy bleiben bis zur ausdrücklichen Freigabe gestoppt.
-- Lokal mit Node 22 bestanden: Lint, Typecheck, Produktions-Build, Bundle-Budget, Analytics-Check, 130 Unit-Tests und 311 Fixture-E2E-Tests; 38 Hosted-Fälle wurden übersprungen. Der Produktionsmodus-Mobilcheck prüfte 20 Kombinationen bei 320/390 px in Hell/Dunkel ohne horizontalen Überlauf oder CSP-Fehler. Das ersetzt keine echten Geräte oder Residenten.
-- Push-CI `36120001487` für Basis-SHA `1250ae3` bestand einschließlich Preview-DB-Migration und Schema-Check; `e2e-preview` wurde übersprungen. Die ältere Preview-DDL-Blockade unten ist **historisch**, kein aktueller Befund für diesen CI-Lauf.
-- T8 offen: Supabase Free zeigt keinen Provider-Backup-Punkt und kein PITR. Ein autorisierter kostenloser Production-Export liegt lokal mit privaten Dateirechten; ein RAM-basierter PostgreSQL-17-Import hat Datenzahlen, Finanzsummen, Ledger und ausgewählte Rechte geprüft. Externe verschlüsselte Aufbewahrung, wiederkehrende Exporte, **hosted** Restore, genehmigte RPO/RTO, Mailzustellung, Alert-Empfang und Support-Owner bleiben unbelegt. Leaked Password Protection ist deaktiviert und erfordert laut Provider Pro oder höher.
-- T4–T7 offen: aktueller Patch ohne authentifizierte Preview-Privacy-/Mehrnutzer-Abnahme; PayPal-Variablen fehlen in Preview und Production; Push/Cron, Storage-Nutzerfluss, Kalender, Import/Export und iOS-/Android-Verhalten brauchen aktuelle Hosted- oder Gerätebelege. Der genaue Stand steht in [docs/releases/release-candidate.md](docs/releases/release-candidate.md).
+## Aktueller Nachweis — 2026-09-30
+
+Production ist auf `746f889` verifiziert: frische Health- und Auth-Abgrenzungs-
+Prüfungen bestanden. Privater Storage-Upload/Read/Revocation und DB-Migrationsstand
+sind am vorherigen quellgleichen App-Stand `6aa0b666` bestätigt. Die korrigierte
+Dependency-Version bestand 393 Unit-/Route-Tests; 512 Chromium-Fixture-Fälle
+bestanden vor der Lock-Korrektur. Hosted Preview:
+frischer Login, eigene Test-WG (200), Fremdnutzer-Abgrenzung (401) und vollständiger
+Cleanup bestätigt. Nativer Preview auf `746f889` mit GitSource-SHA und Health
+bestätigt; vollständige CI-Gates und echte Geräte bleiben getrennte offene
+Abnahmen. Frischer lokaler Restore: 62/62
+Datenabschnitte. MCP und Datenschutz-Landing wurden geliefert.
+
+Die freigegebene Analytics-Bereinigung löschte 552 Keys; Readback: null verbleibend.
+CI und gezielte Vercel-Bypass-Token-Rotation bleiben auf Nutzerwunsch zurückgestellt.
+Sandbox-Zahlungstest, Offsite-Backup/Key-Custody sowie echte Telefon- und
+Alarmempfangsabnahme bleiben offen. Details und Beweisgrenzen:
+[Release evidence](docs/releases/2026-09-30-release-evidence.md).
+
+Die folgenden älteren Abschnitte sind historische Zustände.
+
+## Historische Freigabelage — 2026-09-25
+
+- **Nicht release-ready.** Die PRs #444 und #449 sind auf `main` gelandet. Beim letzten Readback stand `origin/main` auf `519ebc2`; sein Push-CI-Lauf `36162244967` bestand einschließlich Preview-Datenbankcheck, aber `e2e-preview` wurde übersprungen. `app.manawg.com` zeigt weiterhin einen älteren READY-Deploy; für diesen Main-SHA fehlen exakter Hosted-Preview- und Production-Nachweis.
+- Auf dem aktuellen Main-SHA bestanden GitHub-`validate` und 337 Fixture-E2E-Tests; 39 Hosted-Fälle wurden übersprungen. Ein früherer lokaler Produktionsmodus-Mobilcheck prüfte 20 Kombinationen bei 320/390 px in Hell/Dunkel ohne horizontalen Überlauf oder CSP-Fehler. Fixture- und Mobilbefunde ersetzen keine echten Geräte oder Residenten.
+- Die lokale Production-Sicherung wurde kostenlos exportiert und in einer isolierten PostgreSQL-17-Instanz importiert: 61/61 Datenabschnitte sowie Finanzsummen, Ledger und ausgewählte Referenzen/Rechte stimmten überein. Der Export liegt außerhalb des Repositories auf dem FileVault-geschützten Rechner mit privaten Dateirechten. Supabase Free zeigt keinen auswählbaren Provider-Backup-Punkt und kein PITR; Storage-Objektbytes, externe Kopie, regelmäßige Exporte, **hosted** Restore und genehmigte RPO/RTO sind nicht belegt.
+- T4–T8 offen: Ein Production-Passwort-Reset erreichte am 2026-09-25 das kontrollierte Gmail-Postfach; Signup-Mail und Preview-Mail bleiben ungetestet. Custom SMTP ist in Production aktiviert und in Preview deaktiviert. Authentifizierte Preview-Privacy-/Mehrnutzer-Abnahme, Alarm-Empfang, PayPal-Konfiguration, echte Push-/Kalender-/Storage-/Import-/Export-Geräteflüsse und iOS-/Android-Abnahme fehlen. Vercel Alerts auf Hobby und Supabase Leaked Password Protection auf Free verlangen laut den Provider-Oberflächen einen bezahlten Plan; es wurde keiner gebucht. Details stehen in [docs/releases/release-candidate.md](docs/releases/release-candidate.md).
+
 
 ## Lokale Entwicklungsrunde — 2026-09-24, Europe/Berlin
 

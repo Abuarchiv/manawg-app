@@ -81,6 +81,7 @@ function harness({
 			},
 		},
 		'@/core/db/transaction': {
+			TransactionAbort: class TransactionAbort extends Error {},
 			withTransaction: async (operation) => {
 				const result = await operation(tx);
 				if (outcome === 'commit-then-throw') {
@@ -95,6 +96,7 @@ function harness({
 		},
 		'@/core/errors': {
 			apiError: (message, status, code) => Response.json({ error: message, code }, { status }),
+			conflict: (message) => Response.json({ error: message }, { status: 409 }),
 			serverError: (message) => Response.json({ error: message }, { status: 500 }),
 		},
 		'@/core/infra/observability': { logApiError: () => undefined },

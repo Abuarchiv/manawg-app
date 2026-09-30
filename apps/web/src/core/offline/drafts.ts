@@ -27,30 +27,28 @@ export function buildQueueEditHref(
 	return `/wg/${encodedShareCode}/putzen`;
 }
 
-/**
- * The page that owns the form for a queued action, or null when no page can
- * apply the draft (`chore.complete`, `recurring.advance`). The section must
- * not guess a page for those: a draft written to a key nobody reads would be
- * cleared by an unrelated form without ever being applied.
- */
+/** Return the form that owns an editable queued action, or null if none exists. */
 export function buildQueueEditActionHref(
 	shareCode: string,
 	type: OfflineActionType,
 ): string | null {
 	switch (type) {
 		case 'shopping.create':
-		case 'shopping.update':
 			return buildQueueEditHref(shareCode, 'shopping');
 		case 'announcement.create':
 			return buildQueueEditHref(shareCode, 'announcement');
 		case 'expense.create':
-		case 'expense.update':
 		case 'recurring.create':
 			return buildQueueEditHref(shareCode, 'expense');
 		case 'absence.create':
 			return buildQueueEditHref(shareCode, 'chore', { openAbsencesPanel: true });
 		case 'chore.create':
 			return buildQueueEditHref(shareCode, 'chore');
+		case 'shopping.update':
+		case 'expense.update':
+		case 'recurring.advance':
+		case 'chore.complete':
+			return null;
 		default:
 			return null;
 	}
@@ -145,6 +143,7 @@ export function isEmptyModuleDraft(
 			absenceEndDate: '',
 			absenceReason: '',
 			queueEditId: null,
+			queueEditType: null,
 		},
 	};
 	// The Putzplan page keeps its absence form in the same draft as the chore form.
@@ -182,20 +181,12 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 					quantity: typeof action.payload.quantity === 'string' ? action.payload.quantity : '',
 				},
 			};
-		case 'shopping.update': {
-			const name = String(action.payload.name ?? '');
-			const quantity = typeof action.payload.quantity === 'string' ? action.payload.quantity : '';
-			if (!name && !quantity) return null;
-			return {
-				module: 'shopping',
-				draft: {
-					queueEditId: action.id,
-					queueEditType: action.type,
-					name,
-					quantity,
-				},
-			};
-		}
+		// Queued updates have no owning edit form: the Einkaufs-/Ausgaben-forms
+		// only create, so editing one there would turn the update into a new
+		// item and drop the original. They can only be synced or discarded.
+		case 'shopping.update':
+		case 'expense.update':
+			return null;
 		case 'recurring.advance':
 			return null;
 		case 'announcement.create':
@@ -210,10 +201,7 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 				},
 			};
 		case 'absence.create':
-			// The Putzplan owns both forms and reads a single `chore` key
-			// (see isEmptyModuleDraft) — the queue-edit draft must use that
-			// same module or the page would hydrate an empty form and keep
-			// the queued action alive, creating the absence twice.
+			// The Putzplan owns both forms and reads only the chore draft key.
 			return {
 				module: 'chore',
 				draft: {
@@ -225,6 +213,7 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 						typeof action.payload.startDate === 'string' ? action.payload.startDate : '',
 					absenceEndDate: typeof action.payload.endDate === 'string' ? action.payload.endDate : '',
 					absenceReason: typeof action.payload.reason === 'string' ? action.payload.reason : '',
+					openAbsencesPanel: true,
 				},
 			};
 		case 'chore.create':
@@ -244,7 +233,6 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 				},
 			};
 		case 'expense.create':
-		case 'expense.update':
 		case 'recurring.create':
 			return {
 				module: 'expense',
@@ -266,6 +254,19 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 							: undefined,
 					recurringNextDueAt:
 						typeof action.payload.nextDueAt === 'string' ? action.payload.nextDueAt : undefined,
+					// A queued "Fixkosten nachholen" booking must keep its template link,
+					// otherwise the edited booking never advances the template. Its
+					// recurringNextDueAt is the template due date the booking expects.
+					...(action.type === 'expense.create' &&
+					typeof action.payload.recurringExpenseId === 'string'
+						? {
+								recurringSourceId: action.payload.recurringExpenseId,
+								recurringNextDueAt:
+									typeof action.payload.expectedRecurringNextDueAt === 'string'
+										? action.payload.expectedRecurringNextDueAt
+										: undefined,
+							}
+						: {}),
 					...(manualSplits && Object.keys(manualSplits).length > 0 ? { manualSplits } : {}),
 				},
 			};

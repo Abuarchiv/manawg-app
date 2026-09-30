@@ -175,7 +175,7 @@ export function PushPrimingPrompt({
 		>
 			<div className="min-w-0 flex-1 basis-48">
 				<p className="text-sm font-medium">Benachrichtigungen</p>
-				<p className="text-[13px] text-muted-foreground">
+				<p className="text-[12px] text-muted-foreground">
 					Erhalte Hinweise zu fälligen Aufgaben und neuen WG-Nachrichten.
 				</p>
 				{activationError && (

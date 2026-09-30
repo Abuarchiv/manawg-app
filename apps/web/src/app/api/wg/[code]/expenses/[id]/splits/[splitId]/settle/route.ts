@@ -1,5 +1,5 @@
 import { recordAuditEvent } from '@/core/audit';
-import { db, expenseSplits, expenses } from '@/core/db';
+import { db, expenseSplits, expenses, wgMembers } from '@/core/db';
 import {
 	badRequest,
 	conflict,
@@ -12,8 +12,10 @@ import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
+import { computeNetBalances } from '@/features/expenses/debt-reduction';
 import {
 	hasActiveExpensePayment,
+	loadCompletedExpensePayments,
 	withExpensePaymentLock,
 } from '@/features/expenses/expense-payments';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
@@ -44,6 +46,7 @@ export const POST = withWgRoute<{ id: string; splitId: string }>(
 				wgId: expenses.wgId,
 				description: expenses.description,
 				paidByMemberId: expenses.paidByMemberId,
+				currency: expenses.currency,
 			})
 			.from(expenses)
 			.where(and(eq(expenses.id, id), eq(expenses.wgId, wgId)))
@@ -75,24 +78,99 @@ export const POST = withWgRoute<{ id: string; splitId: string }>(
 		const isDebtor = split.debtorMemberId === auth.member.memberId;
 		const isPayer = expense.paidByMemberId === auth.member.memberId;
 		if (!isDebtor && !isPayer) return forbidden('not_split_party', 'not_split_party');
-		if ((settled && split.settledAt !== null) || (!settled && split.settledAt === null)) {
-			return NextResponse.json({ split });
-		}
 		const limited = await checkRateLimit(
 			wgWriteLimiter,
 			`split-settle:${expense.wgId}:${auth.member.memberId}`,
 		);
 		if (!limited.success) return tooMany();
 
-		// Guard the write on the state we just read: settling requires the split
-		// to currently be unsettled, un-settling requires it to currently be
-		// settled. Without this, two concurrent opposite toggles race to
-		// last-write-wins — whichever request's UPDATE commits last silently
-		// overwrites the other's result. With the guard, a stale toggle (the
-		// state already changed since our read above) matches zero rows and
-		// becomes a no-op instead of clobbering the newer state.
+		// Keep this state predicate in the write as a final stale-toggle guard.
 		const change = await withExpensePaymentLock(expense.wgId, async (tx) => {
-			if (await hasActiveExpensePayment(tx, expense.wgId)) return { blocked: true as const };
+			const [current] = await tx
+				.select({
+					splitId: expenseSplits.id,
+					debtorMemberId: expenseSplits.debtorMemberId,
+					expenseId: expenseSplits.expenseId,
+					amountCents: expenseSplits.amountCents,
+					settledAt: expenseSplits.settledAt,
+					description: expenses.description,
+					paidByMemberId: expenses.paidByMemberId,
+					currency: expenses.currency,
+				})
+				.from(expenses)
+				.innerJoin(expenseSplits, eq(expenseSplits.expenseId, expenses.id))
+				.where(and(eq(expenses.id, id), eq(expenses.wgId, wgId), eq(expenseSplits.id, splitId)))
+				.limit(1);
+			if (!current) return { kind: 'missing' as const };
+
+			const currentSplit = {
+				id: current.splitId,
+				debtorMemberId: current.debtorMemberId,
+				expenseId: current.expenseId,
+				settledAt: current.settledAt,
+			};
+			const currentIsDebtor = current.debtorMemberId === auth.member.memberId;
+			const currentIsPayer = current.paidByMemberId === auth.member.memberId;
+			if (!currentIsDebtor && !currentIsPayer) return { kind: 'not_party' as const };
+			if ((settled && current.settledAt !== null) || (!settled && current.settledAt === null)) {
+				return { kind: 'unchanged' as const, split: currentSplit };
+			}
+			if (await hasActiveExpensePayment(tx, expense.wgId)) return { kind: 'blocked' as const };
+
+			if (settled) {
+				// ponytail: scan all WG splits under the lock; add indexed stored balances if this becomes slow.
+				const [members, splitRows, payments] = await Promise.all([
+					tx
+						.select({ id: wgMembers.id, name: wgMembers.name, color: wgMembers.color })
+						.from(wgMembers)
+						.where(eq(wgMembers.wgId, expense.wgId)),
+					tx
+						.select({
+							expenseId: expenses.id,
+							paidByMemberId: expenses.paidByMemberId,
+							currency: expenses.currency,
+							splitId: expenseSplits.id,
+							debtorMemberId: expenseSplits.debtorMemberId,
+							amountCents: expenseSplits.amountCents,
+							settledAt: expenseSplits.settledAt,
+						})
+						.from(expenses)
+						.innerJoin(expenseSplits, eq(expenseSplits.expenseId, expenses.id))
+						.where(eq(expenses.wgId, expense.wgId)),
+					loadCompletedExpensePayments(expense.wgId, tx),
+				]);
+				const balanceExpenses = splitRows.map((row) => ({
+					paidByMemberId: row.paidByMemberId,
+					currency: row.currency,
+					splits: [
+						{
+							debtorMemberId: row.debtorMemberId,
+							amountCents: row.amountCents,
+							settledAt:
+								row.settledAt instanceof Date ? row.settledAt.toISOString() : row.settledAt,
+						},
+					],
+				}));
+				const currency = current.currency.trim().toUpperCase() || 'EUR';
+				const balances = computeNetBalances(balanceExpenses, members, payments);
+				const debtorCents =
+					balances.find(
+						(balance) =>
+							balance.memberId === current.debtorMemberId && balance.currency === currency,
+					)?.cents ?? 0;
+				const payerCents =
+					balances.find(
+						(balance) =>
+							balance.memberId === current.paidByMemberId && balance.currency === currency,
+					)?.cents ?? 0;
+				if (
+					current.amountCents > Math.max(0, -debtorCents) ||
+					current.amountCents > Math.max(0, payerCents)
+				) {
+					return { kind: 'offset' as const };
+				}
+			}
+
 			const [updated] = await tx
 				.update(expenseSplits)
 				.set({ settledAt: settled ? new Date() : null })
@@ -104,11 +182,15 @@ export const POST = withWgRoute<{ id: string; splitId: string }>(
 					),
 				)
 				.returning();
-			return { blocked: false as const, updated };
+			if (!updated) return { kind: 'unchanged' as const, split: currentSplit };
+			return { kind: 'updated' as const, updated, current };
 		});
-		if (change.blocked) return conflict('paypal_payment_pending');
-		const updated = change.updated;
-		if (!updated) return NextResponse.json({ split });
+		if (change.kind === 'blocked') return conflict('paypal_payment_pending');
+		if (change.kind === 'offset') return conflict('split_already_offset');
+		if (change.kind === 'missing') return notFound('split_not_found');
+		if (change.kind === 'not_party') return forbidden('not_split_party', 'not_split_party');
+		if (change.kind === 'unchanged') return NextResponse.json({ split: change.split });
+		const { updated, current } = change;
 		await recordAuditEvent({
 			wgId: expense.wgId,
 			memberId: auth.member.memberId,
@@ -116,13 +198,13 @@ export const POST = withWgRoute<{ id: string; splitId: string }>(
 			entityType: 'expense_split',
 			entityId: splitId,
 			summary: settled
-				? `${auth.member.name} hat einen Anteil für ${expense.description} beglichen.`
-				: `${auth.member.name} hat einen Anteil für ${expense.description} wieder geöffnet.`,
+				? `${auth.member.name} hat einen Anteil für ${current.description} beglichen.`
+				: `${auth.member.name} hat einen Anteil für ${current.description} wieder geöffnet.`,
 			metadata: {
-				expenseId: expense.id,
-				description: expense.description,
-				debtorMemberId: split.debtorMemberId,
-				paidByMemberId: expense.paidByMemberId,
+				expenseId: current.expenseId,
+				description: current.description,
+				debtorMemberId: current.debtorMemberId,
+				paidByMemberId: current.paidByMemberId,
 			},
 		});
 

@@ -109,7 +109,9 @@ export const metadata: Metadata = {
 	},
 	appleWebApp: {
 		capable: true,
-		statusBarStyle: 'black-translucent',
+		// Opaque bar, not black-translucent: translucent lets light-mode content
+		// show through and washes out the white status-bar icons.
+		statusBarStyle: 'black',
 		title: 'ManaWG',
 	},
 	formatDetection: {
@@ -147,7 +149,7 @@ export default function RootLayout({
 			<head>
 				<meta name="apple-mobile-web-app-capable" content="yes" />
 				<meta name="mobile-web-app-capable" content="yes" />
-				<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+				<meta name="apple-mobile-web-app-status-bar-style" content="black" />
 				<meta name="apple-mobile-web-app-title" content="ManaWG" />
 				<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 				{/* Sehr früh den beforeinstallprompt-Event abfangen — bevor React mountet.

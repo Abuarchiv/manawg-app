@@ -28,8 +28,8 @@ import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { berlinDayKey, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { MS_PER_DAY } from '@/core/utils/time';
 import { computeOpenGapsByMember } from '@/features/chores/chore-fairness';
-import { computeInitialDue } from '@/features/chores/chore-recurrence';
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
+import { computeNextDueAt } from '@/features/chores/chore-recurrence';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -93,38 +93,52 @@ export const GET = withWgRoute(
 		}
 
 		const choreIds = items.map((item) => item.id);
-		const completionRows = await db
-			.select({
-				choreId: choreCompletions.choreId,
-				completedAt: choreCompletions.completedAt,
-				completedByMemberId: choreCompletions.completedByMemberId,
-				completedByName: wgMembers.name,
-			})
-			.from(choreCompletions)
-			.innerJoin(wgMembers, eq(wgMembers.id, choreCompletions.completedByMemberId))
-			.where(inArray(choreCompletions.choreId, choreIds))
-			.orderBy(desc(choreCompletions.completedAt));
+		const now = Date.now();
+		const monthStart = startOfBerlinDay(new Date(`${berlinDayKey(new Date(now)).slice(0, 7)}-01`));
+		// Only the latest completion per chore and this month's per-member counts
+		// are returned, so load exactly that instead of the full history. The
+		// (chore_id, completed_at) index serves the DISTINCT ON; counts keep the
+		// previous key order (most recent completer first).
+		const [latestRows, monthRows] = await Promise.all([
+			db
+				.selectDistinctOn([choreCompletions.choreId], {
+					choreId: choreCompletions.choreId,
+					completedAt: choreCompletions.completedAt,
+					completedByName: wgMembers.name,
+				})
+				.from(choreCompletions)
+				.innerJoin(wgMembers, eq(wgMembers.id, choreCompletions.completedByMemberId))
+				.where(inArray(choreCompletions.choreId, choreIds))
+				.orderBy(choreCompletions.choreId, desc(choreCompletions.completedAt)),
+			db
+				.select({
+					memberId: choreCompletions.completedByMemberId,
+					count: sql<number>`count(*)::int`,
+				})
+				.from(choreCompletions)
+				.where(
+					and(
+						inArray(choreCompletions.choreId, choreIds),
+						gte(choreCompletions.completedAt, monthStart),
+					),
+				)
+				.groupBy(choreCompletions.completedByMemberId)
+				.orderBy(sql`max(${choreCompletions.completedAt}) desc`),
+		]);
 
 		const latestCompletionByChore = new Map<
 			string,
 			{ completedAt: Date; completedByName: string }
 		>();
-		for (const row of completionRows) {
-			if (latestCompletionByChore.has(row.choreId)) continue;
+		for (const row of latestRows) {
 			latestCompletionByChore.set(row.choreId, {
 				completedAt: row.completedAt,
 				completedByName: row.completedByName,
 			});
 		}
 
-		const now = Date.now();
-		const monthStart = startOfBerlinDay(new Date(`${berlinDayKey(new Date(now)).slice(0, 7)}-01`));
 		const monthCompletions: Record<string, number> = {};
-		for (const row of completionRows) {
-			if (row.completedAt < monthStart) continue;
-			monthCompletions[row.completedByMemberId] =
-				(monthCompletions[row.completedByMemberId] ?? 0) + 1;
-		}
+		for (const row of monthRows) monthCompletions[row.memberId] = Number(row.count);
 
 		const openGapsByMember = computeOpenGapsByMember(
 			items.map((item) => ({
@@ -203,18 +217,16 @@ export const POST = withWgRoute('chores POST', async (req, { code }) => {
 		assignedMemberId = null,
 		nextDueAt: nextDueAtStr,
 	} = parsed.data;
-	// First due and cadence anchor are computed together: the first due is the
-	// clamped result (calendar-aware — a monthly chore created on 31.01 is
-	// first due 28.02, not 30 days later), while the anchor keeps the intended
-	// day so the cycle comes back to 31.03 / 30.04 instead of freezing on 28.
-	// See computeInitialDue in chore-recurrence.ts (#507).
-	const requestedDueAt = nextDueAtStr ? new Date(nextDueAtStr) : null;
-	const { nextDueAt, anchorAt } = computeInitialDue(
-		new Date(),
-		intervalDays,
-		recurrenceType,
-		requestedDueAt,
-	);
+	const createdAt = new Date();
+	const nextDueAt = nextDueAtStr
+		? new Date(nextDueAtStr)
+		: // Calendar-aware initial due: months-based chores anchor on
+			// today + N months (not today + 30N days), matching the cadence the
+			// completion handler will use later. See chore-recurrence.ts.
+			computeNextDueAt(createdAt, intervalDays, createdAt, recurrenceType);
+	// Store the unclamped cadence anchor: a monthly chore created on 31.01 is
+	// first due 28.02 but must keep day 31 for 31.03, 30.04, …
+	const anchorAt = nextDueAtStr ? nextDueAt : createdAt;
 	const idemKey = readIdempotencyKey(req);
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
@@ -356,7 +368,7 @@ export const POST = withWgRoute('chores POST', async (req, { code }) => {
 			({ warning } = await dispatchNotificationSafely({
 				wg,
 				event: 'chore.due',
-				payload: { title, choreId: chore.id },
+				payload: { title, choreId: chore.id, nextDueAt: nextDueAt.toISOString() },
 				targetMemberIds: [assignedMemberId],
 			}));
 		}

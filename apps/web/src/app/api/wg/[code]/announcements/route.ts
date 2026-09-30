@@ -6,7 +6,9 @@ import {
 	db,
 	wgMembers,
 } from '@/core/db';
-import { badRequest, payloadTooLarge } from '@/core/errors';
+import { assertPrivateImageCanBeAttached } from '@/core/db/private-image-deletions';
+import { TransactionAbort } from '@/core/db/transaction';
+import { badRequest, conflict, payloadTooLarge } from '@/core/errors';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { readJsonBody } from '@/core/http/read-json';
@@ -21,15 +23,18 @@ import {
 } from '@/features/pinnwand/announcement-replay';
 import {
 	ANNOUNCEMENT_KINDS,
+	type AnnouncementSource,
 	summarizeAnnouncementReactions,
 } from '@/features/pinnwand/announcement-workflow';
-import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 const CONTENT_MIN = 1;
 const CONTENT_MAX = 2000;
 const ANNOUNCEMENTS_LIST_LIMIT = 300;
+/** Sources a member writes by hand; everything else is a system notice. */
+const MEMBER_ANNOUNCEMENT_SOURCES: AnnouncementSource[] = ['manual', 'chore_swap'];
 const announcementKindSchema = z.enum(ANNOUNCEMENT_KINDS);
 
 type AnnouncementCreateWarning =
@@ -74,12 +79,41 @@ export const GET = withWgRoute(
 		const auth = await requireWgMember(req, code);
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;
-		const items = await db
-			.select()
-			.from(announcements)
-			.where(eq(announcements.wgId, wgId))
-			.orderBy(sql`${announcements.pinnedAt} desc nulls last`, desc(announcements.createdAt))
-			.limit(ANNOUNCEMENTS_LIST_LIMIT);
+		const listOrder = [
+			sql`${announcements.pinnedAt} desc nulls last`,
+			desc(announcements.createdAt),
+		] as const;
+		// System notices (postSystemNotice) are stored as open posts too and can
+		// flood the newest window, so open posts written by members are fetched
+		// separately and always included next to the newest rows.
+		const [newestItems, openMemberItems] = await Promise.all([
+			db
+				.select()
+				.from(announcements)
+				.where(eq(announcements.wgId, wgId))
+				.orderBy(...listOrder)
+				.limit(ANNOUNCEMENTS_LIST_LIMIT),
+			db
+				.select()
+				.from(announcements)
+				.where(
+					and(
+						eq(announcements.wgId, wgId),
+						eq(announcements.status, 'open'),
+						inArray(announcements.source, MEMBER_ANNOUNCEMENT_SOURCES),
+					),
+				)
+				.orderBy(...listOrder)
+				.limit(ANNOUNCEMENTS_LIST_LIMIT),
+		]);
+		const itemsById = new Map(newestItems.map((item) => [item.id, item]));
+		for (const item of openMemberItems) itemsById.set(item.id, item);
+		const items = [...itemsById.values()].sort(
+			(a, b) =>
+				(b.pinnedAt?.getTime() ?? Number.NEGATIVE_INFINITY) -
+					(a.pinnedAt?.getTime() ?? Number.NEGATIVE_INFINITY) ||
+				b.createdAt.getTime() - a.createdAt.getTime(),
+		);
 
 		if (items.length === 0) return NextResponse.json({ announcements: [] });
 
@@ -177,42 +211,56 @@ export const POST = withWgRoute('announcements POST', async (req, { code }) => {
 	const scope = announcementCreateIdempotencyScope(wg.id, auth.member.memberId);
 
 	// SECURITY: author is always the authenticated caller.
-	const outcome = await withAnnouncementReplay(
-		req,
-		scope,
-		async (tx) => {
-			const limited = await checkRateLimit(
-				wgWriteLimiter,
-				`announcement:${wg.id}:${auth.member.memberId}`,
-			);
-			if (!limited.success) {
-				return { response: { status: 429, body: { error: 'too_many_requests' } }, effect: null };
-			}
+	let outcome: {
+		response: AnnouncementReplayResponse;
+		effect: typeof announcements.$inferSelect | null;
+		key: string | null;
+	};
+	try {
+		outcome = await withAnnouncementReplay(
+			req,
+			scope,
+			async (tx) => {
+				const limited = await checkRateLimit(
+					wgWriteLimiter,
+					`announcement:${wg.id}:${auth.member.memberId}`,
+				);
+				if (!limited.success) {
+					return { response: { status: 429, body: { error: 'too_many_requests' } }, effect: null };
+				}
+				await assertPrivateImageCanBeAttached(tx, wg.id, safeImageUrl);
 
-			const [item] = await tx
-				.insert(announcements)
-				.values({
-					wgId: wg.id,
-					authorMemberId: auth.member.memberId,
-					content,
-					imageUrl: safeImageUrl,
-					kind,
-					source: safeSource,
-					sourcePath: safeSourcePath,
-				})
-				.returning();
-			if (!item) throw new Error('announcement_insert_failed');
-			return {
-				response: {
-					status: 200,
-					body: { announcement: item, warning: null },
-					entityId: item.id,
-				},
-				effect: item,
-			};
-		},
-		legacyCreateReplay,
-	);
+				const [item] = await tx
+					.insert(announcements)
+					.values({
+						wgId: wg.id,
+						authorMemberId: auth.member.memberId,
+						content,
+						imageUrl: safeImageUrl,
+						kind,
+						source: safeSource,
+						sourcePath: safeSourcePath,
+					})
+					.returning();
+				if (!item) throw new Error('announcement_insert_failed');
+				return {
+					response: {
+						status: 200,
+						body: { announcement: item, warning: null },
+						entityId: item.id,
+					},
+					effect: item,
+				};
+			},
+			legacyCreateReplay,
+			wg.id,
+		);
+	} catch (error) {
+		if (error instanceof TransactionAbort && error.code === 'image_removed') {
+			return conflict('image_removed', 'image_removed');
+		}
+		throw error;
+	}
 	if (!outcome.effect) {
 		return NextResponse.json(outcome.response.body, { status: outcome.response.status });
 	}

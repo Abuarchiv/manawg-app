@@ -30,22 +30,21 @@ import {
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Field, FieldGroup } from '@/components/ui/field';
-import {
-	Message,
-	MessageAvatar,
-	MessageContent,
-	MessageFooter,
-	MessageHeader,
-} from '@/components/ui/message';
+import { Message, MessageAvatar, MessageContent, MessageHeader } from '@/components/ui/message';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { memberTint } from '@/components/wg/MemberAvatar';
 import { readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
-import { formatRelativeTime, formatTimeFull } from '@/core/utils/time';
+import { formatTimeFull } from '@/core/utils/time';
+import { cn } from '@/shared/lib/cn';
 import { haptic } from '@/shared/lib/haptics';
-import { MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react';
+import { Copy, Pencil, Reply, Smile, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { canDeleteMessage, canEditMessage, resolveStoredEditDraft } from '../chat-pure';
 import { ReactionPicker } from './ReactionPicker';
+
+const BUBBLE_TEXT = 'rounded-2xl px-3 py-1.5 text-[14px] leading-snug';
+const TIME_FORMAT = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 
 export interface BubbleMessage {
 	id: string;
@@ -106,8 +105,12 @@ export function MessageBubble({
 	const [reactionPending, setReactionPending] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [reactOpen, setReactOpen] = useState(false);
 	const pendingRef = useRef(false);
 	const reactionRef = useRef(false);
+	const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+	const actionsTriggerRef = useRef<HTMLButtonElement | null>(null);
+	const wasEditingRef = useRef(false);
 	const isDeleted = Boolean(message.deletedAt);
 	const editable = canEditMessage(message, { id: currentMemberId });
 	const deletable = canDeleteMessage(message, {
@@ -117,17 +120,23 @@ export function MessageBubble({
 	const senderName = sender?.name ?? 'Unbekannt';
 	const align = isOwn ? 'end' : 'start';
 	const messageBody = message.body ?? '';
+	// Uhrzeit klein unten rechts in der Blase wie bei WhatsApp; das Datum steht im Tagestrenner.
+	const timeStamp = (
+		<span className="float-end ms-2 mt-1.5 text-[11px] leading-none tabular-nums opacity-70">
+			{message.editedAt && 'bearbeitet · '}
+			<time dateTime={message.createdAt} title={formatTimeFull(message.createdAt)}>
+				{TIME_FORMAT.format(new Date(message.createdAt))}
+			</time>
+		</span>
+	);
 
 	useEffect(() => {
-		// Skip while editing: the textarea keeps what the user is typing, and a
-		// message arriving mid-edit must not rewrite it.
+		// Keep the active textarea stable if a message update arrives mid-edit.
 		if (editing) return;
 		const stored = readDraft<{ body?: string; base?: string }>(draftKey);
 		const resolved = resolveStoredEditDraft(stored, messageBody);
 		if (resolved.discard) removeDraft(draftKey);
 		if (resolved.text !== null) {
-			// Adopt drafts persisted before `base` existed so later message
-			// changes are detected from now on.
 			if (typeof stored?.base !== 'string')
 				writeDraft(draftKey, { body: resolved.text, base: messageBody });
 			setDraft(resolved.text);
@@ -137,17 +146,22 @@ export function MessageBubble({
 		setDraft(messageBody);
 		setHasDraft(false);
 	}, [draftKey, editing, messageBody]);
+	useEffect(() => {
+		if (editing) {
+			wasEditingRef.current = true;
+			editTextareaRef.current?.focus();
+		} else if (wasEditingRef.current) {
+			wasEditingRef.current = false;
+			actionsTriggerRef.current?.focus();
+		}
+	}, [editing]);
 	function changeDraft(value: string) {
 		setDraft(value);
 		setHasDraft(true);
-		// `base` records the body this edit started from; a message that changes
-		// underneath it invalidates the draft instead of silently overwriting.
 		writeDraft(draftKey, { body: value, base: messageBody });
 	}
 	function cancelEdit() {
 		if (pendingRef.current) return;
-		// Abbrechen/Escape verwirft den Entwurf: sonst bietet das Menü „Entwurf
-		// weiterbearbeiten" mit veraltetem Text an, auch nach einem Reload.
 		removeDraft(draftKey);
 		setHasDraft(false);
 		setDraft(messageBody);
@@ -208,31 +222,27 @@ export function MessageBubble({
 			id={`message-${message.id}`}
 			aria-busy={pending || Boolean(reactionPending)}
 		>
-			<MessageAvatar
-				className={grouped ? 'invisible' : undefined}
-				aria-hidden={grouped || undefined}
-			>
-				<Avatar className="size-7 text-xs">
-					<AvatarFallback>{senderName.slice(0, 2).toLocaleUpperCase('de-DE')}</AvatarFallback>
-				</Avatar>
-			</MessageAvatar>
-			<MessageContent className="gap-1">
-				<MessageHeader className={grouped ? 'sr-only' : 'flex-wrap gap-x-1.5 gap-y-0 px-2 text-xs'}>
-					{!isOwn && <span className="min-w-0 [overflow-wrap:anywhere]">{senderName}</span>}
-					<time dateTime={message.createdAt} title={formatTimeFull(message.createdAt)}>
-						{formatRelativeTime(message.createdAt)}
-					</time>
-					{message.editedAt && <span>· bearbeitet</span>}
-				</MessageHeader>
-				{grouped && message.editedAt && (
-					<span className="px-1 text-xs text-muted-foreground" aria-hidden>
-						bearbeitet
-					</span>
+			{/* Wie WhatsApp: eigene Nachrichten ohne Avatar, fremde mit Avatar und Name nur am Anfang einer Folge. */}
+			{!isOwn && (
+				<MessageAvatar className={grouped ? 'invisible' : undefined} aria-hidden>
+					<Avatar className="size-7 text-xs">
+						<AvatarFallback style={memberTint(senderName)}>
+							{senderName.slice(0, 2).toLocaleUpperCase('de-DE')}
+						</AvatarFallback>
+					</Avatar>
+				</MessageAvatar>
+			)}
+			<MessageContent className="gap-0.5">
+				{!isOwn && !grouped && (
+					<MessageHeader className="px-2.5 text-xs">
+						<span className="min-w-0 [overflow-wrap:anywhere]">{senderName}</span>
+					</MessageHeader>
 				)}
 				{editing ? (
 					<FieldGroup className="gap-2">
 						<Field data-invalid={Boolean(error)}>
 							<Textarea
+								ref={editTextareaRef}
 								value={draft}
 								onChange={(event) => changeDraft(event.target.value)}
 								onKeyDown={(event) => {
@@ -263,43 +273,119 @@ export function MessageBubble({
 						</div>
 					</FieldGroup>
 				) : (
-					<BubbleGroup className="max-w-full">
+					<BubbleGroup className="min-w-0 max-w-[85%] group-data-[align=end]/message:self-end">
 						<Bubble
 							variant={isDeleted ? 'muted' : isOwn ? 'default' : 'secondary'}
 							align={align}
 							className="max-w-full"
 						>
-							<BubbleContent className="px-2.5 py-1.5 leading-snug">
-								{replyTo && (
-									<blockquote className="mb-2 border-s-2 border-current/30 ps-2">
-										<p className="text-xs font-medium [overflow-wrap:anywhere]">
-											↪ {replyToSender?.name ?? 'Unbekannt'}
-										</p>
-										<p className="line-clamp-2 whitespace-pre-wrap text-xs [overflow-wrap:anywhere]">
-											{replyTo.deletedAt
-												? 'Diese Nachricht wurde gelöscht.'
-												: (replyTo.body ?? (replyTo.imageUrl ? 'Bild' : '…'))}
-										</p>
-									</blockquote>
-								)}
-								{isDeleted ? (
-									<p>Diese Nachricht wurde gelöscht.</p>
-								) : (
-									message.body && (
-										<p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
-									)
-								)}
-							</BubbleContent>
+							{isDeleted ? (
+								<BubbleContent className={BUBBLE_TEXT}>
+									<p>
+										Diese Nachricht wurde gelöscht.
+										{timeStamp}
+									</p>
+								</BubbleContent>
+							) : (
+								// Tippen auf die Blase öffnet Antworten, Reagieren usw. (wie Telegram) statt eines ⋯ daneben.
+								<DropdownMenu>
+									<DropdownMenuTrigger
+										ref={actionsTriggerRef}
+										disabled={pending}
+										render={
+											<BubbleContent
+												// Der Trigger setzt sonst data-slot="dropdown-menu-trigger"; die Blasenfarben hängen am Slot.
+												data-slot="bubble-content"
+												render={<button type="button" />}
+												className={cn(BUBBLE_TEXT, 'cursor-pointer')}
+											/>
+										}
+									>
+										<span className="sr-only">Aktionen für Nachricht von {senderName}: </span>
+										{replyTo && (
+											<span className="mb-1.5 block rounded-md border-s-2 border-current/40 bg-current/5 px-2 py-1">
+												<span className="block text-xs font-medium [overflow-wrap:anywhere]">
+													↪ {replyToSender?.name ?? 'Unbekannt'}
+												</span>
+												<span className="line-clamp-2 whitespace-pre-wrap text-xs opacity-80 [overflow-wrap:anywhere]">
+													{replyTo.deletedAt
+														? 'Diese Nachricht wurde gelöscht.'
+														: (replyTo.body ?? (replyTo.imageUrl ? 'Bild' : '…'))}
+												</span>
+											</span>
+										)}
+										{/* Spans statt <p>: Absatz-Elemente sind in einem <button> nicht erlaubt. */}
+										<span className="block whitespace-pre-wrap [overflow-wrap:anywhere]">
+											{message.body}
+											{timeStamp}
+										</span>
+									</DropdownMenuTrigger>
+									<DropdownMenuContent align={isOwn ? 'end' : 'start'} className="w-48">
+										<DropdownMenuGroup>
+											<DropdownMenuItem
+												className="min-h-11"
+												disabled={Boolean(reactionPending)}
+												onClick={() => setReactOpen(true)}
+											>
+												<Smile aria-hidden /> Reagieren
+											</DropdownMenuItem>
+											<DropdownMenuItem
+												className="min-h-11"
+												onClick={() => {
+													haptic('selection');
+													onReply();
+												}}
+											>
+												<Reply aria-hidden /> Antworten
+											</DropdownMenuItem>
+											{message.body && (
+												<DropdownMenuItem
+													className="min-h-11"
+													onClick={() => void navigator.clipboard?.writeText(message.body ?? '')}
+												>
+													<Copy aria-hidden /> Kopieren
+												</DropdownMenuItem>
+											)}
+											{editable && (
+												<DropdownMenuItem
+													className="min-h-11"
+													onClick={() => {
+														if (!hasDraft) setDraft(message.body ?? '');
+														setError(null);
+														setEditing(true);
+													}}
+												>
+													<Pencil aria-hidden />{' '}
+													{hasDraft ? 'Entwurf weiterbearbeiten' : 'Bearbeiten'}
+												</DropdownMenuItem>
+											)}
+											{deletable && (
+												<DropdownMenuItem
+													className="min-h-11"
+													variant="destructive"
+													onClick={() => {
+														setError(null);
+														setDeleteOpen(true);
+													}}
+												>
+													<Trash2 aria-hidden /> Löschen
+												</DropdownMenuItem>
+											)}
+										</DropdownMenuGroup>
+									</DropdownMenuContent>
+								</DropdownMenu>
+							)}
 							{reactions.length > 0 && (
 								<BubbleReactions
 									align={align}
-									className="static max-w-full flex-wrap translate-y-0 self-start"
+									className="static max-w-full flex-wrap translate-y-0 gap-1 bg-transparent p-0 ring-0 group-data-[align=end]/bubble:self-end has-[button]:p-0"
 								>
 									{reactions.map((reaction) => (
 										<Button
 											key={reaction.emoji}
 											variant={reaction.mine ? 'secondary' : 'outline'}
-											size="sm"
+											size="xs"
+											className="rounded-full"
 											onClick={() => void toggleReaction(reaction.emoji, reaction.mine)}
 											disabled={isDeleted || Boolean(reactionPending)}
 											aria-pressed={reaction.mine}
@@ -343,66 +429,12 @@ export function MessageBubble({
 						<AlertDescription>{error}</AlertDescription>
 					</Alert>
 				)}
-				{!isDeleted && !editing && (
-					<MessageFooter className="flex-wrap gap-2 px-0 py-1 [&_svg]:size-3.5">
-						<ReactionPicker
-							disabled={Boolean(reactionPending)}
-							onSelect={(emoji) => toggleReaction(emoji, false)}
-							triggerLabel={`Reaktion zu Nachricht von ${senderName} (${formatRelativeTime(message.createdAt)}) hinzufügen`}
-						/>
-						<Button
-							variant="ghost"
-							size="icon"
-							onClick={() => {
-								haptic('selection');
-								onReply();
-							}}
-							aria-label={`Auf Nachricht von ${senderName} (${formatRelativeTime(message.createdAt)}) antworten`}
-						>
-							<Reply aria-hidden />
-						</Button>
-						{(editable || deletable) && (
-							<DropdownMenu>
-								<DropdownMenuTrigger
-									render={<Button variant="ghost" size="icon" />}
-									disabled={pending}
-									aria-label={`Aktionen für Nachricht von ${senderName} (${formatRelativeTime(message.createdAt)})`}
-								>
-									<MoreVertical aria-hidden />
-								</DropdownMenuTrigger>
-								<DropdownMenuContent align="end" className="w-48">
-									<DropdownMenuGroup>
-										{editable && (
-											<DropdownMenuItem
-												className="min-h-11"
-												onClick={() => {
-													if (!hasDraft) setDraft(message.body ?? '');
-													setError(null);
-													setEditing(true);
-												}}
-											>
-												<Pencil aria-hidden />{' '}
-												{hasDraft ? 'Entwurf weiterbearbeiten' : 'Bearbeiten'}
-											</DropdownMenuItem>
-										)}
-										{deletable && (
-											<DropdownMenuItem
-												className="min-h-11"
-												variant="destructive"
-												onClick={() => {
-													setError(null);
-													setDeleteOpen(true);
-												}}
-											>
-												<Trash2 aria-hidden /> Löschen
-											</DropdownMenuItem>
-										)}
-									</DropdownMenuGroup>
-								</DropdownMenuContent>
-							</DropdownMenu>
-						)}
-					</MessageFooter>
-				)}
+				<ReactionPicker
+					open={reactOpen}
+					onOpenChange={setReactOpen}
+					onSelect={(emoji) => toggleReaction(emoji, false)}
+					returnFocusRef={actionsTriggerRef}
+				/>
 				<AlertDialog
 					open={deleteOpen}
 					onOpenChange={(open) => {

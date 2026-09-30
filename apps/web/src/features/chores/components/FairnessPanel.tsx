@@ -23,10 +23,13 @@ export function FairnessPanel({
 	fairness,
 	monthCompletions,
 	members,
+	currentMemberId,
 }: {
 	fairness: ChoreFairness;
 	monthCompletions: Record<string, number>;
 	members: { id: string; name: string }[];
+	/** Die eigene Person heißt überall „du“, nicht beim eigenen Namen. */
+	currentMemberId: string;
 }) {
 	const shares = members
 		.map((member) => ({ ...member, count: monthCompletions[member.id] ?? 0 }))
@@ -59,7 +62,8 @@ export function FairnessPanel({
 							<ul className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
 								{shares.map((member) => (
 									<li key={member.id}>
-										{member.name}: {Math.round((member.count / total) * 100)} % ({member.count})
+										{member.id === currentMemberId ? 'Du' : member.name}:{' '}
+										{Math.round((member.count / total) * 100)} % ({member.count})
 									</li>
 								))}
 							</ul>
@@ -69,7 +73,11 @@ export function FairnessPanel({
 				{fairness.suggestedAssignee && (
 					<p className="text-sm">
 						Als Nächstes dran:{' '}
-						<span className="font-medium">{fairness.suggestedAssignee.name}</span>
+						<span className="font-medium">
+							{fairness.suggestedAssignee.id === currentMemberId
+								? 'du'
+								: fairness.suggestedAssignee.name}
+						</span>
 					</p>
 				)}
 				<Collapsible>
@@ -90,7 +98,9 @@ export function FairnessPanel({
 								{fairness.rows.map((row) => (
 									<Item key={row.id} variant="outline">
 										<ItemContent className="min-w-0">
-											<ItemTitle className="line-clamp-none break-words">{row.name}</ItemTitle>
+											<ItemTitle className="line-clamp-none break-words">
+												{row.id === currentMemberId ? 'Du' : row.name}
+											</ItemTitle>
 											<ItemDescription className="line-clamp-none">
 												{row.assignedCount} Aufgabe{row.assignedCount === 1 ? '' : 'n'} ·{' '}
 												{row.openGapCount}{' '}

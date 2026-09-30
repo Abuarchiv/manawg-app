@@ -32,7 +32,9 @@ import { apiFetch } from '@/core/infra/api-client';
 import { captureException } from '@/core/infra/observability';
 import { buildDraftKey, readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import {
+	discardQueuedEntry,
 	enqueueOfflineAction,
+	isOfflineActionQueued,
 	readOfflineQueue,
 	syncOfflineActions,
 	writeOfflineQueue,
@@ -41,13 +43,15 @@ import {
 	DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE,
 	OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE,
+	QUEUE_EDIT_ALREADY_SENT_MESSAGE,
 	formatQueuedOfflineEntries,
 } from '@/core/offline/offline-copy';
 import {
 	createOfflineIdempotencyKey,
 	createQueuedShoppingItem,
 	createQueuedShoppingUpdate,
-	resolveLocalRowRemoval,
+	hasQueuedShoppingUpdate,
+	isQueuedCreateId,
 } from '@/core/offline/offline-queue';
 import { useOfflineQueueSync } from '@/core/offline/useOfflineQueueSync';
 import { useVisibilityPausedInterval } from '@/core/utils/use-visibility-paused-interval';
@@ -152,6 +156,9 @@ export default function EinkaufPage() {
 	const clearingBoughtRef = useRef(false);
 	const nameInputRef = useRef<HTMLInputElement>(null);
 	const nameValueRef = useRef('');
+	const shoppingPatchRequestKeysRef = useRef(
+		new Map<string, { fingerprint: string; key: string }>(),
+	);
 
 	const draftKey = buildDraftKey(wg.shareCode, identity.memberId, 'shopping');
 	const appliedPrefillRef = useRef<string | null>(null);
@@ -160,11 +167,11 @@ export default function EinkaufPage() {
 	const hasShoppingCacheRef = useRef(cachedShopping !== undefined);
 
 	const load = useCallback(
-		async (silent = false): Promise<void> => {
+		async (silent = false, afterMutation = false): Promise<void> => {
 			const requestId = loadRequestIdRef.current + 1;
 			loadRequestIdRef.current = requestId;
 			if (!silent && !hasShoppingCacheRef.current) setInitialLoading(true);
-			const res = await refreshShopping();
+			const res = await refreshShopping({ afterMutation });
 			if (requestId !== loadRequestIdRef.current) {
 				if (!silent) setInitialLoading(false);
 				return;
@@ -297,6 +304,16 @@ export default function EinkaufPage() {
 		const submittedName = text ?? newName;
 		const { name, quantity } = parseShoppingInput(submittedName);
 		if (name.length === 0) return;
+		// The edited queue entry may have been synced meanwhile; a new create would duplicate it.
+		if (fromInput && queueEditId && !isOfflineActionQueued(queueEditId)) {
+			setQueueEditId(null);
+			setNewName('');
+			removeDraft(draftKey);
+			setAddError(null);
+			setAddNotice(QUEUE_EDIT_ALREADY_SENT_MESSAGE);
+			void load(true);
+			return;
+		}
 		addingRef.current = true;
 		setAdding(true);
 		setAddError(null);
@@ -343,6 +360,7 @@ export default function EinkaufPage() {
 						setAddError(OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE);
 						return;
 					}
+					addIdempotencyKeyRef.current = null;
 					refreshCount();
 					if (fromInput && !clearEditedQueueItem()) {
 						setAddError(OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE);
@@ -393,7 +411,8 @@ export default function EinkaufPage() {
 			} else if (res.data.warning === 'notification_delivery_unknown') {
 				toast.info('Gespeichert. Push-Versand konnte nicht bestätigt werden.');
 			}
-			void load(true);
+			// The add has no optimistic row; make sure the list reflects it.
+			void load(true, true);
 		} finally {
 			addingRef.current = false;
 			setAdding(false);
@@ -403,10 +422,55 @@ export default function EinkaufPage() {
 	const toggleBought = useCallback(
 		async (item: ShoppingItem): Promise<void> => {
 			if (isPending(item.id)) return;
+			if (hasQueuedShoppingUpdate(readOfflineQueue(), wg.shareCode, identity.memberId, item.id)) {
+				return;
+			}
+			const becomingBought = item.boughtAt === null;
+			const queuedCreate = readOfflineQueue().find(
+				(queued) =>
+					queued.id === item.id &&
+					queued.shareCode === wg.shareCode &&
+					queued.type === 'shopping.create',
+			);
+			let patchRequest: {
+				expectedUpdatedAt: string;
+				expectedBoughtAt: string | null;
+				fingerprint: string;
+				idempotencyKey: string;
+			} | null = null;
+			if (!queuedCreate) {
+				if (!item.updatedAt) {
+					setToggleError(
+						'Der Artikelstand wird aktualisiert. Prüfe die Liste und versuche es erneut.',
+					);
+					void load(true);
+					return;
+				}
+				const fingerprint = JSON.stringify({
+					expectedUpdatedAt: item.updatedAt,
+					expectedBoughtAt: item.boughtAt,
+					bought: becomingBought,
+				});
+				const previous = shoppingPatchRequestKeysRef.current.get(item.id);
+				const idempotencyKey =
+					previous?.fingerprint === fingerprint ? previous.key : createOfflineIdempotencyKey();
+				if (!idempotencyKey) {
+					setToggleError(
+						'Einkaufsstatus konnte nicht sicher gespeichert werden. Versuche es erneut.',
+					);
+					return;
+				}
+				patchRequest = {
+					expectedUpdatedAt: item.updatedAt,
+					expectedBoughtAt: item.boughtAt,
+					fingerprint,
+					idempotencyKey,
+				};
+				shoppingPatchRequestKeysRef.current.set(item.id, { fingerprint, key: idempotencyKey });
+			}
 			start(item.id);
 			setToggleError(null);
 			setToggleNotice(null);
-			const becomingBought = item.boughtAt === null;
 			const optimisticItem: ShoppingItem = {
 				...item,
 				boughtAt: becomingBought ? new Date().toISOString() : null,
@@ -427,12 +491,6 @@ export default function EinkaufPage() {
 				);
 
 			try {
-				const queuedCreate = readOfflineQueue().find(
-					(queued) =>
-						queued.id === item.id &&
-						queued.shareCode === wg.shareCode &&
-						queued.type === 'shopping.create',
-				);
 				if (queuedCreate) {
 					const saved = writeOfflineQueue(
 						readOfflineQueue().map((queued) =>
@@ -456,6 +514,11 @@ export default function EinkaufPage() {
 					);
 					return;
 				}
+				if (!patchRequest) {
+					rollback();
+					setToggleError('Der Einkaufsstatus konnte nicht sicher gespeichert werden.');
+					return;
+				}
 
 				const res = await apiFetch<{ item: ShoppingItem }>(
 					`/api/wg/${encodedShareCode}/shopping/${encodeURIComponent(item.id)}`,
@@ -463,13 +526,21 @@ export default function EinkaufPage() {
 						method: 'PATCH',
 						memberId: identity.memberId,
 						memberToken: identity.memberToken,
+						headers: { 'Idempotency-Key': patchRequest.idempotencyKey },
 						body: JSON.stringify({
 							bought: becomingBought,
-							boughtByMemberId: becomingBought ? identity.memberId : null,
+							expectedUpdatedAt: patchRequest.expectedUpdatedAt,
+							expectedBoughtAt: patchRequest.expectedBoughtAt,
 						}),
 					},
 				);
 				if (!res.ok) {
+					if (res.status > 0 && res.status < 500 && res.status !== 429) {
+						const pending = shoppingPatchRequestKeysRef.current.get(item.id);
+						if (pending?.fingerprint === patchRequest.fingerprint) {
+							shoppingPatchRequestKeysRef.current.delete(item.id);
+						}
+					}
 					if (res.status === 403) {
 						rollback();
 						setToggleError('Nur der/die Autor:in kann dies abhaken.');
@@ -483,6 +554,14 @@ export default function EinkaufPage() {
 						setToggleError(
 							'Dieser Einkaufsartikel existiert nicht mehr und wurde aus deiner Liste entfernt.',
 						);
+					} else if (res.status === 409 && res.error === 'shopping_item_duplicate') {
+						rollback();
+						await load(true);
+						setToggleError(shoppingAddErrorMessage(res.error));
+					} else if (res.status === 409 && res.error === 'shopping_item_changed') {
+						rollback();
+						await load(true);
+						setToggleError('Der Einkaufsstatus hat sich geändert. Prüfe den aktualisierten Stand.');
 					} else if (res.status === 0) {
 						const queued = createQueuedShoppingUpdate({
 							wgId: wg.id,
@@ -491,6 +570,9 @@ export default function EinkaufPage() {
 							itemId: item.id,
 							name: item.name,
 							bought: becomingBought,
+							expectedUpdatedAt: patchRequest.expectedUpdatedAt,
+							expectedBoughtAt: patchRequest.expectedBoughtAt,
+							idempotencyKey: patchRequest.idempotencyKey,
 						});
 						if (enqueueOfflineAction(queued) === 0) {
 							rollback();
@@ -499,6 +581,7 @@ export default function EinkaufPage() {
 							);
 							return;
 						}
+						shoppingPatchRequestKeysRef.current.delete(item.id);
 						refreshCount();
 						setToggleNotice(
 							becomingBought
@@ -517,6 +600,7 @@ export default function EinkaufPage() {
 						prev.map((current) => (current.id === item.id ? res.data.item : current)),
 					),
 				);
+				shoppingPatchRequestKeysRef.current.delete(item.id);
 				void load(true);
 			} finally {
 				end(item.id);
@@ -540,24 +624,18 @@ export default function EinkaufPage() {
 	const remove = useCallback(
 		async (id: string): Promise<void> => {
 			if (isPending(id)) return;
-			start(id);
 			setRemoveError(null);
 			setRemoveErrorId(null);
 			setRemoveNotice(null);
-			// Offline angelegte Zeilen tragen eine synthetische ID, die der Server
-			// nie vergeben hat: hier lokal entfernen statt mit 400 id_invalid zu
-			// scheitern — dasselbe Muster wie in toggleBought.
-			const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
-			if (localRemoval) {
-				if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
-					setRemoveErrorId(id);
-					setRemoveError(
-						'Offline-Speicher ist blockiert. Der Eintrag konnte nicht entfernt werden.',
-					);
-					end(id);
-					return;
-				}
-				setQueueEditId((current) => (current === id ? null : current));
+			const queued = discardQueuedEntry(wg.shareCode, id);
+			if (queued === 'storage_blocked') {
+				setRemoveErrorId(id);
+				setRemoveError(
+					'Offline-Speicher ist blockiert. Der vorgemerkte Artikel konnte nicht entfernt werden.',
+				);
+				return;
+			}
+			if (queued === 'removed' || isQueuedCreateId(id)) {
 				commitItems((prev) =>
 					keepItems(
 						prev,
@@ -565,10 +643,11 @@ export default function EinkaufPage() {
 					),
 				);
 				refreshCount();
+				setQueueEditId((current) => (current === id ? null : current));
 				setRemoveNotice('Der offline angelegte Eintrag wurde aus deiner Liste entfernt.');
-				end(id);
 				return;
 			}
+			start(id);
 			const res = await apiFetch<unknown>(
 				`/api/wg/${encodedShareCode}/shopping/${encodeURIComponent(id)}`,
 				{
@@ -660,6 +739,16 @@ export default function EinkaufPage() {
 		(a, b) => (b.boughtAt ?? '').localeCompare(a.boughtAt ?? '') || byCreated(a, b),
 	);
 	const actionError = toggleError ?? (removeErrorId ? null : removeError);
+	const queuedShoppingUpdateIds = new Set(
+		readOfflineQueue()
+			.filter(
+				(action) =>
+					action.type === 'shopping.update' &&
+					action.shareCode === wg.shareCode &&
+					action.memberId === identity.memberId,
+			)
+			.map((action) => String(action.payload.itemId)),
+	);
 
 	// Nach dem Einkauf: eigene frisch gekaufte Artikel direkt als Ausgabe erfassen.
 	const receiptKey = `manawg:receipt-prompt:${wg.shareCode}`;
@@ -728,6 +817,7 @@ export default function EinkaufPage() {
 				adder={memberLookup(item.addedByMemberId)}
 				buyer={item.boughtByMemberId ? memberLookup(item.boughtByMemberId) : null}
 				pending={isPending(item.id)}
+				queued={queuedShoppingUpdateIds.has(item.id)}
 				onToggle={toggleBought}
 				onRemove={remove}
 				removeError={removeErrorId === item.id ? removeError : null}
@@ -741,12 +831,13 @@ export default function EinkaufPage() {
 	return (
 		<div data-household-content className="mx-auto flex w-full max-w-4xl flex-col gap-6 px-4 py-6">
 			<SubNav liveCount={!initialLoading && !loadError ? open.length : undefined} />
-			<header>
+			{/* Der aktive Tab benennt die Seite schon; Titel und Zähler bleiben für Screenreader. */}
+			<header className="sr-only">
 				<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight text-foreground">
 					Einkaufsliste
 				</h1>
 				<p
-					className="mt-0.5 text-[13px] text-muted-foreground tabular-nums"
+					className="mt-0.5 text-[12px] text-muted-foreground tabular-nums"
 					aria-live="polite"
 					aria-atomic="true"
 				>
@@ -758,20 +849,30 @@ export default function EinkaufPage() {
 				{suggestionGroups.map((group) => (
 					<div key={group.label} className="flex min-w-0 flex-col gap-1.5">
 						<p className="text-sm font-medium text-muted-foreground">{group.label}</p>
-						<ul
-							aria-label={group.label}
-							className="-mx-4 -my-1.5 flex gap-2 overflow-x-auto px-4 py-1.5 [scrollbar-width:none]"
-						>
+						<ul aria-label={group.label} className="-mx-4 -my-1.5 flex flex-wrap gap-2 px-4 py-1.5">
 							{group.names.map((name) => (
-								<li key={name} className="shrink-0">
+								<li key={name} className="min-w-0 max-w-full">
 									<Button
 										type="button"
 										variant="outline"
 										size="sm"
 										disabled={adding}
 										onClick={() => void add(name)}
+										onFocus={(event) => {
+											if (!event.currentTarget.matches(':focus-visible')) return;
+											const action = document.querySelector<HTMLElement>(
+												'[data-page-primary-action]',
+											);
+											if (
+												action &&
+												event.currentTarget.getBoundingClientRect().bottom >
+													action.getBoundingClientRect().top
+											) {
+												event.currentTarget.scrollIntoView({ block: 'start', inline: 'nearest' });
+											}
+										}}
 										aria-label={`${name} hinzufügen`}
-										className="max-w-56"
+										className="min-w-0 max-w-full"
 									>
 										<Plus data-icon="inline-start" aria-hidden />
 										<span className="truncate">{name}</span>
@@ -859,7 +960,9 @@ export default function EinkaufPage() {
 			) : (
 				<section aria-label="Einkaufsartikel" className="flex flex-col gap-4">
 					{openItems.length > 0 ? (
-						<ul className="flex flex-col">{openItems.map(renderRow)}</ul>
+						<ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
+							{openItems.map(renderRow)}
+						</ul>
 					) : (
 						<p className="text-sm text-muted-foreground">Alles eingekauft.</p>
 					)}
@@ -876,7 +979,9 @@ export default function EinkaufPage() {
 								/>
 								Erledigt ({doneItems.length})
 							</summary>
-							<ul className="flex flex-col">{doneItems.map(renderRow)}</ul>
+							<ul className="flex flex-col divide-y overflow-hidden rounded-xl border">
+								{doneItems.map(renderRow)}
+							</ul>
 							{isAdmin && (
 								<Button
 									variant="outline"

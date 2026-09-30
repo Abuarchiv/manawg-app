@@ -49,6 +49,7 @@ test.describe('live public dashboard entry', () => {
 		await expect(page).toHaveURL(/\/neu\?action=create$/);
 		await expect(page.getByLabel('E-Mail-Adresse')).toBeVisible();
 		await expect(page.getByLabel('Passwort', { exact: true })).toBeVisible();
+		await expect(page.getByText('Für ein neues Konto mindestens 8 Zeichen.')).toBeVisible();
 		const phoneTab = page.getByRole('tab', { name: 'Telefon / SMS', exact: true });
 		const { external } = (await (await authSettings).json()) as { external?: { phone?: boolean } };
 		if (external?.phone === true) {
@@ -64,18 +65,27 @@ test.describe('live public dashboard entry', () => {
 		).toBeVisible();
 		await expect(page.getByRole('button', { name: 'WG erstellen', exact: true })).toHaveCount(0);
 
-		// New accounts need 8 characters; the rule is stated by the field hint up
-		// front, and the rejection still surfaces the shared weak-password message.
-		await expect(page.getByTestId('auth-password-hint')).toContainText('mindestens 8 Zeichen');
+		// Short passwords are rejected locally, before any Supabase sign-up request.
+		let signUpRequests = 0;
+		await page.route(
+			(url) => url.pathname === '/auth/v1/signup',
+			async (route) => {
+				signUpRequests += 1;
+				await route.abort();
+			},
+		);
+		const passwordWarning = page.getByRole('alert').filter({ hasText: WEAK_PASSWORD_MESSAGE });
 		await page.getByLabel('E-Mail-Adresse').fill('kurz@example.invalid');
 		await page.getByLabel('Passwort', { exact: true }).fill('12345');
 		await page.getByRole('button', { name: 'Konto erstellen', exact: true }).click();
-		await expect(page.getByText(WEAK_PASSWORD_MESSAGE, { exact: false })).toBeVisible();
+		await expect(passwordWarning).toBeVisible();
+		expect(signUpRequests).toBe(0);
 		await page.reload();
 		await page.getByLabel('E-Mail-Adresse').fill('kurz@example.invalid');
 		await page.getByLabel('Passwort', { exact: true }).fill('1234567');
 		await page.getByRole('button', { name: 'Konto erstellen', exact: true }).click();
-		await expect(page.getByText(WEAK_PASSWORD_MESSAGE, { exact: false })).toBeVisible();
+		await expect(passwordWarning).toBeVisible();
+		expect(signUpRequests).toBe(0);
 	});
 
 	test('an invitation survives public navigation and enters join only after selection', async ({

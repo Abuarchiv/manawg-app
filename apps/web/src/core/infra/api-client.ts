@@ -1,8 +1,23 @@
-import { MEMBER_ID_HEADER, MEMBER_TOKEN_HEADER } from '@/shared/lib/member-header';
+import {
+	EXPECTED_MEMBER_ID_HEADER,
+	MEMBER_ID_HEADER,
+	MEMBER_TOKEN_HEADER,
+} from '@/shared/lib/member-header';
 
 type ApiFetchInit = RequestInit & { memberId?: string; memberToken?: string | undefined };
 
+/** status 0 means no trustworthy result was received; a write may still have committed. */
 type ApiFetchResult<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
+
+let mutationCount = 0;
+
+/**
+ * Increases after every settled non-GET request. A cached read that started
+ * before the latest mutation may not contain its effect (useCachedFetch).
+ */
+export function mutationGeneration(): number {
+	return mutationCount;
+}
 
 export async function apiFetch<T>(
 	path: string,
@@ -12,6 +27,7 @@ export async function apiFetch<T>(
 	const method = rest.method ?? 'GET';
 
 	const headers = new Headers(rest.headers);
+	if (memberId) headers.set(EXPECTED_MEMBER_ID_HEADER, memberId);
 	if (
 		process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE === 'true' &&
 		process.env.NEXT_PUBLIC_DB_DOWN === 'true' &&
@@ -27,14 +43,19 @@ export async function apiFetch<T>(
 		headers.set('content-type', 'application/json');
 	}
 
+	const isMutation = method !== 'GET' && method !== 'HEAD';
 	try {
+		const timeoutSignal = AbortSignal.timeout(15_000);
+		const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 		const res = await fetch(path, {
 			cache: 'no-store',
 			...rest,
 			method,
 			headers,
-			signal: signal ?? AbortSignal.timeout(15_000),
+			signal: requestSignal,
 		});
+
+		if (res.status === 204) return { ok: true, data: undefined as T };
 
 		if (!res.ok) {
 			let error = res.statusText;
@@ -51,17 +72,13 @@ export async function apiFetch<T>(
 			return { ok: false, status: res.status, error };
 		}
 
-		// 204/empty bodies are legitimate success responses — parsing them
-		// would throw and get misreported as a network failure (status 0),
-		// which offline queueing would then replay as a duplicate mutation.
 		const contentType = res.headers.get('content-type') ?? '';
 		if (!contentType.includes('application/json')) {
-			const body = await res.text();
-			if (body.length === 0) return { ok: true, data: undefined as T };
+			await res.text();
 			return {
 				ok: false,
-				status: res.status,
-				error: res.statusText || 'Unerwartete Serverantwort',
+				status: 0,
+				error: 'Unerwartete Serverantwort',
 			};
 		}
 		try {
@@ -70,11 +87,13 @@ export async function apiFetch<T>(
 		} catch {
 			return {
 				ok: false,
-				status: res.status,
-				error: res.statusText || 'Unerwartete Serverantwort',
+				status: 0,
+				error: 'Unerwartete Serverantwort',
 			};
 		}
 	} catch {
 		return { ok: false, status: 0, error: 'Netzwerkfehler' };
+	} finally {
+		if (isMutation) mutationCount += 1;
 	}
 }

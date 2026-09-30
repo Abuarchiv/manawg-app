@@ -41,7 +41,7 @@ export function ShareWgCard({
 	hideHeader = false,
 	joiningEnabled = true,
 }: Props) {
-	const [copied, setCopied] = useState<'code' | 'link' | null>(null);
+	const [copied, setCopied] = useState<'code' | 'link' | 'shared' | null>(null);
 	const [copyError, setCopyError] = useState<string | null>(null);
 	const [copying, setCopying] = useState<'code' | 'link' | 'share' | null>(null);
 	const feedbackTimerRef = useRef<number | null>(null);
@@ -54,7 +54,7 @@ export function ShareWgCard({
 		};
 	}, []);
 
-	function showCopied(kind: 'code' | 'link'): void {
+	function showCopied(kind: 'code' | 'link' | 'shared'): void {
 		setCopied(kind);
 		if (feedbackTimerRef.current !== null) window.clearTimeout(feedbackTimerRef.current);
 		feedbackTimerRef.current = window.setTimeout(() => {
@@ -108,7 +108,7 @@ export function ShareWgCard({
 				text: `Tritt der WG "${wgName}" auf ManaWG bei. Code: ${shareCode}`,
 				url: shareUrl,
 			});
-			showCopied('link');
+			showCopied('shared');
 		} catch (err) {
 			if (err instanceof Error && err.name === 'AbortError') return;
 			copyingRef.current = false;
@@ -182,7 +182,7 @@ function ShareWgBody({
 	shareCode: string;
 	wgName: string;
 	joiningEnabled: boolean;
-	copied: 'code' | 'link' | null;
+	copied: 'code' | 'link' | 'shared' | null;
 	copying: 'code' | 'link' | 'share' | null;
 	copyError: string | null;
 	onCopyCode: () => void;
@@ -274,7 +274,7 @@ function ShareWgBody({
 					<AlertDescription>{copyError}</AlertDescription>
 				</Alert>
 			) : null}
-			{copied === 'link' && !copyError ? (
+			{(copied === 'link' || copied === 'shared') && !copyError ? (
 				<p aria-live="polite" className="text-muted-foreground mt-2 block text-xs">
 					Einladungslink bereit.
 				</p>

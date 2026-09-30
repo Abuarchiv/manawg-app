@@ -3,8 +3,8 @@ import { getAuthenticatedUser } from '@/core/auth/server';
 import { db, wgMembers, wgs } from '@/core/db';
 import { lockActiveAccountMember } from '@/core/db/account-deletion';
 import { deleteWgCascade } from '@/core/db/delete-wg';
-import { withTransaction } from '@/core/db/transaction';
-import { apiError, badRequest, forbidden, notFound, serverError } from '@/core/errors';
+import { TransactionAbort, withTransaction } from '@/core/db/transaction';
+import { apiError, badRequest, conflict, forbidden, notFound, serverError } from '@/core/errors';
 import { requireMember } from '@/core/guards/api-auth';
 import { deriveMemberToken } from '@/core/guards/member-token';
 import { requireWgAdmin } from '@/core/guards/require-wg-admin';
@@ -12,6 +12,7 @@ import { readShareCode } from '@/core/guards/route-preamble';
 import type { RouteCtx } from '@/core/infra/api-types';
 import { getE2EWgFixture, isE2EDbDownMode } from '@/core/infra/e2e-db-down';
 import { logApiError } from '@/core/infra/observability';
+import { withExpensePaymentLock } from '@/features/expenses/expense-payments';
 import { generateShareCode } from '@/shared/lib/share-code';
 import { eq } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -79,10 +80,17 @@ export async function GET(
 		});
 	}
 
+	let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
 	try {
-		const user = await getAuthenticatedUser(req);
-		if (!user) return apiError('auth_required', 401, 'auth_required');
+		user = await getAuthenticatedUser(req);
+	} catch (err) {
+		// A transient Auth outage is retryable, not an unauthenticated caller.
+		logApiError('[api/wg/[code] GET] auth error', err);
+		return apiError('db_error', 503);
+	}
+	if (!user) return apiError('auth_required', 401, 'auth_required');
 
+	try {
 		const wg = await db.query.wgs.findFirst({
 			where: (w, { eq }) => eq(w.shareCode, code),
 			columns: {
@@ -213,7 +221,7 @@ export async function DELETE(
 		const admin = await requireWgAdmin(req, code, 'wg-settings');
 		if (!admin.ok) return admin.response;
 		const { wg, member } = admin;
-		const result = await withTransaction(async (tx) => {
+		const result = await withExpensePaymentLock(wg.id, async (tx) => {
 			const actor = await lockActiveAccountMember(tx, wg.id, member.memberId, admin.authUserId);
 			if (!actor || actor.role !== 'admin' || !member.verified) {
 				return { ok: false as const, reason: 'not_admin' as const };
@@ -224,6 +232,9 @@ export async function DELETE(
 		if (!result.deleted) return notFound('wg_not_found');
 		return NextResponse.json({ deleted: true });
 	} catch (err) {
+		if (err instanceof TransactionAbort && err.code === 'paypal_payment_pending') {
+			return conflict('paypal_payment_pending');
+		}
 		logApiError('[api/wg/[code] DELETE] failed', err);
 		return serverError('db_error');
 	}

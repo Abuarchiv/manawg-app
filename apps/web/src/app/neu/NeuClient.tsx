@@ -38,7 +38,7 @@ import { getInitialJoinCode, joinErrorMessage } from '@/core/infra/join-flow';
 import { readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
 import posthog from '@/shared/lib/analytics';
-import { rememberWg } from '@/shared/lib/identity';
+import { getIdentity, rememberWg } from '@/shared/lib/identity';
 import { isValidShareCode, normalizeShareCode } from '@/shared/lib/share-code';
 import { ArrowRight, ChevronDown, Home, KeyRound, Plus } from 'lucide-react';
 import Link from 'next/link';
@@ -368,7 +368,19 @@ export function NeuClient() {
 		setAccountSwitchError(null);
 		try {
 			const { signOutSocialAccount } = await import('@/core/auth/client');
-			await signOutSocialAccount();
+			const pushTargets = accountWgs.flatMap((wg) => {
+				const identity = getIdentity(wg.id);
+				return identity
+					? [
+							{
+								code: wg.code,
+								memberId: identity.memberId,
+								...(identity.memberToken ? { memberToken: identity.memberToken } : {}),
+							},
+						]
+					: [];
+			});
+			const { pushCleanup } = await signOutSocialAccount(pushTargets);
 			const intent = getNeuIntentFromSearch(searchParams.toString());
 			removeDraft(START_DRAFT_KEY);
 			setStep(intent.joinCode ? 'join' : intent.create ? 'create' : 'choose');
@@ -381,6 +393,11 @@ export function NeuClient() {
 			clearError();
 			setAccountWgs([]);
 			setAuthState('signed-out');
+			if (pushCleanup === 'failed') {
+				setAccountSwitchError(
+					'Du bist abgemeldet, aber Push konnte auf diesem Browser nicht sicher beendet werden. Deaktiviere Website-Benachrichtigungen in den Browsereinstellungen.',
+				);
+			}
 		} catch {
 			setAccountSwitchError('Konto konnte nicht abgemeldet werden. Bitte erneut versuchen.');
 		} finally {
@@ -595,6 +612,7 @@ export function NeuClient() {
 				}
 				backHref={explorationHref()}
 			>
+				{accountSwitchError && <ErrorBox>{accountSwitchError}</ErrorBox>}
 				{callbackError && (
 					<ErrorBox>
 						Die Anmeldung konnte nicht abgeschlossen werden. Bitte versuche es erneut.
@@ -766,6 +784,7 @@ export function NeuClient() {
 							required
 							invalid={invalidField === 'wgName'}
 							describedBy={invalidField === 'wgName' ? 'create-wg-error' : undefined}
+							enterKeyHint="next"
 						/>
 						<Field
 							id="creator-name"
@@ -778,6 +797,7 @@ export function NeuClient() {
 							required
 							invalid={invalidField === 'creatorName'}
 							describedBy={invalidField === 'creatorName' ? 'create-wg-error' : undefined}
+							enterKeyHint="done"
 						/>
 					</FieldGroup>
 					{error && (
@@ -844,6 +864,7 @@ export function NeuClient() {
 								autoComplete="off"
 								autoCapitalize="characters"
 								inputMode="text"
+								enterKeyHint="done"
 								placeholder="ABCD1234"
 								aria-describedby={
 									invalidField === 'joinCode' ? 'join-code-hint join-code-error' : 'join-code-hint'
@@ -905,6 +926,7 @@ export function NeuClient() {
 							required
 							invalid={invalidField === 'joinName'}
 							describedBy={invalidField === 'joinName' ? 'join-name-error' : undefined}
+							enterKeyHint="done"
 						/>
 					</FieldGroup>
 					<p className="text-sm text-muted-foreground">

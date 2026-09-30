@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { FIXTURE_WG, dismissOnboarding, navigateToFeature, setupMember } from './_helpers';
+import { FIXTURE_WG, setupMember } from './_helpers';
 
 test.describe('app shell navigation state', () => {
 	test('restores create intent from the URL after signing out', async ({ page }) => {
@@ -42,21 +42,6 @@ test.describe('app shell navigation state', () => {
 		await expect(
 			page.getByText('Melde dich an, um mit deinem Einladungscode beizutreten.'),
 		).toBeVisible();
-	});
-
-	test('makes the WG search link visible before expanding the recent activity panel', async ({
-		page,
-	}) => {
-		test.skip(
-			process.env.E2E_FIXTURE_MODE !== 'true' || process.env.NEXT_PUBLIC_DB_DOWN !== 'true',
-			'Requires the database-down fixture server.',
-		);
-
-		await setupMember(page);
-		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}`);
-		await dismissOnboarding(page);
-
-		await expect(page.getByRole('link', { name: 'WG durchsuchen', exact: true })).toBeVisible();
 	});
 
 	test('lets a signed-in single-WG user open that WG from a module preview', async ({ page }) => {

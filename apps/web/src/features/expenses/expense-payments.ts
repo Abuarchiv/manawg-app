@@ -1,6 +1,6 @@
 import { db, expensePayments } from '@/core/db';
-import { type DbTransaction, withTransaction } from '@/core/db/transaction';
-import { and, eq, gt, or, sql } from 'drizzle-orm';
+import { type DbTransaction, lockExpensePayments, withTransaction } from '@/core/db/transaction';
+import { and, eq, gt, or } from 'drizzle-orm';
 
 export const PAYPAL_ORDER_TTL_MS = 3 * 60 * 60 * 1000;
 
@@ -49,6 +49,18 @@ export async function hasActiveExpensePayment(
 	return rows.length > 0;
 }
 
+export async function hasCapturingExpensePayment(
+	tx: DbTransaction,
+	wgId: string,
+): Promise<boolean> {
+	const rows = await tx
+		.select({ id: expensePayments.id })
+		.from(expensePayments)
+		.where(and(eq(expensePayments.wgId, wgId), eq(expensePayments.status, 'capturing')))
+		.limit(1);
+	return rows.length > 0;
+}
+
 export async function withExpensePaymentLock<T>(
 	wgId: string,
 	fn: (tx: DbTransaction) => Promise<T>,
@@ -61,7 +73,7 @@ export async function withExpensePaymentLock<T>(
 		// row selected by share code (see app/api/wg/[code]/*/route.ts) or
 		// from a `wgs.id` column. It is never a raw URL parameter, so the
 		// advisory lock key is safe from injection and collisions.
-		await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`expense-payment:${wgId}`}))`);
+		await lockExpensePayments(tx, wgId);
 		return fn(tx);
 	});
 }

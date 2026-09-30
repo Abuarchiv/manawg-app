@@ -45,7 +45,15 @@ function harness() {
 		claimExpiry: new Date('2026-09-25T00:00:00.000Z'),
 		releaseWhere: '',
 		errors: [],
+		locks: 0,
+		rejectImageAttachment: false,
 	};
+	class TransactionAbort extends Error {
+		constructor(code) {
+			super(code);
+			this.code = code;
+		}
+	}
 	let prior = Promise.resolve();
 	const db = {
 		delete: () => ({
@@ -152,8 +160,22 @@ function harness() {
 			wgChatReactions: {},
 			wgMembers,
 		},
-		'@/core/db/transaction': { withTransaction },
-		'@/core/errors': {},
+		'@/core/db/private-image-deletions': {
+			assertPrivateImageCanBeAttached: async () => {
+				if (state.rejectImageAttachment) throw new TransactionAbort('image_removed');
+			},
+		},
+		'@/core/db/transaction': {
+			TransactionAbort,
+			lockExpensePayments: async () => {
+				state.locks++;
+			},
+			withTransaction,
+		},
+		'@/core/errors': {
+			conflict: (error, code) =>
+				Response.json({ error, ...(code ? { code } : {}) }, { status: 409 }),
+		},
 		'@/core/guards/api-auth': { UUID_PATTERN: /^[0-9a-f-]{36}$/i },
 		'@/core/guards/idempotency': {
 			claimReplaySlotWithRetry: async () => {
@@ -212,12 +234,12 @@ function harness() {
 	);
 	return {
 		state,
-		post: () =>
+		post: (imageUrl = null) =>
 			module.exports.POST(
 				new Request('https://example.invalid', {
 					method: 'POST',
 					headers: { 'Idempotency-Key': key },
-					body: JSON.stringify({ body: 'Hello', imageUrl: null, mentionMemberIds: [mentionedId] }),
+					body: JSON.stringify({ body: 'Hello', imageUrl, mentionMemberIds: [mentionedId] }),
 				}),
 				{ code: 'MTE8PZAT' },
 			),
@@ -291,4 +313,17 @@ test('persisted notification warning is replayed without a second dispatch', asy
 	assert.equal(replay.warning, state.warning);
 	assert.equal(state.messages.length, 1);
 	assert.equal(state.notifications, 2);
+});
+
+test('revoked private image attachment returns 409 and creates no chat row', async () => {
+	const { state, post } = harness();
+	state.rejectImageAttachment = true;
+	const response = await post(
+		'https://app.example/api/upload/read?key=manawg%2F44444444-4444-4444-8444-444444444444%2Fannouncement%2F55555555-5555-4555-8555-555555555555.jpg',
+	);
+	assert.equal(response.status, 409);
+	assert.deepEqual(await response.json(), { error: 'image_removed', code: 'image_removed' });
+	assert.equal(state.messages.length, 0);
+	assert.equal(state.notifications, 0);
+	assert.ok(state.locks > 0);
 });

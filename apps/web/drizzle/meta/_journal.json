@@ -113,6 +113,20 @@
       "when": 1790291774454,
       "tag": "0015_mixed_strong_guy",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790507828201,
+      "tag": "0016_revoke_data_api_table_select",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790510090755,
+      "tag": "0017_private_image_deletions",
+      "breakpoints": true
     }
   ]
 }

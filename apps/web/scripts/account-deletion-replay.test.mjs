@@ -8,14 +8,18 @@ const webDir = path.resolve(import.meta.dirname, '..');
 const requireFromWeb = createRequire(path.join(webDir, 'package.json'));
 const { ModuleKind, ScriptTarget, transpileModule } = requireFromWeb('typescript');
 
-function load(cached) {
+function load(cached, idempotencyOverrides = {}) {
 	const mocks = {
-		'@/core/guards/replay-slot': { claimReplaySlot: async () => ({ won: false, cached }) },
+		'@/core/guards/replay-slot': {
+			claimReplaySlot: async () => (cached ? { won: false, cached } : { won: true }),
+		},
 		'@/core/idempotency': {
 			claimResponseSlot: async () => true,
 			getCachedResponse: async () => cached,
 			readIdempotencyKey: (req) => req.headers.get('idempotency-key'),
+			releaseResponseSlot: async () => undefined,
 			setCachedResponse: async () => undefined,
+			...idempotencyOverrides,
 		},
 		'next/server': { NextResponse: Response },
 	};
@@ -74,4 +78,68 @@ test('a cached response still replays when the fresh account gate allows it', as
 	);
 	assert.equal(response.status, 200);
 	assert.deepEqual(await response.json(), { ok: true });
+});
+
+function loadWithStore() {
+	const store = new Map();
+	const released = [];
+	const exports = load(null, {
+		getCachedResponse: async (scope, key) => store.get(`${scope}:${key}`) ?? null,
+		releaseResponseSlot: async (scope, key) => {
+			released.push(`${scope}:${key}`);
+		},
+		setCachedResponse: async (scope, key, payload) => {
+			store.set(`${scope}:${key}`, payload);
+		},
+	});
+	return { ...exports, store, released };
+}
+
+const retryRequest = () =>
+	new Request('https://example.test/api/wg/reminders', {
+		method: 'POST',
+		headers: { 'Idempotency-Key': '22222222-2222-4222-8222-222222222222' },
+	});
+
+test('a 5xx response is not cached and a retry with the same key re-runs the handler', async () => {
+	// A failed attempt must not replay: the retry wins the slot again.
+	const { withIdempotentJsonResponse, store, released } = loadWithStore();
+	let calls = 0;
+	const handler = async () => {
+		calls += 1;
+		return calls === 1
+			? Response.json({ error: 'internal' }, { status: 500 })
+			: Response.json({ ok: true }, { status: 201 });
+	};
+	const first = await withIdempotentJsonResponse(retryRequest(), 'reminder:test', handler);
+	assert.equal(first.status, 500);
+	assert.equal(store.size, 0);
+	assert.deepEqual(released, ['reminder:test:22222222-2222-4222-8222-222222222222']);
+
+	const second = await withIdempotentJsonResponse(retryRequest(), 'reminder:test', handler);
+	assert.equal(second.status, 201);
+	assert.deepEqual(await second.json(), { ok: true });
+	assert.equal(calls, 2);
+	assert.equal(store.size, 1);
+
+	const replay = await withIdempotentJsonResponse(retryRequest(), 'reminder:test', handler);
+	assert.equal(replay.status, 201);
+	assert.deepEqual(await replay.json(), { ok: true });
+	assert.equal(calls, 2);
+});
+
+test('a 429 response and a thrown handler release the claim instead of caching', async () => {
+	const { withIdempotentJsonResponse, store, released } = loadWithStore();
+	const limited = await withIdempotentJsonResponse(retryRequest(), 'reminder:test', async () =>
+		Response.json({ error: 'rate_limited' }, { status: 429 }),
+	);
+	assert.equal(limited.status, 429);
+	await assert.rejects(
+		withIdempotentJsonResponse(retryRequest(), 'reminder:test', async () => {
+			throw new Error('boom');
+		}),
+		/boom/,
+	);
+	assert.equal(store.size, 0);
+	assert.equal(released.length, 2);
 });

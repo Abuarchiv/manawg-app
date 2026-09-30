@@ -47,6 +47,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { type ActionNotice, ActionNoticeBanner } from '@/components/wg/ActionNoticeBanner';
 import { ImageUploader } from '@/components/wg/ImageUploader';
 import type { Member } from '@/components/wg/WgContextProvider';
+import { formatEuroCents } from '@/core/utils/money';
 import { remainderCandidates } from '@/features/expenses/expense-split-input';
 import { ArrowLeft, ChevronDown, Receipt, Repeat2 } from 'lucide-react';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
@@ -82,6 +83,7 @@ interface ExpenseFormSectionProps {
 	imageUrl: string | null;
 	setImageUrl: Dispatch<SetStateAction<string | null>>;
 	shareCode: string;
+	currency: string;
 	isEditingQueuedExpense: boolean;
 	isEditingQueuedRecurring: boolean;
 	formError: string | null;
@@ -127,6 +129,7 @@ export function ExpenseFormSection({
 	imageUrl,
 	setImageUrl,
 	shareCode,
+	currency,
 	isEditingQueuedExpense,
 	isEditingQueuedRecurring,
 	formError,
@@ -203,7 +206,7 @@ export function ExpenseFormSection({
 	const hasLockedHistoricalShare =
 		isEditingExpense && splitCandidates.some((member) => !member.active);
 	const historicalShareHintId = `${splitErrorId}-inactive-share`;
-	const remainderMembers = remainderCandidates(members, splitMode, manualSplits, isEditingExpense);
+	const remainderMembers = remainderCandidates(members);
 	const firstSplitMemberId = splitCandidates[0]?.id;
 	const splitErrorTargetsMode =
 		Boolean(fieldErrors.splits) && (splitMode !== 'manual' || firstSplitMemberId === undefined);
@@ -293,6 +296,7 @@ export function ExpenseFormSection({
 									placeholder="z. B. Wocheneinkauf"
 									disabled={formSaving}
 									error={fieldErrors.description}
+									enterKeyHint="next"
 								/>
 								<TextField
 									label="Betrag"
@@ -304,9 +308,10 @@ export function ExpenseFormSection({
 									}}
 									inputMode="decimal"
 									placeholder="0,00"
-									suffix="€"
+									suffix={currency === 'EUR' ? '€' : currency}
 									disabled={formSaving}
 									error={fieldErrors.amount}
+									enterKeyHint="next"
 								/>
 								<Field data-disabled={formSaving}>
 									<FieldLabel htmlFor="paid-by">Bezahlt von</FieldLabel>
@@ -347,7 +352,7 @@ export function ExpenseFormSection({
 									>
 										<ToggleGroupItem
 											value="equal"
-											className="min-h-11 flex-1"
+											className="flex-1"
 											disabled={hasLockedHistoricalShare}
 											aria-label="Aufteilung: Gleichmäßig"
 											aria-describedby={
@@ -358,7 +363,7 @@ export function ExpenseFormSection({
 										</ToggleGroupItem>
 										<ToggleGroupItem
 											value="manual"
-											className="min-h-11 flex-1"
+											className="flex-1"
 											aria-label="Aufteilung: Manuell"
 										>
 											Manuell
@@ -374,11 +379,11 @@ export function ExpenseFormSection({
 										<FieldError id={splitErrorId}>{fieldErrors.splits}</FieldError>
 									)}
 									{splitMode === 'manual' && (
-										<FieldGroup className="gap-3">
-											{splitCandidates.map((member) => (
+										<FieldGroup className={fieldErrors.splits ? 'block space-y-3' : 'gap-3'}>
+											{splitCandidates.map((member, index) => (
 												<Field
 													key={member.id}
-													orientation="horizontal"
+													orientation="responsive"
 													data-disabled={formSaving || (isEditingExpense && !member.active)}
 													data-invalid={
 														Boolean(fieldErrors.splits) && member.id === firstSplitMemberId
@@ -395,7 +400,7 @@ export function ExpenseFormSection({
 															</span>
 														)}
 													</FieldLabel>
-													<InputGroup className="w-32 shrink-0">
+													<InputGroup className="w-full min-w-32 shrink-0 @md/field-group:max-w-32">
 														<InputGroupInput
 															id={`share-${member.id}`}
 															type="text"
@@ -410,7 +415,8 @@ export function ExpenseFormSection({
 															}}
 															placeholder="0,00"
 															disabled={formSaving || (isEditingExpense && !member.active)}
-															aria-label={`Anteil ${member.name} in Euro${isEditingExpense && !member.active ? ', ausgezogen. Anteil bleibt unverändert.' : ''}`}
+															enterKeyHint={index === splitCandidates.length - 1 ? 'done' : 'next'}
+															aria-label={`Anteil ${member.name} in ${currency === 'EUR' ? 'Euro' : currency}${isEditingExpense && !member.active ? ', ausgezogen. Anteil bleibt unverändert.' : ''}`}
 															aria-invalid={
 																Boolean(fieldErrors.splits) && member.id === firstSplitMemberId
 																	? true
@@ -424,13 +430,14 @@ export function ExpenseFormSection({
 															className="min-h-11 font-mono tabular-nums text-base"
 														/>
 														<InputGroupAddon align="inline-end">
-															<InputGroupText>€</InputGroupText>
+															<InputGroupText>{currency === 'EUR' ? '€' : currency}</InputGroupText>
 														</InputGroupAddon>
 													</InputGroup>
 												</Field>
 											))}
 											<ManualSplitSummary
 												amountStr={amountStr}
+												currency={currency}
 												manualSplits={manualSplits}
 												members={remainderMembers}
 												setManualSplits={setManualSplits}
@@ -438,7 +445,10 @@ export function ExpenseFormSection({
 											/>
 											{!fieldErrors.splits && (
 												<FieldDescription>
-													Für einzelne Personen <span className="font-mono tabular-nums">0 €</span>{' '}
+													Für einzelne Personen{' '}
+													<span className="font-mono tabular-nums">
+														{formatEuroCents(0, currency)}
+													</span>{' '}
 													eintragen oder das Feld leer lassen.
 												</FieldDescription>
 											)}
@@ -449,6 +459,7 @@ export function ExpenseFormSection({
 											members={splitCandidates}
 											splits={previewSplits}
 											paidByMemberId={paidByMemberId}
+											currency={currency}
 										/>
 									)}
 								</FieldSet>
@@ -556,10 +567,10 @@ export function ExpenseFormSection({
 						</div>
 						<Separator />
 						<div className="flex shrink-0 flex-col gap-2 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-							<div className="flex gap-2">
+							<div className="flex flex-col gap-2">
 								<Button
 									type="submit"
-									className="flex-1"
+									className="w-full"
 									disabled={formSaving || savingRecurringTemplate}
 									aria-label={
 										isEditingQueuedRecurring || editingTemplate
@@ -577,6 +588,7 @@ export function ExpenseFormSection({
 								<Button
 									type="button"
 									variant="ghost"
+									className="w-full"
 									onClick={requestClose}
 									disabled={formSaving || savingRecurringTemplate}
 								>

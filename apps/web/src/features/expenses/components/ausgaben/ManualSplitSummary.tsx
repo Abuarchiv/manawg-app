@@ -5,11 +5,12 @@ import { Button } from '@/components/ui/button';
 import { parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { formatEuroCents } from '@/core/utils/money';
-import { distributeRemainderSplits } from '@/features/expenses/manual-split-remainder';
 import type { Dispatch, SetStateAction } from 'react';
+import { distributeRemainderCents } from './manual-split-distribute';
 
 interface ManualSplitSummaryProps {
 	amountStr: string;
+	currency: string;
 	manualSplits: Record<string, string>;
 	members: ReadonlyArray<{ id: string; name: string }>;
 	setManualSplits: Dispatch<SetStateAction<Record<string, string>>>;
@@ -18,6 +19,7 @@ interface ManualSplitSummaryProps {
 
 export function ManualSplitSummary({
 	amountStr,
+	currency,
 	manualSplits,
 	members,
 	setManualSplits,
@@ -35,10 +37,10 @@ export function ManualSplitSummary({
 
 	function distributeRemainder(): void {
 		if (totalCents <= 0 || remainderCents === 0) return;
-		// Computed outside the updater: a pure result is handed to the state
-		// setter, so StrictMode's second invocation cannot lose cents.
-		const next = distributeRemainderSplits(members, manualSplits, remainderCents);
-		if (next !== null) setManualSplits(next);
+		// Compute the next state from the same snapshot remainderCents came
+		// from, outside any updater, so StrictMode's double-invoked updaters
+		// cannot apply the remainder against a different base.
+		setManualSplits(distributeRemainderCents(manualSplits, members, remainderCents));
 	}
 
 	return (
@@ -50,7 +52,7 @@ export function ManualSplitSummary({
 				<AlertDescription className="flex items-center justify-between gap-2">
 					<span>
 						Summe:{' '}
-						<span className="font-mono tabular-nums">{formatEuroCents(splitCents, 'EUR')}</span>
+						<span className="font-mono tabular-nums">{formatEuroCents(splitCents, currency)}</span>
 					</span>
 					<span>
 						{label}
@@ -58,7 +60,7 @@ export function ManualSplitSummary({
 							<>
 								:{' '}
 								<span className="font-mono tabular-nums">
-									{formatEuroCents(Math.abs(remainderCents), 'EUR')}
+									{formatEuroCents(Math.abs(remainderCents), currency)}
 								</span>
 							</>
 						)}
@@ -71,7 +73,7 @@ export function ManualSplitSummary({
 					variant="outline"
 					size="lg"
 					onClick={distributeRemainder}
-					disabled={disabled || remainderCents < 0}
+					disabled={disabled}
 				>
 					Rest aufteilen
 				</Button>

@@ -2,6 +2,7 @@ import { getAuthenticatedUser } from '@/core/auth/server';
 import { apiError, notFound } from '@/core/errors';
 import { type VerifiedMember, requireMember } from '@/core/guards/api-auth';
 import { type ResolvedWg, resolveWg } from '@/core/guards/resolve';
+import { shareCodeMissResponse } from '@/core/guards/share-code-miss';
 import { logApiError } from '@/core/infra/observability';
 import type { NextRequest, NextResponse } from 'next/server';
 
@@ -59,8 +60,20 @@ export async function requireWgMember(
 	}
 
 	const wg = await resolveWg(code);
-	if (!wg) return { ok: false, response: notFound('wg_not_found') };
+	if (!wg) {
+		return { ok: false, response: await shareCodeMissResponse(user.id, notFound('wg_not_found')) };
+	}
 	const auth = await requireMember(req, wg.id, user);
-	if (!auth.ok) return { ok: false, response: auth.response };
+	if (!auth.ok) {
+		const body = (await auth.response
+			.clone()
+			.json()
+			.catch(() => null)) as { error?: unknown } | null;
+		const response =
+			body?.error === 'not_a_member'
+				? await shareCodeMissResponse(user.id, auth.response)
+				: auth.response;
+		return { ok: false, response };
+	}
 	return { ok: true, wg, member: auth.member, authUserId: user.id };
 }

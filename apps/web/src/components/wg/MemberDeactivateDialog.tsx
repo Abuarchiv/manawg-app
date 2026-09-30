@@ -121,6 +121,16 @@ export function MemberDeactivateDialog({
 			onClose();
 			return;
 		}
+		if (res.error === 'admin_required') {
+			setSubmitError(
+				selfLeave
+					? 'Admins können ihre Mitgliedschaft derzeit nicht beenden, weil die Admin-Rolle nicht übertragen werden kann. Wenn du nur dieses Gerät abmelden möchtest, nutze oben „Konto abmelden“.'
+					: 'Nur aktive Admin-Mitglieder können andere Mitglieder deaktivieren. Admin-Mitgliedschaften selbst können nicht deaktiviert werden. Bitte wende dich an ein aktives Admin-Mitglied.',
+			);
+			submittingRef.current = false;
+			setSubmitting(false);
+			return;
+		}
 		setSubmitError(
 			selfLeave
 				? 'WG konnte nicht verlassen werden. Deine Mitgliedschaft bleibt bestehen. Bitte erneut versuchen.'
@@ -148,13 +158,13 @@ export function MemberDeactivateDialog({
 					<AlertDialogDescription>
 						{selfLeave
 							? 'Deine Mitgliedschaft in dieser WG wird deaktiviert. Deine Einträge und offenen Salden bleiben erhalten. Ein aktives Admin-Mitglied mit der nötigen Berechtigung kann dich später wieder aktivieren.'
-							: `${member.name} verschwindet aus allen Listen (Rotation, Aufteilung, Auswahl), behält aber Zugriff auf dieses Gerät. Historie und Salden bleiben erhalten. Du kannst den Auszug jederzeit rückgängig machen.`}
+							: `${member.name} verliert den Zugriff auf diese WG. Historie und offene Salden bleiben erhalten. Ein aktives Admin-Mitglied kann sie später wieder aktivieren.`}
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 
 				<div className="grid gap-2">
 					{loading ? (
-						<p className="text-muted-foreground flex min-h-[44px] items-center gap-2 text-[13px]">
+						<p className="text-muted-foreground flex min-h-[44px] items-center gap-2 text-[12px]">
 							<Spinner aria-hidden />
 							Offene Salden werden geprüft …
 						</p>
@@ -168,7 +178,7 @@ export function MemberDeactivateDialog({
 							</AlertDescription>
 						</Alert>
 					) : openBalances.length === 0 ? (
-						<p className="text-muted-foreground text-[13px]">Keine offenen Salden.</p>
+						<p className="text-muted-foreground text-[12px]">Keine offenen Salden.</p>
 					) : (
 						<Alert>
 							<AlertTitle>
@@ -179,7 +189,7 @@ export function MemberDeactivateDialog({
 									{openBalances.map((balance) => (
 										<li
 											key={`${balance.currency}-${balance.direction}-${balance.member_id}`}
-											className="flex items-center justify-between gap-2 text-[13px]"
+											className="flex items-center justify-between gap-2 text-[12px]"
 										>
 											<span className="text-muted-foreground truncate">
 												{balance.direction === 'owes'
@@ -206,7 +216,7 @@ export function MemberDeactivateDialog({
 				<AlertDialogFooter>
 					<AlertDialogCancel
 						disabled={submitting}
-						aria-label={selfLeave ? 'WG-Verlassen abbrechen' : undefined}
+						aria-label={selfLeave ? 'Abbrechen: WG verlassen' : undefined}
 					>
 						Abbrechen
 					</AlertDialogCancel>
@@ -216,7 +226,7 @@ export function MemberDeactivateDialog({
 							void handleConfirm();
 						}}
 						disabled={submitting || loading}
-						aria-label={selfLeave ? 'WG auf diesem Gerät verlassen' : undefined}
+						aria-label={selfLeave ? 'Verlassen: WG auf diesem Gerät verlassen' : undefined}
 					>
 						{submitting && <Spinner aria-hidden />}
 						{selfLeave ? 'Verlassen' : 'Ausziehen'}

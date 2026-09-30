@@ -26,7 +26,7 @@ function loadPost(route, overrides) {
 	return loaded.exports.POST;
 }
 
-function harness(kind) {
+function harness(kind, bodyOverride) {
 	const tables = {
 		chores: { name: 'chores' },
 		memberAbsences: { name: 'memberAbsences' },
@@ -246,7 +246,7 @@ function harness(kind) {
 				}
 			: { memberId, startDate: '2026-09-24T00:00:00+02:00', endDate: '2026-09-24T23:59:59+02:00' };
 	const request = () => ({
-		json: async () => body,
+		json: async () => bodyOverride ?? body,
 		headers: new Headers({ 'idempotency-key': key }),
 	});
 	return { post, request, state };
@@ -301,3 +301,16 @@ for (const kind of ['chore', 'absence']) {
 		assert.equal(state.audits, 0);
 	});
 }
+
+test('absence create rejects an end before the start on the same Berlin day', async () => {
+	const { post, request, state } = harness('absence', {
+		memberId,
+		startDate: '2026-09-24T18:00:00+02:00',
+		endDate: '2026-09-24T09:00:00+02:00',
+	});
+	const response = await post(request(), { code: 'MTE8PZAT' });
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), { error: 'date_range_invalid' });
+	assert.equal(state.rows.length, 0);
+	assert.equal(state.audits, 0);
+});

@@ -33,6 +33,7 @@ import {
 	INVENTORY_UNITS,
 	type InventoryCategory,
 	type InventoryItemDto,
+	type InventoryMutationItemDto,
 	type InventoryUnit,
 	isBelowThreshold,
 } from '@/features/inventory/inventory';
@@ -54,7 +55,7 @@ interface InventoryAddModalProps {
 		updatedAt: string;
 	} | null;
 	onClose: () => void;
-	onSaved: () => void;
+	onSaved: (item?: InventoryMutationItemDto, deletedId?: string) => void;
 	onItemRefreshed: (item: InventoryItemDto) => void;
 }
 
@@ -172,21 +173,24 @@ export function InventoryAddModal({
 		if (idempotencyKey) createRequestRef.current = { fingerprint, key: idempotencyKey };
 		const res =
 			mode === 'edit' && current
-				? await apiFetch(
+				? await apiFetch<{ item: InventoryMutationItemDto }>(
 						`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(current.id)}`,
 						{ method: 'PATCH', memberId, memberToken, body: JSON.stringify(body) },
 					)
-				: await apiFetch(`/api/wg/${encodedShareCode}/inventory`, {
-						method: 'POST',
-						memberId,
-						memberToken,
-						headers: { 'Idempotency-Key': idempotencyKey as string },
-						body: JSON.stringify(body),
-					});
+				: await apiFetch<{ item: InventoryMutationItemDto }>(
+						`/api/wg/${encodedShareCode}/inventory`,
+						{
+							method: 'POST',
+							memberId,
+							memberToken,
+							headers: { 'Idempotency-Key': idempotencyKey as string },
+							body: JSON.stringify(body),
+						},
+					);
 		if (res.ok) {
 			setSaving(false);
 			if (mode === 'create') createRequestRef.current = null;
-			onSaved();
+			onSaved(res.data.item);
 			onClose();
 		} else if (mode === 'edit' && current && res.error === 'version_conflict') {
 			const refreshed = await apiFetch<{ items: InventoryItemDto[] }>(
@@ -194,17 +198,18 @@ export function InventoryAddModal({
 				{ memberId, memberToken },
 			);
 			setSaving(false);
-			onSaved();
 			const latest = refreshed.ok
 				? (refreshed.data.items.find((item) => item.id === current.id) ?? null)
 				: null;
 			if (!latest) {
+				onSaved(undefined, refreshed.ok ? current.id : undefined);
 				setConflictNeedsReload(true);
 				setServerError(
 					'Dieser Vorrat wurde geändert, konnte aber nicht neu geladen werden. Schließe das Formular und öffne ihn erneut.',
 				);
 				return;
 			}
+			onSaved(latest);
 			setBaseline(latest);
 			setName(latest.name);
 			setQuantity(latest.quantity);
@@ -278,6 +283,7 @@ export function InventoryAddModal({
 									aria-describedby={nameError ? 'inventory-name-error' : undefined}
 									placeholder="z. B. Nudeln"
 									disabled={saving || conflictNeedsReload}
+									enterKeyHint="next"
 									className="text-base"
 								/>
 								{nameError && <FieldError id="inventory-name-error">{nameError}</FieldError>}

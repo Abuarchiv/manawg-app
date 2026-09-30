@@ -79,6 +79,10 @@ export async function refreshSupabaseSession(
 
 	try {
 		const { data, error } = await supabase.auth.getUser();
+		// A transient Auth failure is not "signed out": serve the page and let
+		// app/wg/[code]/layout.tsx fail closed. That layout is then the only
+		// barrier for /wg/*, which scripts/check-wg-auth-invariant.mjs keeps
+		// true by rejecting route handlers and server actions under app/wg/**.
 		if (requiresSignIn && isTransientAuthError(error)) return refreshedResponse;
 		if (requiresSignIn && (error || !data.user)) return signInRedirect(request, refreshedResponse);
 	} catch {

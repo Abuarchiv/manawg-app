@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { announcements, db, wgChatMessages } from '@/core/db';
+import { logApiError } from '@/core/infra/observability';
 import { SYSTEM_MESSAGE_KIND } from '@/features/chat/chat-pure';
 import type { ChatSystemKind } from '@/features/chat/chat-pure';
 
@@ -33,7 +34,7 @@ export async function postSystemNotice(input: SystemNoticeInput): Promise<void> 
 			content: input.content,
 		});
 	} catch (err) {
-		console.warn(`[activity-feed] system notice from "${input.source}" failed`, err);
+		logApiError('[activity-feed] system notice failed', err);
 	}
 }
 
@@ -62,6 +63,6 @@ export async function postChatSystemMessage(input: ChatSystemMessageInput): Prom
 			systemPayload: input.payload,
 		});
 	} catch (err) {
-		console.warn(`[activity-feed] chat system message "${input.kind}" failed`, err);
+		logApiError('[activity-feed] chat system message failed', err);
 	}
 }

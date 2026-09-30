@@ -5,7 +5,9 @@ import { TransactionAbort, withTransaction } from '@/core/db/transaction';
 import { apiError, badRequest, conflict, forbidden, notFound } from '@/core/errors';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { verifyMemberToken } from '@/core/guards/member-token';
+import { shareCodeMissResponse } from '@/core/guards/share-code-miss';
 import { withWgRoute } from '@/core/guards/with-wg-route';
+import { logApiError } from '@/core/infra/observability';
 import { MEMBER_ID_HEADER, MEMBER_TOKEN_HEADER } from '@/shared/lib/member-header';
 import { and, eq, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -19,14 +21,22 @@ type ClaimResult =
 
 export const POST = withWgRoute<{ id: string }>('members claim POST', async (req, { code, id }) => {
 	if (!UUID_PATTERN.test(id)) return badRequest('id_invalid');
-	const user = await getAuthenticatedUser(req);
-	if (!user) return apiError('auth_required', 401, 'auth_required');
+	let authUser: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+	try {
+		authUser = await getAuthenticatedUser(req);
+	} catch (err) {
+		// A transient Auth outage is retryable, not an unauthenticated caller.
+		logApiError('[members claim POST] auth error', err);
+		return apiError('db_error', 503);
+	}
+	if (!authUser) return apiError('auth_required', 401, 'auth_required');
+	const user = authUser;
 
 	const wg = await db.query.wgs.findFirst({
 		where: (w, { eq }) => eq(w.shareCode, code),
 		columns: { id: true },
 	});
-	if (!wg) return notFound('wg_not_found');
+	if (!wg) return shareCodeMissResponse(user.id, notFound('wg_not_found'));
 
 	const legacyMemberId = req.headers.get(MEMBER_ID_HEADER)?.trim();
 	const legacyToken = req.headers.get(MEMBER_TOKEN_HEADER);

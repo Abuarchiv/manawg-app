@@ -2,7 +2,7 @@
 
 Scope: hosted Supabase PostgreSQL and Auth, AWS S3 uploads (Supabase Storage if used), Upstash and Vercel. No local PostgreSQL substitute or custom backup service.
 
-**Status: documented procedure, not recovery evidence.** Repository behavior was inspected on 2026-09-03. Provider plans, backup/PITR availability and retention, restore capability, Auth settings, object protection, environment secrets and approval rules remain **UNVERIFIED** until an operator records current evidence. This document authorizes no remote action and does not declare ManaWG release-ready.
+**Status: hosted recovery evidence remains incomplete.** A fresh local export and isolated Supabase PostgreSQL 17.6 restore check passed on 2026-09-30; row counts matched for all 62 exported tables. This does not demonstrate provider-managed backups/PITR, offsite retention, complete Auth/Storage recovery, or measured RPO/RTO. No offsite destination is configured on the operator Mac. Provider backup status/retention, PITR, Auth settings, object protection, environment secrets and approval rules remain **UNVERIFIED** until an operator records current evidence. This document authorizes no remote action and does not declare ManaWG release-ready.
 
 ## Authority and stop conditions
 
@@ -28,6 +28,70 @@ The recovery owner completes this record before approval; blanks and “unknown�
 
 Supabase backup/PITR support depends on the actual project configuration. Database backups do **not** recover Storage object contents; AWS S3 needs separate object/version recovery evidence. Verify availability in the provider, not from a plan name or this document. See [Supabase backups](https://supabase.com/docs/guides/platform/backups).
 
+## Free local recovery point
+
+The current Free-plan fallback is an **operator-owned local export**, not a hosted backup or a substitute for the approval gates above. On the operator's Mac, `~/Library/LaunchAgents/com.abu.manawg-local-backup.plist` runs `~/.local/bin/manawg-local-backup.py` daily at 03:15 local time and at login. The script requires the existing Supabase and Vercel CLI sessions. Check `launchctl print gui/$(id -u)/com.abu.manawg-local-backup` and `~/.local/share/manawg-recovery/backup-status.json`; only `status: success` with a fresh completed directory is a recovery point. Ordinary failures write `failed`, abrupt termination can leave `running`, and an early filesystem failure can leave an older status; always compare timestamps and the LaunchAgent exit. A failed status write after the final directory rename can leave a completed-looking directory that is **unverified** until its manifest and status are reconciled.
+
+Each completed directory holds private `roles.sql`, `schema.sql`, `data.sql`, a managed Auth/Storage schema **reference**, a manifest with file SHA-256/size, and downloaded Supabase Storage objects. The script checks Production project identity, current Supabase-storage configuration, required COPY sections, supported app image keys, object count and image references. Unknown keys or historical external image URLs fail closed. Directories must be `0700`, files `0600`, and the local disk encrypted. The current private drill record verifies a no-network restore with exact row sets and sequence values; do not put its raw Auth rows, secrets or object bytes in Git or tickets.
+
+### Verified local drill — 2026-09-27
+
+The export completed at **01:15:28 UTC (03:15:28 Europe/Berlin)**. The disposable restore used the official `supabase/postgres:17.6.1.165` image, no network, temporary database storage and a read-only snapshot mount. Its four SQL payload hashes matched the manifest before and after verification. Private evidence is under the operator's `manawg-recovery/restore-drills/20260927T011528Z-supabase17/reviewed-q1em3U/`; the container was removed after verification. Keep evidence directories `0700` and files `0600`.
+
+| Local check | Verified result |
+| --- | --- |
+| Restored rows and sequences | All 61 COPY sections matched the source row multisets; both sequence values and `is_called` states matched. |
+| Financial consistency | Source/restored aggregates matched for expenses, splits and payments; same-WG relationship checks and balance-conservation violations were zero. |
+| Relationships | All 84 foreign keys had zero orphan rows; none were unvalidated. |
+| Migration ledger | All 16 captured entries matched the canonical applied prefix. The candidate has 18 entries; this restore did not apply the two pending migrations. |
+| Database security | RLS enabled on all 27 public tables; policy counts matched. Effective application table, sequence and function privileges were denied to `anon`, `authenticated` and `service_role`. The repository's actual catalog-security checker passed for the 24 baseline tables. |
+| Server-role access | A synthetic WG insert/read/delete under the restored runtime role passed inside a rolled-back transaction; a fresh session confirmed the probe row was absent. |
+| Session state | A fresh session reported `session_replication_role = origin`. |
+
+The Storage manifest contained **one bucket, zero objects and zero image references**. This proves the empty inventory was accounted for; it does not exercise object-byte recovery, attachment upload/read or provider deletion. The managed Auth/Storage schema reference restores database objects only; it is **not** an approved script to apply wholesale to a hosted Supabase project.
+
+### Current local evidence — 2026-09-30
+
+- The daily 03:15 Europe/Berlin LaunchAgent's 2026-09-28 through 2026-09-30 runs failed at `roles.sql` while OrbStack was stopped. OrbStack's supported `app.start_at_login` setting is now enabled through `orbctl`. Before staging, the script checks `orbctl status` and requires the `orbstack` Docker context. It waits at most 60 seconds while OrbStack reports `Starting` or `Running` for Docker API readiness, then records a `docker_runtime` failure; it never starts, stops or restarts OrbStack/Docker. A post-change export completed at **2026-09-30 11:46:29 UTC**.
+- The completed export remains local-only. Its directory is `0700`; the manifest, status and export files are `0600`; FileVault is on; every export hash matches its manifest. The export contains 62 `COPY` sections and zero Storage objects.
+- The export restored into a disposable Supabase PostgreSQL 17.6 database over a Docker internal network with no application services. The drill initialized the `extensions` and `vault` schemas plus the empty `supabase_realtime` publication required by the dump, then restored roles, the managed Auth/Storage schema reference, the application schema and data. Row counts matched the source for all 62 `COPY` tables. The temporary project, database, container, volume and network were removed.
+- `tmutil destinationinfo` reports no Time Machine destination, and no `rclone`, `restic` or `borg` remote is configured. No offsite copy is evidenced. The zero-object export does not exercise Storage object-byte recovery. Provider-managed backup/PITR and measured RPO/RTO remain unverified.
+- A portable OpenPGP archive is staged with AES-256/OCB AEAD. GPG packet inspection and decrypt/hash verification matched all five source files. The archive and its separate random passphrase are `0600` under `0700` directories; FileVault is on. Nothing was uploaded. A user-approved offsite destination and separate key custody are still needed for an offsite copy.
+
+### Local restore sequence
+
+1. Verify the completed export's manifest, SHA-256 hashes, file sizes and permissions. Start the official image above with `POSTGRES_USER=supabase_admin`, `--network none`, database storage on tmpfs, no published ports and the snapshot mounted read-only at `/snapshot`. Keep all DDL sessions as `supabase_admin`; the image demotes `postgres`. Use a new private evidence directory with `umask 077` and unique stdout/stderr files for each stage; stop on a nonzero exit and classify only that stage's new log.
+2. Reconcile required roles against the source catalog. This export required the missing `supabase_realtime_admin` role with the captured attributes: `NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`, connection limit `-1`, no expiry and `search_path = public, extensions, realtime`. Reproduce those exact attributes, then apply the captured `roles.sql` grants. Do not guess extra memberships or replay the image's global initialization scripts.
+3. Create `restore_probe` from **`template0`**, owned by `postgres`, and create the empty `supabase_realtime` publication with owner `postgres`. Preserve the source dump's subsequent owner statements. The image's preinitialized Auth tables are not a substitute: they lacked Production's audit-log column and OAuth tables in the failed first attempt.
+4. Bootstrap only the required database extensions as `supabase_admin`, with `ON_ERROR_STOP=1` and a single transaction:
+
+   ```sql
+   CREATE SCHEMA IF NOT EXISTS extensions AUTHORIZATION postgres;
+   CREATE EXTENSION IF NOT EXISTS "uuid-ossp" WITH SCHEMA extensions;
+   CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
+   CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA extensions;
+   CREATE EXTENSION IF NOT EXISTS supabase_vault;
+   ```
+
+   These are the official image's database-scoped prerequisites. The dump declares extensions but omits creation of `extensions` and `vault`; bare `CREATE EXTENSION supabase_vault` uses the extension control file's `vault` schema. Whole image scripts include global roles and database/session changes and must not be replayed into this target.
+5. With `container` naming that disposable container and `evidence` naming the new private directory, import the captured files atomically:
+
+   ```sh
+   docker exec "$container" psql -X -U supabase_admin -d restore_probe \
+     --set=ON_ERROR_STOP=1 --single-transaction \
+     -f /snapshot/managed-schema-reference.sql \
+     -f /snapshot/roles.sql \
+     -c 'SET LOCAL session_replication_role = replica' \
+     -f /snapshot/schema.sql -f /snapshot/data.sql \
+     > "$evidence/02-restore.stdout.log" 2> "$evidence/02-restore.stderr.log"
+   ```
+
+   `roles.sql` resets session settings, so the explicit replication setting follows it. Keep the payloads unchanged; no owner rewrites, `SET ROLE`, `\connect`, added grants or corrective data edits belong in this import.
+6. In fresh sessions, require `session_replication_role = origin`; compare every COPY section as a row multiset using its captured column order, both sequence values/`is_called`, financial aggregates and relationships, Auth/member and foreign-key links, the canonical ledger prefix, RLS and effective grants. Run the existing catalog-security checker for that restored prefix and a rollback-only runtime-role write/read/delete probe. Confirm the probe is absent in a fresh session and recheck payload hashes. Pending candidate migrations and hosted application behavior are separate gates.
+7. Retain only restricted evidence and remove the disposable container after verification. Keep failed attempts distinctly labeled; their old errors are not the result of a later successful stage.
+
+This local method has no guaranteed RPO while the Mac is off, sleeping or unauthenticated. SQL dump commands do not share one database snapshot; matching exports does not establish cross-file atomicity. Storage bytes and Auth/provider, Vercel, payment and notification configuration have separate recovery boundaries. No offsite copy, hosted Auth/login, numeric RPO or measured service RTO follows from this local import. A completed timestamp alone does not prove the LaunchAgent's calendar trigger; retain its invocation/exit evidence separately. Local evidence does not waive leaked-password protection, exact-SHA Preview CI or real-user acceptance.
+
 ## Safe production migration
 
 Use the existing [manual GitHub workflow](../.github/workflows/migrate-production.yml), not ad-hoc production SQL.
@@ -35,7 +99,7 @@ Use the existing [manual GitHub workflow](../.github/workflows/migrate-productio
 1. Review the exact main SHA and pending SQL. Compare the existing ledger to the canonical **applied prefix**, including hashes, timestamps and any documented baseline adoption. Pending migrations are legitimate; unexplained gaps/duplicates are not. The current full `db:check` expects all migrations, so it is not a pending-prefix preflight. Rehearse upgrades, applicable baseline adoption, failure/retry and a second no-op migration on disposable hosted Supabase first.
 2. Complete the evidence table and approval. Verify GitHub `Production` access/protection and the `DATABASE_MIGRATION_URL` secret without revealing it. The workflow requires the configured Production direct Supabase host on explicit port **5432**; do not substitute the runtime transaction pooler (6543), a Session Pooler or localhost. The script, not the broader environment-example wording, is authoritative for this workflow.
 3. With authorization, deploy/activate `MIGRATION_READ_ONLY=true` and verify the intended API mutation/cron requests return 503. This [middleware gate](../apps/web/src/middleware.ts) is **not a database-wide freeze**: contain other writers, Auth changes, uploads, payment callbacks and scheduled/external jobs separately; drain in-flight work and record the final write boundary. Confirm queued offline retries will not replay unreconciled writes on reopening.
-4. In GitHub Actions, select **Migrate production database**, approved `main`, and enter `MIGRATE_PRODUCTION`. Confirm the resolved run SHA equals the approved SHA before application; do not approve a moved ref. The current workflow uses `Production`, serializes migration runs, installs with Node 22/frozen lockfile, then runs `pnpm --filter @manawg/web db:migrate` followed by `pnpm --filter @manawg/web db:check`. It does not itself enforce recovery evidence, main-only execution or same-SHA hosted proof; those are mandatory operator gates here.
+4. In GitHub Actions, select **Migrate production database** from `main`, supply the approved full `candidate_sha`, its successful protected `preview_run_id`, and `MIGRATE_PRODUCTION`. The workflow verifies current main, successful exact-SHA push CI and protected Preview evidence, uses the `Production` environment, serializes migration runs, installs with Node 22/frozen lockfile, then runs `pnpm --filter @manawg/web db:migrate` followed by `pnpm --filter @manawg/web db:check`. Do not approve a moved ref. Recovery evidence and operator approval remain separate mandatory gates; environment naming alone does not establish that required reviewers or branch-protection rules are configured.
 5. Observe logs and database activity within the approved time budget. The [migrator](../apps/web/scripts/db-migrate.mjs) takes an advisory lock. A stalled/lost/cancelled run is an **unknown outcome**, not proof of rollback: establish session/transaction and ledger state before any retry. Escalate exceeded time budgets to the recovery owner.
 6. Require migration and post-check success, then independently verify the acceptance matrix below. `db:check` checks schema/ledger/data invariants plus the intended public-catalog RLS, role privileges, policies, views and functions; it creates/inserts into a temporary table before rollback. It is not SELECT-only and is not proof of restore, ACLs outside that scope or external consistency.
 7. After separate deployment approval, release the compatible app, verify the actual production deployment/SHA, domain, health and authenticated smoke. Reconcile payment/storage/retry state before reopening writes. Recovery owner signs off, restores authorized schedules/traffic progressively and monitors errors, DB connections, auth, uploads and duplicate writes for the agreed observation window.
@@ -45,9 +109,9 @@ Use the existing [manual GitHub workflow](../.github/workflows/migrate-productio
 | Situation | Action and proof required |
 | --- | --- |
 | Failed migration transaction | Keep writes closed; inspect schema and ledger against the pre-run evidence. Pending Drizzle SQL/ledger work is transactional, but baseline adoption occurs separately. Confirm rollback and any adoption effects before a reviewed retry. Never infer “nothing changed” from a red workflow. |
-| Application rollback | Revert/promote only the approved previous compatible Vercel deployment. This does not undo database changes or recover dropped data. Prove it supports the current schema, data and Auth contract; retain new writes. If incompatible, stay closed and choose forward repair or restore. |
+| Application rollback | Revert/promote only the approved previous compatible Vercel deployment. This does not undo database changes or recover dropped data. Prove it supports the current schema, data and Auth contract; retain new writes. For attachment deletion, the rollback must preserve and honor `private_image_deletions` tombstones in reads, mutation/replay validation and cleanup. A version that ignores these records is incompatible. If incompatible, stay closed and choose forward repair or restore. |
 | Committed migration or post-check failure | Treat changes as committed until proven otherwise. Prefer a reviewed forward repair migration with its own recovery point, hosted rehearsal and approval. Do not edit old migration SQL, erase ledger rows or apply speculative down-migrations. |
-| Data loss/corruption requiring restore | Recovery owner authorizes target point, destination, outage and accepted loss. Preserve incident evidence and the damaged source where possible. Use the supported provider restore procedure; reconcile writes and external effects after the target point before cutover. A database restore does not reverse a captured payment, delivered notification or changed object. |
+| Data loss/corruption requiring restore | Recovery owner authorizes target point, destination, outage and accepted loss. Preserve incident evidence and the damaged source where possible. Use the supported provider restore procedure; reconcile writes and external effects after the target point before cutover. Preserve attachment tombstones and reconcile deletions after the recovery point before reopening reads or cleanup; restoring an older row or object must not reauthorize a deleted attachment. A database restore does not reverse a captured payment, delivered notification or changed object. |
 
 ## Isolated hosted restore drill
 

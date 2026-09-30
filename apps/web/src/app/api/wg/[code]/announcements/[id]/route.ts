@@ -1,5 +1,7 @@
 import { recordAuditEvent } from '@/core/audit';
 import { announcementReactions, announcements, db } from '@/core/db';
+import { revokePrivateImageIfUnreferenced } from '@/core/db/private-image-deletions';
+import { lockExpensePayments, withTransaction } from '@/core/db/transaction';
 import { badRequest, forbidden, notFound, tooMany } from '@/core/errors';
 import { isVerifiedWgAdmin, requireOwnerOrAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
@@ -176,21 +178,34 @@ export const DELETE = withWgRoute<{ id: string }>(
 		// stale or inappropriate content when the author is unreachable.
 		// Previously this was author-only, which left the WG with no way to
 		// clean up posts from departed members (P1 audit finding).
-		const existing = await db
-			.select({ authorMemberId: announcements.authorMemberId, content: announcements.content })
-			.from(announcements)
-			.where(and(eq(announcements.id, id), eq(announcements.wgId, wgId)))
-			.limit(1);
-		const row = existing[0];
-		if (!row) return notFound('announcement_not_found');
-		const denied = await requireOwnerOrAdmin(wgId, auth.member, row.authorMemberId);
-		if (denied) return denied;
+		const deletion = await withTransaction(async (tx) => {
+			await lockExpensePayments(tx, wgId);
+			const [row] = await tx
+				.select({
+					authorMemberId: announcements.authorMemberId,
+					content: announcements.content,
+					imageUrl: announcements.imageUrl,
+				})
+				.from(announcements)
+				.where(and(eq(announcements.id, id), eq(announcements.wgId, wgId)))
+				.limit(1)
+				.for('update');
+			if (!row) return { ok: false as const, response: notFound('announcement_not_found') };
+			const denied = await requireOwnerOrAdmin(wgId, auth.member, row.authorMemberId);
+			if (denied) return { ok: false as const, response: denied };
 
-		const deleted = await db
-			.delete(announcements)
-			.where(and(eq(announcements.id, id), eq(announcements.wgId, wgId)))
-			.returning({ id: announcements.id });
-		if (deleted.length === 0) return notFound('announcement_not_found');
+			const deleted = await tx
+				.delete(announcements)
+				.where(and(eq(announcements.id, id), eq(announcements.wgId, wgId)))
+				.returning({ id: announcements.id });
+			if (deleted.length === 0) {
+				return { ok: false as const, response: notFound('announcement_not_found') };
+			}
+			await revokePrivateImageIfUnreferenced(tx, wgId, row.imageUrl);
+			return { ok: true as const, row };
+		});
+		if (!deletion.ok) return deletion.response;
+		const { row } = deletion;
 		await recordAuditEvent({
 			wgId,
 			memberId: auth.member.memberId,

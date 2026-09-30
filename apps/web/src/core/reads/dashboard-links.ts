@@ -58,13 +58,3 @@ export function getDashboardAuditKind(event: {
 	}
 	return 'audit';
 }
-
-export function getDashboardEmptyActionHref(
-	shareCode: string,
-	action: 'expense' | 'announcement',
-	params: Record<string, string>,
-): string {
-	const query = new URLSearchParams(params).toString();
-	const path = action === 'expense' ? 'ausgaben' : 'pinnwand';
-	return `/wg/${encodeURIComponent(shareCode)}/${path}${query ? `?${query}` : ''}`;
-}

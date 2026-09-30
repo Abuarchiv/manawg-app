@@ -24,14 +24,11 @@ import {
 	AttachmentTitle,
 	AttachmentTrigger,
 } from '@/components/ui/attachment';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
 	Card,
 	CardAction,
 	CardContent,
-	CardDescription,
 	CardFooter,
 	CardHeader,
 	CardTitle,
@@ -54,6 +51,7 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import { formatRelativeTime, formatTimeFull } from '@/core/utils/time';
 import { buildPinnwandPrefill, getPinnwandPrefillHref } from '@/features/pinnwand/pinnwand-prefill';
@@ -254,29 +252,36 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 	return (
 		<li
 			id={`announcement-${announcement.id}`}
-			className={cn(
-				'scroll-mt-24 rounded-xl',
-				highlighted && 'outline outline-2 outline-offset-4 outline-ring',
-			)}
+			className={cn('scroll-mt-24', highlighted && 'ring-2 ring-inset ring-ring')}
 		>
-			<Card aria-busy={busy}>
+			{/* Randlos: die Liste zieht Rahmen und Trennlinien, damit die Pinnwand wie ein Feed liest. */}
+			<Card
+				size="sm"
+				aria-busy={busy}
+				className="gap-1.5 rounded-none border-0 bg-transparent pt-2.5"
+			>
 				<CardHeader>
-					<CardTitle className="flex min-w-0 items-center gap-2">
-						<Avatar>
-							<AvatarFallback>{author.name.slice(0, 2).toLocaleUpperCase('de-DE')}</AvatarFallback>
-						</Avatar>
-						<span className="min-w-0 break-words">{author.name}</span>
+					<CardTitle className="flex min-w-0 items-center gap-2 font-sans font-normal">
+						<MemberAvatar name={author.name} size={28} />
+						<span className="min-w-0 break-words text-[12px] leading-snug text-muted-foreground">
+							<span className="font-medium text-foreground">{author.name}</span> ·{' '}
+							<time
+								dateTime={announcement.createdAt}
+								title={formatTimeFull(announcement.createdAt)}
+							>
+								{formatRelativeTime(announcement.createdAt)}
+							</time>{' '}
+							· {KIND_LABELS[announcement.kind]}
+							{sourceLabel && ` · ${sourceLabel}`}
+						</span>
+						{isPinned && (
+							<Pin aria-label="Fixiert" className="size-3.5 shrink-0 text-muted-foreground" />
+						)}
 					</CardTitle>
-					<CardDescription className="flex flex-wrap items-center gap-2">
-						<time dateTime={announcement.createdAt} title={formatTimeFull(announcement.createdAt)}>
-							{formatRelativeTime(announcement.createdAt)}
-						</time>
-						{sourceLabel && <span>· {sourceLabel}</span>}
-					</CardDescription>
 					<CardAction>
 						<DropdownMenu>
 							<DropdownMenuTrigger
-								render={<Button variant="ghost" size="icon" />}
+								render={<Button variant="ghost" size="icon" className="-my-2 size-10" />}
 								aria-label={`Beitragsaktionen: ${actionSubject}`}
 								disabled={deletePending}
 							>
@@ -362,31 +367,14 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 						</DropdownMenu>
 					</CardAction>
 				</CardHeader>
-				<CardContent className="flex flex-col gap-3">
-					<div className="flex flex-wrap items-center gap-2">
-						<Badge variant="outline">{KIND_LABELS[announcement.kind]}</Badge>
-						{isPinned && (
-							<Badge variant="secondary">
-								<Pin aria-hidden /> Fixiert
-							</Badge>
-						)}
-						<Badge variant={isResolved ? 'secondary' : 'outline'}>
-							{isResolved ? <CheckCircle2 aria-hidden /> : null}
-							{isResolved ? 'Geklärt' : takerNames.length > 0 ? 'Übernommen' : 'Offen'}
-						</Badge>
-						{busy && (
-							<output className="flex items-center gap-1 text-xs text-muted-foreground">
-								<Spinner /> Wird gespeichert…
-							</output>
-						)}
-					</div>
+				<CardContent className="flex flex-col gap-2">
 					{bodyText && (
 						<div className="flex flex-col items-start gap-1">
 							<p
 								id={`announcement-body-${announcement.id}`}
 								className={cn(
-									'text-base whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]',
-									isLong && !expanded && 'line-clamp-3',
+									'text-[14px] whitespace-pre-wrap leading-normal [overflow-wrap:anywhere]',
+									isLong && !expanded && 'line-clamp-4',
 								)}
 							>
 								{bodyText}
@@ -394,6 +382,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 							{isLong && (
 								<Button
 									variant="ghost"
+									className="-ml-2.5"
 									onClick={() => setExpanded((value) => !value)}
 									aria-expanded={expanded}
 									aria-controls={`announcement-body-${announcement.id}`}
@@ -433,34 +422,44 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 							/>
 						</Attachment>
 					)}
-					{takerNames.length > 0 && (
-						<div className="flex items-start gap-2 text-sm">
-							<Hand className="mt-0.5 size-4 shrink-0" aria-hidden />
-							<p className="min-w-0 [overflow-wrap:anywhere]">
-								{takerNames.join(', ')} {takerNames.length === 1 ? 'übernimmt' : 'übernehmen'}
-							</p>
-						</div>
-					)}
-					{announcement.resolvedAt && (
-						<p className="text-xs text-muted-foreground">
-							Geklärt {formatRelativeTime(announcement.resolvedAt)}
+					{(takerNames.length > 0 || announcement.resolvedAt || busy) && (
+						<p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground [overflow-wrap:anywhere]">
+							{takerNames.length > 0 && (
+								<span className="inline-flex items-center gap-1 text-foreground">
+									<Hand className="size-3.5 shrink-0" aria-hidden />
+									{takerNames.join(', ')} {takerNames.length === 1 ? 'übernimmt' : 'übernehmen'}
+								</span>
+							)}
+							{announcement.resolvedAt && (
+								<span className="inline-flex items-center gap-1">
+									<CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+									Geklärt {formatRelativeTime(announcement.resolvedAt)}
+								</span>
+							)}
+							{busy && (
+								<output className="inline-flex items-center gap-1">
+									<Spinner /> Wird gespeichert…
+								</output>
+							)}
 						</p>
 					)}
 				</CardContent>
-				<CardFooter className="flex-col items-stretch gap-3">
+				<CardFooter className="flex-col items-stretch gap-2 border-t-0 bg-transparent px-1.5 pt-0 pb-1">
 					<Collapsible
 						open={commentsOpen}
 						onOpenChange={setCommentsOpen}
-						className="flex flex-col gap-3"
+						className="flex min-w-0 max-w-full flex-col gap-2"
 					>
-						<div className="flex flex-wrap gap-2">
+						<div className="flex flex-wrap items-center gap-1">
 							{visibleReactions.map(({ key, label, icon: Icon }) => {
 								const active = announcement.myReactions.includes(key);
 								const count = announcement.reactionCounts[key] ?? 0;
 								return (
 									<Button
 										key={key}
-										variant={active ? 'secondary' : 'outline'}
+										variant={active ? 'secondary' : 'ghost'}
+										size="sm"
+										className="gap-1 pr-2 text-[12px]"
 										onClick={() => react(key)}
 										disabled={reactionPending(key)}
 										aria-pressed={active}
@@ -475,56 +474,44 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 										) : (
 											<Icon data-icon="inline-start" />
 										)}
-										{key === 'take' && count > 0 ? (active ? 'Mein Task' : 'Übernommen') : label}
+										{label}
 										{count > 0 && <span className="tabular-nums">{count}</span>}
 									</Button>
 								);
 							})}
-							{!isResolved && takerNames.length > 0 && canResolve && (
-								<Button
-									variant="outline"
-									disabled={statusPending}
-									onClick={onToggleStatus}
-									aria-label={`Als erledigt markieren: ${actionSubject}`}
-								>
-									{statusPending ? (
-										<Spinner data-icon="inline-start" />
-									) : (
-										<CheckCircle2 data-icon="inline-start" />
-									)}{' '}
-									Erledigt
-								</Button>
-							)}
-							{isResolved && isPinned && canModerate && (
-								<Button
-									variant="outline"
-									disabled={pinPending}
-									onClick={onTogglePinned}
-									aria-label={`Fixierung lösen: ${actionSubject}`}
-								>
-									<PinOff data-icon="inline-start" /> Pin lösen
-								</Button>
-							)}
-							{isResolved && !announcement.myReactions.includes('ok') && (
-								<Button
-									variant="outline"
-									disabled={reactionPending('ok')}
-									onClick={() => react('ok')}
-									aria-label={`Danke-Reaktion setzen: ${actionSubject}`}
-								>
-									<ThumbsUp data-icon="inline-start" /> Danke
-								</Button>
-							)}
 							<CollapsibleTrigger
-								render={<Button variant="ghost" />}
-								aria-label={`Antworten anzeigen: ${actionSubject}`}
+								render={
+									<Button variant="ghost" size="sm" className="ml-auto min-w-9 gap-1 text-[12px]" />
+								}
+								aria-label={`Antworten anzeigen: ${actionSubject}${announcement.comments.length > 0 ? ` (${announcement.comments.length})` : ''}`}
 								aria-controls={`announcement-comments-${announcement.id}`}
 							>
-								<MessageCircle data-icon="inline-start" /> Antworten
+								<MessageCircle aria-hidden />
 								{announcement.comments.length > 0 && (
 									<span className="tabular-nums">{announcement.comments.length}</span>
 								)}
 							</CollapsibleTrigger>
+							{/* Infos und Entscheidungen verblassen von selbst; alles andere schließt man hier ab. */}
+							{!isResolved &&
+								canResolve &&
+								announcement.kind !== 'info' &&
+								announcement.kind !== 'decision' && (
+									<Button
+										variant="outline"
+										size="sm"
+										className="gap-1 pr-2 text-[12px]"
+										disabled={statusPending}
+										onClick={onToggleStatus}
+										aria-label={`Als erledigt markieren: ${actionSubject}`}
+									>
+										{statusPending ? (
+											<Spinner data-icon="inline-start" />
+										) : (
+											<CheckCircle2 data-icon="inline-start" />
+										)}
+										Erledigt
+									</Button>
+								)}
 						</div>
 						<CollapsiblePanel
 							keepRendered
@@ -657,13 +644,21 @@ function CommentRow({
 }): ReactElement {
 	const [editing, setEditing] = useState(false);
 	const draft = useCommentDraft(draftKey, comment.content);
+	const editorRef = useRef<HTMLTextAreaElement>(null);
+	const focusEditorOnEditRef = useRef(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState(false);
+	const [confirmOpen, setConfirmOpen] = useState(false);
 	const pendingRef = useRef(false);
 	const actionSubject = actionLabelSubject(comment.content, 'leerer Kommentar');
 	useEffect(() => {
 		if (draft.restored && canEdit) setEditing(true);
 	}, [draft.restored, canEdit]);
+	useEffect(() => {
+		if (!editing || !focusEditorOnEditRef.current) return;
+		focusEditorOnEditRef.current = false;
+		editorRef.current?.focus();
+	}, [editing]);
 	async function save() {
 		if (!draft.draft.trim() || pendingRef.current) return;
 		pendingRef.current = true;
@@ -686,7 +681,10 @@ function CommentRow({
 		setError(false);
 		try {
 			if (!(await onDelete())) setError(true);
-			else draft.clear();
+			else {
+				draft.clear();
+				setConfirmOpen(false);
+			}
 		} finally {
 			pendingRef.current = false;
 			setPending(false);
@@ -694,14 +692,12 @@ function CommentRow({
 	}
 	return (
 		<li className="flex min-w-0 gap-2" aria-busy={pending || comment.id.startsWith('temp-')}>
-			<Avatar size="sm">
-				<AvatarFallback>
-					{(comment.authorName || '?').slice(0, 2).toLocaleUpperCase('de-DE')}
-				</AvatarFallback>
-			</Avatar>
+			<MemberAvatar name={comment.authorName || '?'} size={24} />
 			<div className="flex min-w-0 flex-1 flex-col gap-2">
 				<div className="flex flex-wrap items-center gap-2">
-					<span className="text-sm font-medium">{comment.authorName || 'Unbekannt'}</span>
+					<span className="min-w-0 text-sm font-medium [overflow-wrap:anywhere]">
+						{comment.authorName || 'Unbekannt'}
+					</span>
 					<time
 						dateTime={comment.createdAt}
 						title={formatTimeFull(comment.createdAt)}
@@ -710,15 +706,16 @@ function CommentRow({
 						{formatRelativeTime(comment.createdAt)}
 					</time>
 					{comment.id.startsWith('temp-') && (
-						<Badge variant="outline">
+						<output className="inline-flex items-center gap-1 text-xs text-muted-foreground">
 							<Spinner /> Wird gesendet…
-						</Badge>
+						</output>
 					)}
 				</div>
 				{editing ? (
 					<FieldGroup className="gap-2">
 						<Field data-invalid={error}>
 							<Textarea
+								ref={editorRef}
 								value={draft.draft}
 								onChange={(event) => draft.change(event.target.value)}
 								disabled={pending}
@@ -755,7 +752,7 @@ function CommentRow({
 					</Alert>
 				)}
 				{canEdit && !editing && (
-					<div className="flex gap-1">
+					<div className="flex flex-wrap gap-1">
 						<Button
 							variant="ghost"
 							size="sm"
@@ -763,6 +760,7 @@ function CommentRow({
 							aria-label={`Kommentar bearbeiten: ${actionSubject}`}
 							onClick={() => {
 								if (!draft.restored) draft.change(comment.content);
+								focusEditorOnEditRef.current = true;
 								setEditing(true);
 							}}
 						>
@@ -773,14 +771,43 @@ function CommentRow({
 							size="sm"
 							disabled={pending}
 							aria-label={`Kommentar entfernen: ${actionSubject}`}
-							onClick={() => void remove()}
+							onClick={() => setConfirmOpen(true)}
 						>
-							{pending ? <Spinner data-icon="inline-start" /> : <Trash2 data-icon="inline-start" />}{' '}
-							Entfernen
+							<Trash2 data-icon="inline-start" /> Entfernen
 						</Button>
 					</div>
 				)}
 			</div>
+			<AlertDialog open={confirmOpen} onOpenChange={(open) => !pending && setConfirmOpen(open)}>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle>Kommentar entfernen?</AlertDialogTitle>
+						<AlertDialogDescription>„{actionSubject}“ wird entfernt.</AlertDialogDescription>
+					</AlertDialogHeader>
+					{error && (
+						<Alert variant="destructive">
+							<AlertDescription>
+								Kommentar konnte nicht entfernt werden. Versuche es erneut.
+							</AlertDescription>
+						</Alert>
+					)}
+					<AlertDialogFooter>
+						<AlertDialogCancel disabled={pending} className="min-h-11">
+							Abbrechen
+						</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							disabled={pending}
+							className="min-h-11"
+							aria-label={`Kommentar entfernen bestätigen: ${actionSubject}`}
+							onClick={() => void remove()}
+						>
+							{pending && <Spinner data-icon="inline-start" />}
+							{pending ? 'Wird entfernt…' : 'Entfernen'}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</li>
 	);
 }

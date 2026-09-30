@@ -1,5 +1,6 @@
 'use client';
 
+import { cn } from '@/shared/lib/cn';
 import { type ReactNode, useLayoutEffect, useRef } from 'react';
 
 export function ThumbAction({
@@ -40,7 +41,20 @@ export function ThumbAction({
 			<div
 				ref={actionRef}
 				data-page-primary-action
-				className="fixed inset-x-0 bottom-[calc(var(--app-nav-height,5rem)+0.5rem)] z-20 mx-auto w-full max-w-[var(--app-nav-width)] px-4"
+				className={cn(
+					'pointer-events-none [&>*]:pointer-events-auto fixed inset-x-0 bottom-[calc(var(--app-nav-height,5rem)+0.5rem)] z-20 mx-auto w-full max-w-[var(--app-nav-width)] px-4',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:flex',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:size-[44px]',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:min-h-[44px]',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:ml-auto',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:gap-0',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:p-0',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:text-[0px]',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:leading-none',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:after:h-[44px]',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:after:w-[44px]',
+					'max-[639px]:[&>button:has(svg.lucide-plus)]:after:min-w-[44px]',
+				)}
 			>
 				{children}
 			</div>

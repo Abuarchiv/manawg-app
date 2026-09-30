@@ -30,7 +30,7 @@ import {
 	selectSettlementScope,
 	settlementScopeMatches,
 } from '@/features/expenses/settlement-scope';
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 type SettlementQueryClient = typeof db | DbTransaction;
@@ -77,9 +77,10 @@ async function loadSettlementSnapshot(
 			.where(eq(expenses.wgId, wgId)),
 	]);
 
-	const expenseIds = expenseRows.map((expense) => expense.id);
+	// Splits are joined by WG instead of `inArray(expenseIds)`: one bind
+	// parameter per expense would exceed PostgreSQL's 65,535-parameter limit.
 	const [splitRows, paymentRows] = await Promise.all([
-		expenseIds.length === 0
+		expenseRows.length === 0
 			? Promise.resolve([] as SettlementSplitInput[])
 			: client
 					.select({
@@ -90,7 +91,8 @@ async function loadSettlementSnapshot(
 						settledAt: expenseSplits.settledAt,
 					})
 					.from(expenseSplits)
-					.where(inArray(expenseSplits.expenseId, expenseIds)),
+					.innerJoin(expenses, eq(expenseSplits.expenseId, expenses.id))
+					.where(eq(expenses.wgId, wgId)),
 		client
 			.select({
 				fromMemberId: expensePayments.fromMemberId,

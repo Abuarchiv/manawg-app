@@ -14,6 +14,8 @@ const NAME_MAX_LENGTH = 80;
 const storedIdentitySchema = z.object({
 	memberId: z.string().regex(UUID_V4_PATTERN, 'memberId must be a valid UUID v4'),
 	name: z.string().min(1).max(NAME_MAX_LENGTH),
+	// Used only to keep local offline records separated when this browser switches accounts.
+	authUserId: z.string().regex(UUID_V4_PATTERN).optional(),
 	// Session token (see @/lib/wg/member-token). Optional so identities
 	// stored before this field existed keep parsing — they just stay
 	// "legacy" until WgContextProvider's self-heal effect backfills it.
@@ -37,6 +39,7 @@ export function memberAuthHeader(memberId: string, memberToken?: string): Record
 export interface StoredIdentity {
 	memberId: string;
 	name: string;
+	authUserId?: string;
 	memberToken?: string;
 }
 
@@ -70,10 +73,27 @@ export function getIdentity(wgId: string): StoredIdentity | null {
 		const parsed: unknown = JSON.parse(raw);
 		const result = storedIdentitySchema.safeParse(parsed);
 		if (!result.success) return null;
-		const { memberId, name, memberToken } = result.data;
-		return { memberId, name, ...(memberToken ? { memberToken } : {}) };
+		const { memberId, name, authUserId, memberToken } = result.data;
+		return {
+			memberId,
+			name,
+			...(authUserId ? { authUserId } : {}),
+			...(memberToken ? { memberToken } : {}),
+		};
 	} catch {
 		return null;
+	}
+}
+
+export function setIdentity(wgId: string, identity: StoredIdentity): void {
+	const ls = safeLocalStorage();
+	if (!ls) return;
+	const parsed = storedIdentitySchema.safeParse(identity);
+	if (!parsed.success) return;
+	try {
+		ls.setItem(STORAGE_PREFIX + wgId, JSON.stringify(parsed.data));
+	} catch {
+		// Local account binding is a convenience; server checks remain authoritative.
 	}
 }
 
@@ -111,12 +131,6 @@ export function getLegacyIdentityCandidates(): LegacyIdentityCandidate[] {
 		// Storage may become inaccessible between individual reads.
 	}
 	return candidates;
-}
-
-export function setIdentity(wgId: string, identity: StoredIdentity): void {
-	const ls = safeLocalStorage();
-	if (!ls) return;
-	ls.setItem(STORAGE_PREFIX + wgId, JSON.stringify(identity));
 }
 
 export function clearIdentity(wgId: string): void {

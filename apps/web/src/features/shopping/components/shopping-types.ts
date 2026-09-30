@@ -6,6 +6,7 @@ export interface ShoppingItem {
 	boughtAt: string | null;
 	boughtByMemberId: string | null;
 	createdAt: string;
+	updatedAt?: string;
 }
 
 export interface MemberInfo {

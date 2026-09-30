@@ -32,10 +32,17 @@ if (previewE2E) {
 const parsedBaseUrl = new URL(BASE_URL);
 const isLocalBase = ['localhost', '127.0.0.1', '::1'].includes(parsedBaseUrl.hostname);
 const isRemoteBase = /^https?:\/\//i.test(BASE_URL) && !isLocalBase;
+const authUiE2E = process.env.AUTH_UI_E2E === 'true';
+if (authUiE2E && (!isLocalBase || parsedBaseUrl.protocol !== 'http:')) {
+	throw new Error('AUTH_UI_E2E requires a local HTTP BASE_URL.');
+}
 const serverPort = parsedBaseUrl.port || (parsedBaseUrl.protocol === 'https:' ? '443' : '80');
 const APP_DIR = __dirname;
 const useBuiltServer = process.env.PLAYWRIGHT_USE_BUILD === 'true';
-if (!isRemoteBase && (useBuiltServer || process.env.NEXT_PUBLIC_DB_DOWN === 'true')) {
+const authSupabaseEnv = authUiE2E
+	? `NEXT_PUBLIC_SUPABASE_URL=${parsedBaseUrl.origin} NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=auth-ui-fixture-key`
+	: 'NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=';
+if (!isRemoteBase && (useBuiltServer || authUiE2E || process.env.NEXT_PUBLIC_DB_DOWN === 'true')) {
 	const storageKeys = new Set([
 		'AWS_ACCESS_KEY_ID',
 		'AWS_SECRET_ACCESS_KEY',
@@ -59,11 +66,12 @@ const e2eDistDir = `.next-e2e-${serverPort}`;
 const e2eTsconfigPath = `.next-e2e-tsconfig-${serverPort}.json`;
 const isolatedNextEnv = `NEXT_DIST_DIR=${e2eDistDir} NEXT_TSCONFIG_PATH=${e2eTsconfigPath}`;
 const prepareIsolatedNext = `cp "${path.join(APP_DIR, 'tsconfig.json')}" "${e2eTsconfigPath}"`;
-const webServerCommand = useBuiltServer
-	? `${prepareIsolatedNext} && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY= UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next build && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY= UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next start --port ${serverPort}`
-	: process.env.NEXT_PUBLIC_DB_DOWN === 'true'
-		? `${prepareIsolatedNext} && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= NEXT_PUBLIC_SUPABASE_URL= NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY= UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next dev --port ${serverPort}`
-		: `${prepareIsolatedNext} && if [ "\${CI:-}" != "true" ] && [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; VERCEL_ENV=development ${isolatedNextEnv} pnpm exec next dev --port ${serverPort}`;
+const webServerCommand =
+	useBuiltServer || authUiE2E
+		? `${prepareIsolatedNext} && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= ${authSupabaseEnv} UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next build && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= ${authSupabaseEnv} UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next start --port ${serverPort}`
+		: process.env.NEXT_PUBLIC_DB_DOWN === 'true'
+			? `${prepareIsolatedNext} && CI=true E2E_FIXTURE_MODE=true NEXT_PUBLIC_E2E_FIXTURE_MODE=true NEXT_PUBLIC_DB_DOWN=true POSTGRES_URL= DATABASE_URL= ${authSupabaseEnv} UPSTASH_REDIS_REST_URL= UPSTASH_REDIS_REST_TOKEN= VERCEL_ENV=preview ${isolatedNextEnv} pnpm exec next dev --port ${serverPort}`
+			: `${prepareIsolatedNext} && if [ "\${CI:-}" != "true" ] && [ -f .env.local ]; then set -a; . ./.env.local; set +a; fi; VERCEL_ENV=development ${isolatedNextEnv} pnpm exec next dev --port ${serverPort}`;
 
 export default defineConfig({
 	globalSetup: previewE2E ? path.join(APP_DIR, 'e2e/preview-global-setup.ts') : undefined,

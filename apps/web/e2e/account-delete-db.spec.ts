@@ -1,6 +1,63 @@
 import { expect, test } from '@playwright/test';
 
+const accountDeleteTestUrl = process.env.ACCOUNT_DELETE_TEST_URL?.trim() ?? '';
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '::1']);
+const accountDeleteDatabaseUrl = accountDeleteTestUrl ? new URL(accountDeleteTestUrl) : undefined;
+if (accountDeleteDatabaseUrl) {
+	const databaseUrl = accountDeleteDatabaseUrl;
+	const hostname = databaseUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+	if (
+		!['postgres:', 'postgresql:'].includes(databaseUrl.protocol) ||
+		!loopbackHosts.has(hostname) ||
+		!databaseUrl.port ||
+		!databaseUrl.username ||
+		databaseUrl.search !== '' ||
+		databaseUrl.hash !== ''
+	) {
+		throw new Error(
+			'ACCOUNT_DELETE_TEST_URL must include a loopback host and explicit port, without query or fragment overrides.',
+		);
+	}
+	process.env.ACCOUNT_DELETE_TEST_URL = accountDeleteTestUrl;
+	for (const key of Object.keys(process.env)) {
+		if (key.startsWith('PG')) Reflect.deleteProperty(process.env, key);
+	}
+	for (const key of [
+		'POSTGRES_URL',
+		'DATABASE_URL',
+		'POSTGRES_URL_NON_POOLING',
+		'DATABASE_URL_UNPOOLED',
+	]) {
+		process.env[key] = accountDeleteTestUrl;
+	}
+}
+
 const deletionFixtureIds = new Set<string>();
+
+test.beforeAll(async () => {
+	if (!accountDeleteTestUrl || !accountDeleteDatabaseUrl) return;
+
+	const { Client } = await import('pg');
+	const client = new Client({ connectionString: accountDeleteTestUrl });
+	const { host, port, database, user } = client.connectionParameters;
+	const actualHost = String(host)
+		.toLowerCase()
+		.replace(/^\[|\]$/g, '');
+	const expectedHost = accountDeleteDatabaseUrl.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+	const expectedDatabase = decodeURIComponent(accountDeleteDatabaseUrl.pathname.slice(1));
+	const expectedUser = decodeURIComponent(accountDeleteDatabaseUrl.username);
+	if (
+		!loopbackHosts.has(actualHost) ||
+		actualHost !== expectedHost ||
+		Number(port) !== Number(accountDeleteDatabaseUrl.port) ||
+		database !== expectedDatabase ||
+		user !== expectedUser
+	) {
+		throw new Error(
+			'Resolved account-delete PostgreSQL connection is not the validated loopback target.',
+		);
+	}
+});
 
 function trackDeletionFixture(authUserId: string): void {
 	deletionFixtureIds.add(authUserId);

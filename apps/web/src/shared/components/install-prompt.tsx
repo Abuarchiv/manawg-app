@@ -1,14 +1,7 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import {
-	Card,
-	CardAction,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from '@/components/ui/card';
+import { Card, CardDescription, CardTitle } from '@/components/ui/card';
 import { X } from 'lucide-react';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -104,50 +97,40 @@ export function InstallPrompt() {
 			style={{ bottom: 'calc(var(--app-nav-height, 5rem) + 0.5rem)' }}
 		>
 			<section aria-live="polite" aria-label="App installieren">
-				<Card
-					size="sm"
-					className="max-h-[calc(100dvh-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)-6rem)] overflow-y-auto"
-				>
-					<CardHeader>
-						<div className="flex min-w-0 items-center gap-3">
-							<LogoMark
-								size={32}
-								radius={12}
-								tileFill="var(--primary)"
-								markFill="var(--primary-foreground)"
-								className="shrink-0"
-							/>
-							<CardTitle>ManaWG als App installieren</CardTitle>
+				{/* Kompakt statt hoher Karte: verdeckt über der Navigation möglichst wenig Inhalt. */}
+				<Card size="sm" className="gap-2 px-3 py-2.5">
+					<div className="flex min-w-0 items-center gap-2.5">
+						<LogoMark
+							size={28}
+							radius={10}
+							tileFill="var(--primary)"
+							markFill="var(--primary-foreground)"
+							className="shrink-0"
+						/>
+						<div className="min-w-0 flex-1">
+							<CardTitle className="text-sm">ManaWG als App installieren</CardTitle>
+							<CardDescription className="text-[12px]">
+								Schneller starten, offline-fähig.
+							</CardDescription>
 						</div>
-						<CardDescription>
-							Wie eine App. Schneller starten, offline-fähig, kein Browser-Tab nötig.
-						</CardDescription>
-						<CardAction>
-							<Button
-								type="button"
-								onClick={dismiss}
-								variant="ghost"
-								size="icon"
-								aria-label="Installationshinweis ausblenden"
-								className="size-9"
-							>
-								<X aria-hidden="true" />
-							</Button>
-						</CardAction>
-					</CardHeader>
-					<CardFooter>
-						{event ? (
-							<Button
-								type="button"
-								onClick={install}
-								className="h-auto w-full whitespace-normal py-2"
-							>
-								Jetzt installieren
-							</Button>
-						) : (
-							<InstallButton variant="solid" label="So installierst du ManaWG" className="w-full" />
-						)}
-					</CardFooter>
+						<Button
+							type="button"
+							onClick={dismiss}
+							variant="ghost"
+							size="icon-sm"
+							aria-label="Installationshinweis ausblenden"
+							className="shrink-0"
+						>
+							<X aria-hidden="true" />
+						</Button>
+					</div>
+					{event ? (
+						<Button type="button" size="sm" onClick={install} className="w-full">
+							Jetzt installieren
+						</Button>
+					) : (
+						<InstallButton variant="solid" label="So installierst du ManaWG" className="w-full" />
+					)}
 				</Card>
 			</section>
 		</div>

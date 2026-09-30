@@ -83,9 +83,6 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 	const denied = await requireOwnerOrAdmin(wg.id, auth.member, creditorMemberId, 'not_creditor');
 	if (denied) return denied;
 
-	// Active members only: `expenses/settle-batch` requires the same
-	// `isNull(deactivatedAt)` guard, so a reminder can never be dispatched for
-	// someone who has moved out of the WG.
 	const memberIds = [debtorMemberId, creditorMemberId];
 	const memberRows = await db
 		.select({
@@ -102,9 +99,8 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 			),
 		);
 	if (memberRows.length !== 2) {
-		// Keep the existing copy: someone who left the WG is
-		// `member_deactivated` (what settle-batch answers), a member that never
-		// belonged here is `member_not_in_wg`.
+		// Match settle-batch copy: a member who left the WG is distinct from an
+		// ID that never belonged to it.
 		const known = await db
 			.select({ id: wgMembers.id })
 			.from(wgMembers)

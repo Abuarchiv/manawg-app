@@ -23,7 +23,7 @@ import { useWg } from '@/components/wg/WgContextProvider';
 import { apiFetch } from '@/core/infra/api-client';
 import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
 import type { ParsedExpense } from '@/features/expenses/import-parsers';
-import { runOcrOnImage } from '@/features/expenses/ocr';
+import { OcrInitializationError, runOcrOnImage } from '@/features/expenses/ocr';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -191,13 +191,13 @@ export function ImportWizard() {
 		heading.scrollIntoView({ block: 'start', behavior: 'auto' });
 	}, [step]);
 
+	const conflicts = useMemo(() => preview?.conflicts ?? [], [preview]);
 	// Import assigns expenses to a member ("aus Listen raus": moved-out members are
 	// not offered as targets). Historic names in the CSV still resolve by name.
 	const memberOptions = useMemo(
 		() => members.filter((m) => m.active).map((m) => ({ id: m.id, name: m.name })),
 		[members],
 	);
-	const activeMemberIds = useMemo(() => new Set(memberOptions.map((m) => m.id)), [memberOptions]);
 	const namesNeedingMapping = useMemo(() => {
 		if (!preview) return [];
 		const names = new Set<string>();
@@ -209,21 +209,6 @@ export function ImportWizard() {
 		}
 		return Array.from(names);
 	}, [preview]);
-	// What the commit would reject right now: a name that is unmapped or points
-	// at a member who is not (or no longer) active. Derived from the current
-	// mapping instead of the preview response so fixing a name in the mapping
-	// step clears it immediately, and re-checked on every commit because a
-	// member can be deactivated between preview and commit.
-	const invalidNames = useMemo(
-		() =>
-			new Set(
-				namesNeedingMapping.filter((name) => {
-					const id = mapping[name];
-					return !id || !activeMemberIds.has(id);
-				}),
-			),
-		[namesNeedingMapping, mapping, activeMemberIds],
-	);
 	const commitRecoveryAction = useMemo(() => {
 		if (!commitResult) return null;
 		for (const item of commitResult.errors) {
@@ -312,7 +297,13 @@ export function ImportWizard() {
 			if (inputRunIdRef.current !== runId) return;
 			console.error('[ImportWizard] OCR failed', err);
 			setInputStatus('error');
-			setError('Texterkennung fehlgeschlagen. Versuche es mit einem klareren Bild.');
+			setError(
+				err instanceof OcrInitializationError
+					? err.requiresReload
+						? 'Texterkennung konnte nicht geladen werden. Prüfe die Internetverbindung und lade die Seite neu, bevor du es erneut versuchst.'
+						: 'Texterkennung konnte nicht initialisiert werden. Prüfe die Internetverbindung und versuche es erneut.'
+					: 'Texterkennung fehlgeschlagen. Versuche es mit einem klareren Bild.',
+			);
 		} finally {
 			if (inputRunIdRef.current === runId) {
 				setOcrRunning(false);
@@ -462,7 +453,10 @@ export function ImportWizard() {
 		setStep('preview');
 	}
 
-	const allMapped = invalidNames.size === 0;
+	// A mapping only counts when it points at an active member (the commit rejects others).
+	const allMapped = namesNeedingMapping.every((name) =>
+		memberOptions.some((member) => member.id === mapping[name]),
+	);
 
 	const stepNumber = ['source', 'input', 'mapping', 'preview', 'commit'].indexOf(step) + 1;
 	const selectedCount = (preview?.parsed.length ?? 0) - skipIndexes.size;
@@ -476,13 +470,12 @@ export function ImportWizard() {
 
 	return (
 		<div className="flex flex-col gap-5">
-			<div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+			{/* Kopf wie auf den anderen Unterseiten: Zurück-Pfeil links neben dem Titel. */}
+			<header className="flex min-w-0 items-center gap-3">
 				<Link
 					href={returnHref}
-					className={buttonVariants({
-						variant: 'ghost',
-						className: 'min-h-11 min-w-0 max-w-full shrink whitespace-normal',
-					})}
+					aria-label="Zurück zu Ausgaben"
+					className={buttonVariants({ variant: 'ghost', size: 'icon' })}
 					aria-disabled={busy || ocrRunning || undefined}
 					tabIndex={busy || ocrRunning ? -1 : undefined}
 					onClick={(event) => {
@@ -496,13 +489,17 @@ export function ImportWizard() {
 						}
 					}}
 				>
-					<ArrowLeft data-icon="inline-start" />
-					Ausgaben
+					<ArrowLeft aria-hidden />
 				</Link>
-				<Badge variant="secondary" className="max-w-full whitespace-normal">
-					Schritt {stepNumber} von 5
-				</Badge>
-			</div>
+				<div className="min-w-0 flex-1">
+					<h1 className="font-heading text-lg font-semibold tracking-tight">
+						Ausgaben importieren
+					</h1>
+					<p className="mt-0.5 text-[12px] text-muted-foreground tabular-nums">
+						Aus Splitwise oder Splid · Schritt {stepNumber} von 5
+					</p>
+				</div>
+			</header>
 			<Progress value={stepNumber} max={5} aria-label={`Import: Schritt ${stepNumber} von 5`} />
 			{step === 'source' && (
 				<section className="flex flex-col gap-3">
@@ -548,7 +545,9 @@ export function ImportWizard() {
 										}}
 										className="text-base"
 									/>
-									<FieldDescription>Foto oder Bildschirmfoto bis 10 MB.</FieldDescription>
+									<FieldDescription>
+										Foto oder Bildschirmfoto bis 10 MB. Nur Eurobeträge (EUR) werden erkannt.
+									</FieldDescription>
 								</Field>
 								{ocrRunning && (
 									<Alert>
@@ -629,7 +628,7 @@ export function ImportWizard() {
 							</>
 						)}
 					</FieldGroup>
-					<div className="flex gap-2">
+					<div className="flex min-w-0 flex-wrap gap-2">
 						<Button
 							className="flex-1"
 							disabled={
@@ -662,7 +661,7 @@ export function ImportWizard() {
 						Namen WG-Mitgliedern zuordnen
 					</h2>
 					<p className="text-sm text-muted-foreground">
-						{invalidNames.size > 0
+						{conflicts.length > 0
 							? 'Ordne die markierten Namen zu.'
 							: 'Alle Namen automatisch erkannt. Bitte prüfen.'}
 					</p>
@@ -673,11 +672,17 @@ export function ImportWizard() {
 						onChange={updateMapping}
 						showErrors={mappingValidated}
 					/>
-					<div className="flex gap-2">
+					<div className="flex min-w-0 flex-wrap gap-2">
 						<Button className="flex-1" onClick={continueFromMapping}>
 							Weiter zur Vorschau
 						</Button>
-						<Button variant="outline" onClick={() => setStep('input')}>
+						<Button
+							variant="outline"
+							onClick={() => {
+								clearImportError();
+								setStep('input');
+							}}
+						>
 							Zurück
 						</Button>
 					</div>
@@ -699,25 +704,10 @@ export function ImportWizard() {
 						Prüfe Betrag, Zahler:in und alle Anteile. Wähle Einträge ab, die du nicht übernehmen
 						möchtest.
 					</p>
-					{invalidNames.size > 0 && (
-						<Alert variant="destructive">
-							<AlertTitle>Zuordnung prüfen</AlertTitle>
-							<AlertDescription className="flex flex-col items-start gap-2">
-								<span>
-									{Array.from(invalidNames).join(', ')} {invalidNames.size === 1 ? 'ist' : 'sind'}{' '}
-									keinem aktiven Mitglied zugeordnet.
-								</span>
-								<Button variant="outline" disabled={busy} onClick={() => setStep('mapping')}>
-									Zuordnung prüfen
-								</Button>
-							</AlertDescription>
-						</Alert>
-					)}
 					<ImportPreviewTable
 						expenses={preview.parsed}
 						mapping={mapping}
 						members={memberOptions}
-						conflicts={invalidNames}
 						skipIndexes={skipIndexes}
 						onToggleSkip={toggleSkip}
 						disabled={busy}
@@ -738,15 +728,22 @@ export function ImportWizard() {
 							</div>
 						</Field>
 					</FieldGroup>
-					<div className="sticky bottom-[calc(var(--app-nav-height,5rem)+env(safe-area-inset-bottom))] flex gap-2 bg-background py-3">
+					<div className="sticky bottom-[calc(var(--app-nav-height,5rem)+env(safe-area-inset-bottom))] flex min-w-0 flex-wrap gap-2 bg-background py-3">
 						<Button
 							className="flex-1"
-							disabled={busy || selectedCount === 0 || invalidNames.size > 0}
+							disabled={busy || selectedCount === 0}
 							onClick={() => void submitCommit()}
 						>
 							{busy && <Spinner data-icon="inline-start" />}Importieren ({selectedCount})
 						</Button>
-						<Button variant="outline" disabled={busy} onClick={() => setStep('mapping')}>
+						<Button
+							variant="outline"
+							disabled={busy}
+							onClick={() => {
+								clearImportError();
+								setStep('mapping');
+							}}
+						>
 							Zurück
 						</Button>
 					</div>

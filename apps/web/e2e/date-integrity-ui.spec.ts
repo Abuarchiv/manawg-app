@@ -52,8 +52,8 @@ async function openAboCreate(
 	await navigateToFeature(page, `/wg/${SHARE_CODE}/abos`);
 	await dismissOnboarding(page);
 	await expect(page.getByRole('heading', { name: 'Fixkosten', exact: true })).toBeVisible();
-	await page.getByRole('button', { name: 'Neues Abo', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'Neues Abo', exact: true })).toBeVisible();
+	await page.getByRole('button', { name: 'Neue Fixkosten', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Neue Fixkosten', exact: true })).toBeVisible();
 }
 
 async function openCalendarCreate(
@@ -77,7 +77,7 @@ test('Abo blocks a missing due date and preserves a valid calendar date', async 
 	await page.getByLabel('Betrag').fill('12,34');
 	const dueDate = page.getByLabel('Erste Fälligkeit');
 	await dueDate.fill('');
-	await page.getByRole('button', { name: 'Abo anlegen', exact: true }).click();
+	await page.getByRole('button', { name: 'Fixkosten anlegen', exact: true }).click();
 
 	expect(post.bodies).toHaveLength(0);
 	await expect(dueDate).toBeFocused();
@@ -88,7 +88,7 @@ test('Abo blocks a missing due date and preserves a valid calendar date', async 
 
 	await dueDate.fill('2026-09-22');
 	await expect(dueDate).toHaveValue('2026-09-22');
-	await page.getByRole('button', { name: 'Abo anlegen', exact: true }).click();
+	await page.getByRole('button', { name: 'Fixkosten anlegen', exact: true }).click();
 	await expect.poll(() => post.bodies.length).toBe(1);
 	await expect.poll(() => post.statuses.length).toBe(1);
 
@@ -154,6 +154,21 @@ test('new calendar event starts at the next full hour', async ({ page }) => {
 	await expect(page.getByLabel('Beginn')).toHaveValue('2026-09-22T11:00');
 });
 
+test('picking a past day in the month view keeps that day for the new event', async ({ page }) => {
+	await page.clock.setFixedTime(new Date('2026-09-22T08:20:00Z'));
+	await page.setViewportSize(MOBILE_VIEWPORT);
+	await setupMember(page);
+	await navigateToFeature(page, `/wg/${SHARE_CODE}/kalender`);
+	await dismissOnboarding(page);
+	await page.getByRole('tab', { name: 'Monat', exact: true }).click();
+	await page.getByRole('button', { name: 'Donnerstag, 10. September 2026', exact: false }).click();
+	await page.getByRole('button', { name: 'Termin hinzufügen', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'Neuer Termin', exact: true })).toBeVisible();
+	// The day picked in the calendar (in the past) must not be silently
+	// discarded back to "today" — only the time-of-day defaults.
+	await expect(page.getByLabel('Beginn')).toHaveValue('2026-09-10T11:00');
+});
+
 test('calendar reports a missing start only on save and leaves the end unchanged', async ({
 	page,
 }) => {
@@ -204,7 +219,11 @@ test('legacy all-day title-only edit preserves the displayed date and both store
 		return route.fulfill({ json: { event: { ...legacy, ...route.request().postDataJSON() } } });
 	});
 	await navigateToFeature(page, `/wg/${SHARE_CODE}/kalender`);
-	await expect(page.getByText('Di 22.09.2026 · ganztägig', { exact: true })).toBeVisible();
+	await expect(
+		page
+			.getByRole('list', { name: /Dienstag, 22\. September$/ })
+			.getByText('ganztägig', { exact: true }),
+	).toBeVisible();
 	await page.getByRole('button', { name: 'Termin bearbeiten: Alter Geburtstag' }).click();
 	await expect(page.getByLabel('Beginn')).toHaveValue('2026-09-22');
 	await expect(page.getByLabel('Ende (optional)')).toHaveValue('2026-09-22');
@@ -265,7 +284,11 @@ for (const timezoneId of ['America/Los_Angeles', 'Pacific/Kiritimati']) {
 			await loaded;
 			await page.getByRole('tab', { name: 'Agenda', exact: true }).click();
 			await expect(page.getByText(event.title, { exact: true })).toBeVisible();
-			await expect(page.getByText('Di 22.09.2026 · ganztägig', { exact: true })).toBeVisible();
+			await expect(
+				page
+					.getByRole('list', { name: /Dienstag, 22\. September$/ })
+					.getByText('ganztägig', { exact: true }),
+			).toBeVisible();
 		});
 	});
 }

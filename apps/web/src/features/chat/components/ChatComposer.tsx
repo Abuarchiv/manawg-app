@@ -267,7 +267,8 @@ export function ChatComposer({
 				onHoverIndex={setMentionActiveIndex}
 			/>
 			<div className="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-2">
-				<InputGroup className="h-auto items-end">
+				{/* Pillenform mit rundem Senden-Knopf wie in gängigen Messengern. */}
+				<InputGroup className="h-auto items-end rounded-3xl">
 					<InputGroupTextarea
 						ref={textareaRef}
 						value={draft}
@@ -282,9 +283,9 @@ export function ChatComposer({
 						aria-controls={mentionOpen ? mentionListboxId : undefined}
 						aria-expanded={mentionOpen}
 						aria-activedescendant={activeOptionId}
-						className="max-h-32 min-h-11 flex-1 text-base"
+						className="max-h-32 min-h-10 flex-1 px-4 py-2 text-base"
 					/>
-					<InputGroupAddon align="inline-end" className="py-1">
+					<InputGroupAddon align="inline-end" className="py-1 pe-1">
 						<InputGroupButton
 							type="button"
 							variant="default"
@@ -293,7 +294,7 @@ export function ChatComposer({
 							onClick={() => void submit()}
 							disabled={pending || !draftHydrated || draft.trim().length === 0}
 							aria-label="Nachricht senden"
-							className="min-h-11 min-w-11 shrink-0"
+							className="size-8 shrink-0 rounded-full"
 						>
 							{pending ? <Spinner aria-hidden /> : <Send aria-hidden />}
 						</InputGroupButton>

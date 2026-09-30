@@ -85,18 +85,6 @@ export function CopyCodeButton({
 		}
 	}
 
-	const label = !joiningEnabled
-		? 'Neue Beitritte sind gesperrt'
-		: sharing
-			? 'WG wird geteilt…'
-			: state === 'copied' || state === 'shared'
-				? state === 'copied'
-					? 'Einladung kopiert'
-					: 'WG geteilt'
-				: state === 'failed'
-					? 'Teilen fehlgeschlagen'
-					: `WG-Code ${code} teilen`;
-
 	const statusMessage =
 		state === 'shared'
 			? 'WG geteilt'
@@ -117,7 +105,6 @@ export function CopyCodeButton({
 				onClick={onClick}
 				disabled={!joiningEnabled || sharing}
 				className="h-auto whitespace-normal"
-				aria-label={label}
 			>
 				{sharing ? (
 					<Spinner data-icon="inline-start" aria-hidden />

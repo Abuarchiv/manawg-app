@@ -2,9 +2,8 @@
  * Error reporting.
  *
  * Errors go to the platform log (`console.error`), which Vercel captures and
- * retains per its log-retention window. There is no third-party error tracker:
- * nothing is shipped off-platform, which keeps the data-processing surface of
- * the app limited to the host itself.
+ * retains per its log-retention window. Configured Sentry receives sanitized
+ * diagnostics through the shared telemetry helper.
  *
  * Deliberately best-effort: reporting an error must never itself throw and
  * never change control flow at the call site.
@@ -15,6 +14,7 @@
  * and arbitrary context can contain provider responses, SQL, or request data.
  */
 export function captureException(err: unknown, context?: Record<string, unknown>): void {
+	captureSentryException(err, safeContext(context));
 	try {
 		console.error('[error]', describeThrown(err), safeContext(context));
 	} catch {
@@ -31,6 +31,7 @@ export function captureException(err: unknown, context?: Record<string, unknown>
  * label and error type; discard message and stack contents.
  */
 export function logApiError(label: string, ...errors: unknown[]): void {
+	logSentryApiError(errors.map(describeThrown));
 	try {
 		console.error(sanitizeLabel(label), errors.map(describeThrown).join(' | '));
 	} catch {
@@ -38,20 +39,9 @@ export function logApiError(label: string, ...errors: unknown[]): void {
 	}
 }
 
-const TRUSTED_ERROR_NAMES = new Set([
-	'Error',
-	'EvalError',
-	'RangeError',
-	'ReferenceError',
-	'SyntaxError',
-	'TypeError',
-	'URIError',
-	'AggregateError',
-]);
-
 function describeThrown(err: unknown): string {
 	if (err instanceof Error) {
-		return TRUSTED_ERROR_NAMES.has(err.name) ? err.name : 'Error';
+		return safeErrorName(err.name);
 	}
 	return `thrown ${typeof err}`;
 }
@@ -104,3 +94,5 @@ export function withCronLogging<T extends (...args: never[]) => Promise<unknown>
 		}
 	}) as T;
 }
+import { captureSentryException, logSentryApiError } from './sentry';
+import { safeErrorName } from './sentry-privacy';

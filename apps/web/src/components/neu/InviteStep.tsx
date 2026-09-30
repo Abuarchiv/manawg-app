@@ -17,7 +17,7 @@ import { useRef, useState } from 'react';
 
 const SHARE_RESET_MS = 1500;
 
-type ShareState = 'idle' | 'copied' | 'shared' | 'failed';
+type ShareState = 'idle' | 'copied' | 'codeCopied' | 'shared' | 'failed' | 'codeFailed';
 
 interface InviteStepProps {
 	code: string;
@@ -78,7 +78,7 @@ export function InviteStep({ code, wgName, onSkip }: InviteStepProps) {
 		sharingRef.current = true;
 		setSharing('code');
 		try {
-			flash((await copyText(code)) ? 'copied' : 'failed');
+			flash((await copyText(code)) ? 'codeCopied' : 'codeFailed');
 		} finally {
 			sharingRef.current = false;
 			setSharing(null);
@@ -109,9 +109,13 @@ export function InviteStep({ code, wgName, onSkip }: InviteStepProps) {
 					? 'Einladungslink wurde nativ geteilt.'
 					: state === 'copied'
 						? 'Einladungslink wurde kopiert.'
-						: state === 'failed'
-							? 'Teilen fehlgeschlagen.'
-							: ''}
+						: state === 'codeCopied'
+							? 'Einladungscode wurde kopiert.'
+							: state === 'failed'
+								? 'Teilen fehlgeschlagen.'
+								: state === 'codeFailed'
+									? 'Einladungscode konnte nicht kopiert werden.'
+									: ''}
 			</span>
 
 			<Card>
@@ -135,6 +139,13 @@ export function InviteStep({ code, wgName, onSkip }: InviteStepProps) {
 					</Button>
 					<p className="text-sm text-muted-foreground">Tippe auf den Code zum Kopieren.</p>
 				</CardContent>
+				{(state === 'codeCopied' || state === 'codeFailed') && (
+					<CardFooter className="justify-center">
+						<Badge variant={state === 'codeFailed' ? 'destructive' : 'secondary'}>
+							{state === 'codeCopied' ? 'Code kopiert' : 'Code konnte nicht kopiert werden'}
+						</Badge>
+					</CardFooter>
+				)}
 			</Card>
 
 			<Card>
@@ -184,7 +195,7 @@ export function InviteStep({ code, wgName, onSkip }: InviteStepProps) {
 						Per WhatsApp teilen
 					</a>
 				</CardContent>
-				{state !== 'idle' && (
+				{state !== 'idle' && state !== 'codeCopied' && state !== 'codeFailed' && (
 					<CardFooter>
 						<Badge variant={state === 'failed' ? 'destructive' : 'secondary'}>
 							{state === 'shared'

@@ -58,3 +58,39 @@ test('retries an uncertain shopping create with the same idempotency key', async
 	expect(keys[0]).toBeTruthy();
 	expect(keys[1]).toBe(keys[0]);
 });
+
+test('uses a fresh idempotency key after an offline-queued shopping create', async ({ page }) => {
+	test.skip(
+		process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true',
+		'requires the local fixture server',
+	);
+	await page.route('**/api/wg/MTE8PZAT/shopping', async (route) => {
+		if (route.request().method() !== 'POST') {
+			await route.continue();
+			return;
+		}
+		await route.abort('internetdisconnected');
+	});
+	await setupMember(page);
+	await navigateToFeature(page, '/wg/MTE8PZAT/einkauf');
+	await dismissOnboarding(page);
+	const readQueuedKeys = () =>
+		page.evaluate(() => {
+			const raw = window.localStorage.getItem('manawg:offline-actions');
+			const actions = raw
+				? (JSON.parse(raw) as Array<{ type: string; idempotencyKey?: string }>)
+				: [];
+			return actions
+				.filter((action) => action.type === 'shopping.create')
+				.map((action) => action.idempotencyKey);
+		});
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		await page.getByLabel('Artikel-Name').fill('Rettich');
+		await page.getByRole('button', { name: 'Artikel hinzufügen', exact: true }).click();
+		await expect.poll(async () => (await readQueuedKeys()).length).toBe(attempt + 1);
+	}
+	const keys = await readQueuedKeys();
+	expect(keys[0]).toBeTruthy();
+	expect(keys[1]).toBeTruthy();
+	expect(keys[1]).not.toBe(keys[0]);
+});

@@ -118,7 +118,7 @@ export function addBerlinDays(date: Date, days: number): Date {
 
 /** Shift a `YYYY-MM-DD` key by whole days, letting `Date` handle rollover. */
 function shiftDayKey(dayKey: string, days: number): string {
-	const [year, month, day] = dayKey.split('-').map(Number);
+	const [year, month, day] = dayKey.split('-').map(Number) as [number, number, number];
 	return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
 }
 

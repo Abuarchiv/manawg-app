@@ -1,6 +1,7 @@
 'use client';
 
 import { AppBottomNav } from '@/components/app/AppBottomNav';
+import { RouteFocusOnNavigate } from '@/components/app/RouteFocusOnNavigate';
 import { WG_SECTIONS } from '@/components/app/navigation';
 import { LegalLinks } from '@/components/entry/LegalLinks';
 import {
@@ -213,6 +214,7 @@ function PublicAppContent({ activeModule }: { activeModule?: string }) {
 				paddingBottom: 'calc(var(--app-nav-height, 5rem) + 0.5rem)',
 			}}
 		>
+			<RouteFocusOnNavigate />
 			<main
 				id="main"
 				tabIndex={-1}
@@ -231,7 +233,7 @@ function PublicAppContent({ activeModule }: { activeModule?: string }) {
 				)}
 				<div className="flex min-w-0 flex-col gap-6">
 					<header className="flex flex-col gap-3">
-						<div className="flex items-center justify-between gap-3">
+						<div className="flex flex-wrap items-center justify-between gap-3">
 							<Link
 								href={publicHref('/')}
 								className="flex min-h-11 items-center gap-2"
@@ -244,13 +246,16 @@ function PublicAppContent({ activeModule }: { activeModule?: string }) {
 							</Link>
 							<Link
 								href={accountAction.href}
-								className={cn(buttonVariants({ variant: 'link' }), 'px-0 text-muted-foreground')}
+								className={cn(
+									buttonVariants({ variant: 'link' }),
+									'ml-auto px-0 text-muted-foreground',
+								)}
 							>
 								{accountAction.label}
 							</Link>
 						</div>
 						<div className="flex flex-col gap-1">
-							<h1 className="font-heading text-[26px] leading-8 font-semibold tracking-tight">
+							<h1 className="font-heading text-[22px] leading-7 font-semibold tracking-tight">
 								{module?.title ?? 'Euer WG-Alltag. Gemeinsam geregelt.'}
 							</h1>
 							<p className="text-sm text-muted-foreground">

@@ -1,9 +1,5 @@
 import { expect, test } from '@playwright/test';
-import {
-	getTodayFocus,
-	getTodayImportantItems,
-	getTodayListItems,
-} from '../src/core/reads/dashboard-insights';
+import { getTodayImportantItems } from '../src/core/reads/dashboard-insights';
 
 const NOW = Date.parse('2026-09-05T22:30:00.000Z');
 
@@ -125,22 +121,10 @@ test.describe('Start overview read model', () => {
 			href: '/wg/WG%2F1/einkauf',
 		});
 		expect(items.some((item) => item.kind === 'debt')).toBe(false);
-		expect(getTodayListItems(items, getTodayFocus(items))).toHaveLength(items.length - 1);
 	});
 
-	test('uses stable destination links and destination-specific focus labels', () => {
+	test('uses stable destination links', () => {
 		const items = getTodayImportantItems(overviewInput());
-		const labels = new Map(items.map((item) => [item.kind, getTodayFocus([item])?.actionLabel]));
-
-		expect(labels).toEqual(
-			new Map([
-				['chore', 'Aufgabe ansehen'],
-				['shopping', 'Einkaufsliste öffnen'],
-				['announcement', 'Beitrag ansehen'],
-				['recurring', 'Buchung prüfen'],
-				['absence', 'Abwesenheit ansehen'],
-			]),
-		);
 		expect(items.find((item) => item.kind === 'announcement')).toMatchObject({
 			entityId: 'announcement-1',
 			href: '/wg/WG%2F1/pinnwand#announcement-announcement-1',

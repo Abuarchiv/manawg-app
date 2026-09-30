@@ -10,7 +10,6 @@ import {
 	AlertDialogHeader,
 	AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
@@ -28,14 +27,23 @@ import {
 	ItemGroup,
 	ItemTitle,
 } from '@/components/ui/item';
-import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { formatEuroCents } from '@/core/utils/money';
-import { formatRelativeTime, formatTimeFull } from '@/core/utils/time';
+import { formatTimeFull } from '@/core/utils/time';
+import { type ExpenseImpact, getExpenseImpact } from '@/features/expenses/expense-impact';
 import { cn } from '@/shared/lib/cn';
 import { Check, MoreHorizontal, Pencil, Receipt, Trash2 } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { Expense, ExpenseSplit } from './expense-types';
+
+const IMPACT_LABEL: Record<ExpenseImpact['kind'], string> = {
+	lent: 'bekommst du',
+	owe: 'schuldest du',
+	settled: 'beglichen',
+	own: 'nur für dich',
+	none: 'nicht beteiligt',
+};
 
 interface ExpenseRowProps {
 	expense: Expense;
@@ -46,7 +54,6 @@ interface ExpenseRowProps {
 	onToggleSettle: (expenseId: string, split: ExpenseSplit) => void;
 	isPending: (id: string) => boolean;
 	memberName: (id: string) => string;
-	memberColor: (id: string) => string | null;
 	currentMemberId: string;
 	highlighted: boolean;
 }
@@ -64,62 +71,75 @@ export const ExpenseRow = memo(function ExpenseRow({
 	highlighted,
 }: ExpenseRowProps) {
 	const isPayer = expense.paidByMemberId === currentMemberId;
-	const paymentSplits = expense.splits.filter(
-		(split) => split.debtorMemberId !== expense.paidByMemberId && split.amountCents > 0,
-	);
-	const settledCount = paymentSplits.filter((split) => split.settledAt !== null).length;
+	const impact = getExpenseImpact(expense, currentMemberId);
+	const who = (id: string) => (id === currentMemberId ? 'Du' : memberName(id));
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [settleCandidate, setSettleCandidate] = useState<ExpenseSplit | null>(null);
 	return (
 		<li
 			id={`expense-${expense.id}`}
-			className={cn('scroll-mt-24', highlighted && 'rounded-lg ring-2 ring-ring')}
+			className={cn('scroll-mt-24', highlighted && 'ring-2 ring-inset ring-ring')}
 		>
 			<Collapsible open={expanded} onOpenChange={() => onToggleExpand(expense.id)}>
-				<Item variant="outline" className="items-start">
+				<Item className="gap-1 rounded-none py-1 pr-1.5 pl-3">
 					<ItemContent className="min-w-0">
 						<CollapsibleTrigger
 							render={
 								<Button
 									variant="ghost"
-									className="h-auto w-full justify-start whitespace-normal px-0 text-left"
+									className="h-auto w-full items-start justify-start gap-2.5 whitespace-normal px-0 py-1 text-left hover:bg-transparent aria-expanded:bg-transparent"
 								/>
 							}
 						>
-							<span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-3 gap-y-1">
-								<span className="sr-only">Details öffnen:</span>
-								<span className="break-words font-medium leading-snug">{expense.description}</span>
-								<span className="font-mono tabular-nums text-foreground">
-									{formatEuroCents(expense.amountCents, expense.currency)}
-								</span>
-								<span className="col-span-2 text-left text-[13px] leading-normal font-normal text-muted-foreground">
-									Bezahlt von {memberName(expense.paidByMemberId)} ·{' '}
-									<time dateTime={expense.occurredAt} title={formatTimeFull(expense.occurredAt)}>
-										{formatRelativeTime(expense.occurredAt)}
-									</time>
-								</span>
-								{(paymentSplits.length > 0 || expense.imageUrl) && (
-									<span className="col-span-2 flex flex-wrap gap-1.5 pt-1">
-										{paymentSplits.length > 0 && (
-											<Badge variant="secondary">
-												{settledCount === paymentSplits.length ? 'Beglichen' : 'Offen'}
-											</Badge>
-										)}
-										{expense.imageUrl && (
-											<Badge variant="outline">
-												<Receipt />
-												Beleg
-											</Badge>
-										)}
+							<MemberAvatar name={memberName(expense.paidByMemberId)} size={28} />
+							{/* Betrag rechts neben dem Text; erst wenn die Zeile zu schmal wird (große Schrift), darunter. */}
+							<span className="@container flex min-w-0 flex-1">
+								<span className="flex min-w-0 flex-1 flex-col gap-1 @[10rem]:flex-row @[10rem]:gap-3">
+									<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+										<span className="sr-only">Details öffnen:</span>
+										<span className="min-w-0 hyphens-auto text-[14px] font-medium leading-snug [overflow-wrap:break-word]">
+											{expense.description}
+										</span>
+										<span className="text-[12px] leading-normal font-normal text-muted-foreground">
+											{isPayer ? 'Du zahltest' : `${memberName(expense.paidByMemberId)} zahlte`}{' '}
+											<span className="whitespace-nowrap tabular-nums">
+												{formatEuroCents(expense.amountCents, expense.currency)}
+											</span>
+											{expense.imageUrl && (
+												<>
+													{' · '}
+													<Receipt aria-hidden className="inline size-3.5 align-[-2px]" />
+													<span className="sr-only">Beleg</span>
+												</>
+											)}
+										</span>
 									</span>
-								)}
+									{/* Wie Splitwise: rechts steht, was die Ausgabe für dich bedeutet. */}
+									<span className="flex shrink-0 flex-col gap-0.5 @[10rem]:items-end @[10rem]:text-right">
+										<span
+											className={cn(
+												'whitespace-nowrap font-mono text-[14px] leading-snug tabular-nums',
+												impact.kind === 'lent'
+													? 'text-settled'
+													: impact.kind === 'owe'
+														? 'text-destructive'
+														: 'text-muted-foreground',
+											)}
+										>
+											{formatEuroCents(impact.cents, expense.currency)}
+										</span>
+										<span className="whitespace-nowrap text-[11px] font-normal text-muted-foreground">
+											{IMPACT_LABEL[impact.kind]}
+										</span>
+									</span>
+								</span>
 							</span>
 						</CollapsibleTrigger>
 					</ItemContent>
 					<ItemActions>
 						<DropdownMenu>
 							<DropdownMenuTrigger
-								render={<Button variant="ghost" size="icon" className="size-9" />}
+								render={<Button variant="ghost" size="icon" className="size-8" />}
 								aria-label={`Aktionen für ${expense.description}`}
 							>
 								<MoreHorizontal />
@@ -147,8 +167,11 @@ export const ExpenseRow = memo(function ExpenseRow({
 							</DropdownMenuContent>
 						</DropdownMenu>
 					</ItemActions>
-					<CollapsibleContent className="w-full">
-						<Separator className="my-3" />
+					<CollapsibleContent className="w-full pr-1.5 pb-2">
+						{/* Die Woche steht schon als Überschrift; der genaue Zeitpunkt nur in den Details. */}
+						<p className="mb-2 text-xs text-muted-foreground">
+							<time dateTime={expense.occurredAt}>{formatTimeFull(expense.occurredAt)}</time>
+						</p>
 						{expense.imageUrl && (
 							<Button
 								variant="outline"
@@ -172,10 +195,10 @@ export const ExpenseRow = memo(function ExpenseRow({
 								const settled = split.settledAt !== null;
 								const ownShare = split.debtorMemberId === expense.paidByMemberId;
 								return (
-									<Item key={split.id} variant="muted" size="xs">
-										<ItemContent className="min-w-0">
+									<Item key={split.id} variant="muted" size="xs" className="flex-wrap">
+										<ItemContent className="min-w-0 flex-[1_1_8rem]">
 											<ItemTitle className="line-clamp-none break-words">
-												{memberName(split.debtorMemberId)} ·{' '}
+												{who(split.debtorMemberId)} ·{' '}
 												<span className="font-mono tabular-nums">
 													{formatEuroCents(split.amountCents, expense.currency)}
 												</span>
@@ -187,15 +210,19 @@ export const ExpenseRow = memo(function ExpenseRow({
 														? 'Kein Anteil'
 														: settled
 															? 'Als beglichen vermerkt'
-															: `Offen an ${memberName(expense.paidByMemberId)}`}
+															: expense.paidByMemberId === currentMemberId
+																? 'Offen an dich'
+																: `Offen an ${memberName(expense.paidByMemberId)}`}
 											</ItemDescription>
 										</ItemContent>
 										{!ownShare && split.amountCents > 0 && (
 											<Button
 												variant={settled ? 'secondary' : 'outline'}
+												size="sm"
+												className="ml-auto"
 												onClick={() => setSettleCandidate(split)}
 												disabled={isPending(split.id)}
-												aria-label={`${memberName(split.debtorMemberId)} Zahlung als ${settled ? 'offen' : 'beglichen'} markieren`}
+												aria-label={`${settled ? 'Wieder öffnen' : 'Als bezahlt eintragen'}: ${memberName(split.debtorMemberId)}`}
 											>
 												{isPending(split.id) ? (
 													<Spinner data-icon="inline-start" />

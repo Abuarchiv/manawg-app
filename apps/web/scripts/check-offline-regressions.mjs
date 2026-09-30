@@ -9,8 +9,8 @@ const readSource = (relativePath) => readFileSync(path.join(webRoot, relativePat
 const contextProvider = readSource('src/components/wg/WgContextProvider.tsx');
 assert.match(
 	contextProvider,
-	/useVisibilityPausedInterval\(\(\) => void sync\(\), identity \? 60_000 : null\)/,
-	'WG offline sync must use the visibility-paused interval',
+	/useVisibilityPausedInterval\(\(\) => void sync\(\), identity && accountReady \? 60_000 : null\)/,
+	'WG offline sync must use the visibility-paused interval after account binding',
 );
 assert.doesNotMatch(
 	contextProvider,

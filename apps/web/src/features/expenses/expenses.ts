@@ -90,6 +90,8 @@ interface InsertExpenseInput {
 	imageUrl: string | null;
 	occurredAt: Date;
 	splits: readonly ExpenseSplitInput[];
+	recurringExpenseId?: string;
+	recurringDueAt?: Date;
 }
 
 /**
@@ -116,6 +118,8 @@ export async function insertExpenseWithSplits(
 			description: input.description,
 			imageUrl: input.imageUrl,
 			occurredAt: input.occurredAt,
+			recurringExpenseId: input.recurringExpenseId,
+			recurringDueAt: input.recurringDueAt,
 		})
 		.returning();
 	if (!created) throw new TransactionAbort('insert_failed');

@@ -3,6 +3,7 @@ import {
 	auditEvents,
 	chores,
 	db,
+	expensePayments,
 	expenseSplits,
 	expenses,
 	memberAbsences,
@@ -27,7 +28,7 @@ import {
 	parseRecurringSplitsForExport,
 	toCsv,
 } from '@/core/reads/export';
-import { asc, desc, eq, inArray } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 
 function getExportFormat(req: NextRequest): 'json' | 'csv' | null {
@@ -45,11 +46,13 @@ interface ExportPage {
 
 const NO_EXPORT_LIMIT = Number.MAX_SAFE_INTEGER;
 const EXPORT_LIMIT_MAX = 100_000;
+/** Expense ids per split query; well below Postgres' 65,535 bind-param cap. */
+const SPLIT_ID_CHUNK_SIZE = 10_000;
 
 /**
  * Optional `limit`/`offset` params so a huge WG can page through the dump
  * instead of materialising every row in one response. Without params the
- * historic full export is preserved byte for byte.
+ * sections are returned without a row cap, as before.
  * Returns `null` when a param is present but unusable; `explicit` tells the
  * response whether to echo a `pagination` block.
  */
@@ -69,6 +72,7 @@ function parseExportPage(req: NextRequest): { page: ExportPage; explicit: boolea
 const ALL_EXPORT_SECTIONS: ExportSectionKey[] = [
 	'members',
 	'expenses',
+	'expensePayments',
 	'recurringExpenses',
 	'shoppingItems',
 	'chores',
@@ -112,10 +116,7 @@ async function settleSection<T>(
 	try {
 		return { section, ok: true, value: await fn() };
 	} catch (err) {
-		console.error(
-			`[export GET] section "${section}" failed:`,
-			err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error',
-		);
+		logApiError(`[export GET] section ${section} failed`, err);
 		return { section, ok: false };
 	}
 }
@@ -145,20 +146,14 @@ interface ExportSplitRow {
  *
  * Both export paths — the expenses CSV section and the full JSON dump — read
  * the same rows the same way and built the same map, character for character.
- *
- * Postgres rejects a statement with more than 65,535 bind parameters, and both
- * the default full dump (`NO_EXPORT_LIMIT`) and a large explicit page can hand
- * more ids than that to a single `inArray`, so the ids are fetched in chunks —
- * chunking is the only fix that also covers the "no cap" default path.
  */
-const SPLIT_ID_CHUNK = 10_000;
-
 async function loadSplitsByExpense(expenseIds: string[]): Promise<Map<string, ExportSplitRow[]>> {
 	const splitsByExpense = new Map<string, ExportSplitRow[]>();
 	if (expenseIds.length === 0) return splitsByExpense;
 
-	for (let start = 0; start < expenseIds.length; start += SPLIT_ID_CHUNK) {
-		const chunk = expenseIds.slice(start, start + SPLIT_ID_CHUNK);
+	// Postgres caps a statement at 65,535 bind parameters, so a large (or
+	// unlimited) page of expense ids is read in chunks.
+	for (let start = 0; start < expenseIds.length; start += SPLIT_ID_CHUNK_SIZE) {
 		const splitRows = await db
 			.select({
 				expenseId: expenseSplits.expenseId,
@@ -167,7 +162,9 @@ async function loadSplitsByExpense(expenseIds: string[]): Promise<Map<string, Ex
 				settledAt: expenseSplits.settledAt,
 			})
 			.from(expenseSplits)
-			.where(inArray(expenseSplits.expenseId, chunk));
+			.where(
+				inArray(expenseSplits.expenseId, expenseIds.slice(start, start + SPLIT_ID_CHUNK_SIZE)),
+			);
 
 		for (const split of splitRows) {
 			const splits = splitsByExpense.get(split.expenseId) ?? [];
@@ -238,9 +235,38 @@ function mapExpenseRows(
 		amountCents: expense.amountCents,
 		currency: expense.currency,
 		paidBy: memberById.get(expense.paidByMemberId) ?? '',
+		paidByMemberId: expense.paidByMemberId,
 		imageUrl: expense.imageUrl ?? '',
 		occurredAt: expense.occurredAt.toISOString(),
 		splits: formatExpenseSplitsForExport(splitsByExpense.get(expense.id) ?? [], memberById),
+	}));
+}
+
+async function fetchExpensePaymentRows(wgId: string, page: ExportPage) {
+	return db
+		.select({
+			id: expensePayments.id,
+			fromMemberId: expensePayments.fromMemberId,
+			toMemberId: expensePayments.toMemberId,
+			amountCents: expensePayments.amountCents,
+			currency: expensePayments.currency,
+			completedAt: expensePayments.completedAt,
+		})
+		.from(expensePayments)
+		.where(and(eq(expensePayments.wgId, wgId), eq(expensePayments.status, 'completed')))
+		.orderBy(desc(expensePayments.completedAt), desc(expensePayments.id))
+		.limit(page.limit)
+		.offset(page.offset);
+}
+
+function mapExpensePaymentRows(paymentRows: Awaited<ReturnType<typeof fetchExpensePaymentRows>>) {
+	return paymentRows.map((payment) => ({
+		id: payment.id,
+		fromMemberId: payment.fromMemberId,
+		toMemberId: payment.toMemberId,
+		amountCents: payment.amountCents,
+		currency: payment.currency,
+		completedAt: payment.completedAt?.toISOString() ?? null,
 	}));
 }
 
@@ -449,6 +475,7 @@ export async function GET(
 				createdAt: now,
 			})),
 			expenses: [],
+			expensePayments: [],
 			recurringExpenses: [],
 			shoppingItems: [],
 			chores: [],
@@ -512,6 +539,9 @@ export async function GET(
 						expenseRows.map((expense) => expense.id),
 					);
 					return mapExpenseRows(expenseRows, memberById, splitsByExpense);
+				}
+				if (section === 'expensePayments') {
+					return mapExpensePaymentRows(await fetchExpensePaymentRows(wg.id, page));
 				}
 				if (section === 'recurringExpenses') {
 					const [memberById, recurringRows] = await Promise.all([
@@ -580,10 +610,7 @@ export async function GET(
 				memberRowsFetched = await fetchMemberRows(wg.id);
 			} catch (err) {
 				directoryFailed = true;
-				console.error(
-					'[export GET] section "members" failed:',
-					err instanceof Error ? `${err.name}: ${err.message}` : 'unknown error',
-				);
+				logApiError('[export GET] section members failed', err);
 			}
 		}
 		const memberById = memberRowsFetched
@@ -600,6 +627,8 @@ export async function GET(
 				const splitsByExpense = await loadSplitsByExpense(expenseRows.map((expense) => expense.id));
 				return mapExpenseRows(expenseRows, memberById, splitsByExpense);
 			},
+			expensePayments: async () =>
+				mapExpensePaymentRows(await fetchExpensePaymentRows(wg.id, page)),
 			recurringExpenses: async () => {
 				requireDirectory();
 				return mapRecurringRows(await fetchRecurringRows(wg.id, page), memberById);
@@ -643,7 +672,7 @@ export async function GET(
 			else failedSections.push(result.section);
 		}
 
-		// A downloaded backup must contain every requested section.
+		// An export must contain every requested section.
 		if (failedSections.length > 0) {
 			return serverError(null, 'export_incomplete');
 		}
@@ -652,6 +681,7 @@ export async function GET(
 			wg: { name: wg.name, shareCode: wg.shareCode },
 			members: rowsBySection.get('members') ?? [],
 			expenses: rowsBySection.get('expenses') ?? [],
+			expensePayments: rowsBySection.get('expensePayments') ?? [],
 			recurringExpenses: rowsBySection.get('recurringExpenses') ?? [],
 			shoppingItems: rowsBySection.get('shoppingItems') ?? [],
 			chores: rowsBySection.get('chores') ?? [],

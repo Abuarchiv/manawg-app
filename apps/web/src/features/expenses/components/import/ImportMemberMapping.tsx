@@ -25,18 +25,14 @@ export function ImportMemberMapping({
 }: Props) {
 	if (names.length === 0)
 		return <p className="text-sm text-muted-foreground">Keine Namen erkannt.</p>;
-	const memberIds = new Set(members.map((m) => m.id));
+	const memberIds = new Set(members.map((member) => member.id));
 	return (
 		<FieldGroup>
 			{names.map((name, index) => {
 				const selectedId = mapping[name] ?? '';
-				// A mapping target that is not among the offered members (moved-out
-				// member) is as invalid as no mapping at all — without this check the
-				// field looked valid while the commit rejected it with
-				// `member_not_in_wg`.
 				const unknownMember = selectedId !== '' && !memberIds.has(selectedId);
-				const invalid = showErrors && (selectedId === '' || unknownMember);
 				const value = unknownMember ? '' : selectedId;
+				const invalid = showErrors && !value;
 				return (
 					<Field key={name} data-invalid={invalid || undefined}>
 						<FieldLabel htmlFor={`import-map-${index}`}>{name}</FieldLabel>

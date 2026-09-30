@@ -1,5 +1,6 @@
 'use client';
 
+import { retireWebPushEndpoint } from '@/core/notifications/push-subscribe';
 import { createBrowserClient } from '@supabase/ssr';
 import { getSupabaseEnv } from './env';
 import { safeNextPath } from './next-path';
@@ -9,6 +10,14 @@ export type SocialProvider = 'google';
 export type AuthSessionResult = {
 	sessionEstablished: boolean;
 };
+
+export type LogoutPushTarget = {
+	code: string;
+	memberId: string;
+	memberToken?: string;
+};
+
+export type LogoutPushCleanup = 'none' | 'unsubscribed' | 'failed';
 
 const PHONE_PROVIDER_UNAVAILABLE_CODES = new Set(['phone_provider_disabled', 'provider_disabled']);
 
@@ -97,14 +106,6 @@ export async function requestPasswordReset(email: string): Promise<void> {
 	if (error) throw error;
 }
 
-export async function hasAuthenticatedSession(): Promise<boolean> {
-	const {
-		data: { user },
-		error,
-	} = await createSupabaseBrowserClient().auth.getUser();
-	return error === null && user !== null;
-}
-
 export async function updatePassword(password: string): Promise<void> {
 	const { error } = await createSupabaseBrowserClient().auth.updateUser({ password });
 	if (error) throw error;
@@ -128,7 +129,77 @@ export async function verifyPhoneOtp(phone: string, token: string): Promise<Auth
 	return { sessionEstablished: data.session !== null };
 }
 
-export async function signOutSocialAccount(): Promise<void> {
+async function removeCurrentBrowserPushSubscription(
+	targets: readonly LogoutPushTarget[],
+): Promise<LogoutPushCleanup> {
+	if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return 'none';
+
+	let registration: ServiceWorkerRegistration | undefined;
+	try {
+		registration = await navigator.serviceWorker.getRegistration();
+	} catch {
+		console.warn('[auth] browser push subscription could not be inspected during logout');
+		return 'failed';
+	}
+	if (!registration) return 'none';
+	if (!registration.pushManager) return 'none';
+
+	let subscription: PushSubscription | null;
+	try {
+		subscription = await registration.pushManager.getSubscription();
+	} catch {
+		console.warn('[auth] browser push subscription could not be inspected during logout');
+		return 'failed';
+	}
+	if (!subscription) return 'none';
+
+	const uniqueTargets = [
+		...new Map(targets.map((target) => [`${target.code}:${target.memberId}`, target])).values(),
+	];
+	const serverCleanup = Promise.allSettled(
+		uniqueTargets.map((target) =>
+			retireWebPushEndpoint(
+				target.code,
+				target.memberId,
+				subscription.endpoint,
+				target.memberToken,
+			),
+		),
+	);
+	let locallyUnsubscribed = false;
+	let unsubscribeTimeout: ReturnType<typeof setTimeout> | undefined;
+	try {
+		locallyUnsubscribed = await Promise.race([
+			subscription.unsubscribe().catch(() => false),
+			new Promise<false>((resolve) => {
+				unsubscribeTimeout = setTimeout(() => resolve(false), 3_000);
+			}),
+		]);
+	} catch {
+		locallyUnsubscribed = false;
+	} finally {
+		if (unsubscribeTimeout) clearTimeout(unsubscribeTimeout);
+	}
+	const serverResults = await serverCleanup;
+	const serverCleanupSucceeded =
+		uniqueTargets.length > 0 && serverResults.every((result) => result.status === 'fulfilled');
+	if (!locallyUnsubscribed) {
+		console.warn('[auth] browser push subscription could not be retired during logout');
+		return 'failed';
+	}
+	if (!serverCleanupSucceeded && uniqueTargets.length > 0) {
+		console.warn('[auth] browser push endpoint cleanup request failed during logout');
+	}
+	return 'unsubscribed';
+}
+
+export async function signOutSocialAccount(
+	pushTargets: readonly LogoutPushTarget[] = [],
+): Promise<{ pushCleanup: LogoutPushCleanup }> {
+	const pushCleanup = await removeCurrentBrowserPushSubscription(pushTargets).catch(
+		() => 'failed' as const,
+	);
 	const { error } = await createSupabaseBrowserClient().auth.signOut({ scope: 'local' });
 	if (error) throw error;
+	return { pushCleanup };
 }

@@ -6,7 +6,12 @@ export function safeNextPath(value: string | null): string {
 	try {
 		const url = new URL(value, 'https://manawg.invalid');
 		if (url.origin !== 'https://manawg.invalid') return '/';
-		return `${url.pathname}${url.search}${url.hash}`;
+		const path = `${url.pathname}${url.search}${url.hash}`;
+		// Dot-segments normalize to a protocol-relative path ("/.//evil.com" →
+		// "//evil.com"), which a browser resolves to another host. Re-check the
+		// normalized result, not only the raw input.
+		if (!path.startsWith('/') || path.startsWith('//') || path.includes('\\')) return '/';
+		return path;
 	} catch {
 		return '/';
 	}

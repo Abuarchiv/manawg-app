@@ -20,6 +20,7 @@ interface TextFieldProps {
 	suffix?: string;
 	disabled?: boolean;
 	error?: string | undefined;
+	enterKeyHint?: 'done' | 'next' | 'go' | 'search' | 'send';
 }
 
 export function TextField({
@@ -33,6 +34,7 @@ export function TextField({
 	suffix,
 	disabled = false,
 	error,
+	enterKeyHint,
 }: TextFieldProps) {
 	const id = providedId ?? `f-${label.toLowerCase().replace(/\s+/g, '-')}`;
 	const errorId = `${id}-error`;
@@ -49,6 +51,7 @@ export function TextField({
 					maxLength={maxLength}
 					placeholder={placeholder}
 					disabled={disabled}
+					enterKeyHint={enterKeyHint}
 					aria-invalid={error ? true : undefined}
 					aria-describedby={error ? errorId : undefined}
 					className={cn('min-h-11 text-base', inputMode === 'decimal' && 'font-mono tabular-nums')}

@@ -114,10 +114,11 @@ export function OfflineBanner() {
 	if (!online) {
 		return (
 			<output
-				className="bg-muted text-foreground border-border sticky top-0 z-20 border-b px-4 py-2 text-[13px] font-medium"
+				data-offline-banner
+				className="bg-muted text-foreground border-border sticky top-0 z-20 grid min-h-[var(--offline-banner-height)] grid-cols-[minmax(0,1fr)] content-center border-b px-4 py-2 text-[12px] font-medium"
 				aria-live="polite"
 			>
-				<div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+				<div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
 					<div className="flex min-w-0 items-center gap-2">
 						<WifiOff className="h-4 w-4 shrink-0" aria-hidden />
 						<span className="truncate">
@@ -142,10 +143,11 @@ export function OfflineBanner() {
 	if (notice && queueCount === 0) {
 		return (
 			<output
-				className="bg-card text-foreground border-border sticky top-0 z-20 border-b px-4 py-2 text-[13px] font-medium"
+				data-offline-banner
+				className="bg-card text-foreground border-border sticky top-0 z-20 grid min-h-[var(--offline-banner-height)] grid-cols-[minmax(0,1fr)] content-center border-b px-4 py-2 text-[12px] font-medium"
 				aria-live="polite"
 			>
-				<div className="mx-auto flex max-w-2xl items-center gap-2">
+				<div className="mx-auto flex w-full max-w-2xl items-center gap-2">
 					<CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
 					{notice.text}
 				</div>
@@ -155,10 +157,11 @@ export function OfflineBanner() {
 
 	return (
 		<output
-			className="bg-card text-foreground border-border sticky top-0 z-20 border-b px-4 py-2 text-[13px] font-medium"
+			data-offline-banner
+			className="bg-card text-foreground border-border sticky top-0 z-20 grid min-h-[var(--offline-banner-height)] grid-cols-[minmax(0,1fr)] content-center border-b px-4 py-2 text-[12px] font-medium"
 			aria-live="polite"
 		>
-			<div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
+			<div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-3">
 				<Link href={settingsDataHref} className="min-w-0 flex-1 truncate">
 					{notice ? notice.text : formatQueuedOfflineActions(queueCount)}
 				</Link>
@@ -170,7 +173,7 @@ export function OfflineBanner() {
 					aria-label={
 						syncing ? 'Offline-Aktionen werden gesendet' : 'Offline-Aktionen jetzt senden'
 					}
-					className="shrink-0 text-xs"
+					className="min-h-[44px] shrink-0 text-[12px]"
 				>
 					{syncing ? (
 						<Spinner aria-hidden />

@@ -205,7 +205,7 @@ function SegmentList({
 									aria-current={active ? (current ? 'page' : 'location') : undefined}
 									aria-label={suffix ? `${itemLabel}, ${suffix}` : undefined}
 									className={cn(
-										'flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium max-[419px]:px-1 max-[419px]:text-[13px] outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50',
+										"relative flex min-h-9 min-w-0 items-center justify-center gap-1.5 rounded-lg px-2 text-sm font-medium after:absolute after:inset-x-0 after:top-1/2 after:h-11 after:-translate-y-1/2 after:content-[''] max-[419px]:px-1 max-[419px]:text-[12px] outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50",
 										active
 											? 'bg-background text-foreground ring-1 ring-border'
 											: 'text-foreground/75 hover:text-foreground',

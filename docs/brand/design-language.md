@@ -25,6 +25,10 @@ On 2026-09-23 the product owner requested Liquid Glass for the bottom navigation
 
 For the same update, shared buttons and tappable list/card surfaces may scale to 0.97 for an 80 ms pressed state. Reduced-motion preferences disable the scale; 44 px touch targets remain required.
 
+## Explicit member avatar color exception
+
+On 2026-09-26 the product owner requested colored member avatars; the color is intentional. `memberTint(name)` in `src/components/wg/MemberAvatar.tsx` picks one of eight oklch hues from the member's name and mixes it with `--background`/`--foreground`, so every avatar of a person (members, chat, Pinnwand, balances) matches in light and dark with initials contrast of at least 5.9:1. This is the only decorative color; do not neutralize avatars back to `bg-muted`, and do not reuse the hues for status or other surfaces.
+
 ## Responsive control contract
 
 - Component sizes belong to the shared primitives, not a phone-only global

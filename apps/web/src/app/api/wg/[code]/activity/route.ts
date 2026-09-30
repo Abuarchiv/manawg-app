@@ -12,8 +12,12 @@ import {
 } from '@/core/db';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
-import { buildActivityTimeline, getActivityReminders } from '@/core/reads/activity';
-import { asc, desc, eq } from 'drizzle-orm';
+import {
+	REMINDER_ANNOUNCEMENT_KINDS,
+	buildActivityTimeline,
+	getActivityReminders,
+} from '@/core/reads/activity';
+import { and, asc, desc, eq, inArray, isNull, lte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 export const GET = withWgRoute(
@@ -32,6 +36,8 @@ export const GET = withWgRoute(
 			recurringRows,
 			absenceRows,
 			auditRows,
+			openShoppingRows,
+			openAnnouncementRows,
 		] = await Promise.all([
 			db
 				.select({ id: wgMembers.id, name: wgMembers.name })
@@ -84,10 +90,9 @@ export const GET = withWgRoute(
 					assignedMemberId: chores.assignedMemberId,
 				})
 				.from(chores)
-				.where(eq(chores.wgId, wg.id))
-				// These rows feed `dueChores`, which only escalates overdue chores —
-				// a descending sort plus the cap would drop exactly the rows the
-				// "hängt seit N Tagen" reminder needs.
+				// Only overdue chores feed the reminders; oldest first so the cap
+				// never drops the ones that have been hanging the longest.
+				.where(and(eq(chores.wgId, wg.id), lte(chores.nextDueAt, new Date())))
 				.orderBy(asc(chores.nextDueAt))
 				.limit(120),
 			db
@@ -130,6 +135,35 @@ export const GET = withWgRoute(
 				.from(auditEvents)
 				.where(eq(auditEvents.wgId, wg.id))
 				.orderBy(desc(auditEvents.createdAt))
+				.limit(120),
+			// Reminders read their own open rows, oldest first, so bought items
+			// and system notices in the newest timeline rows never hide them.
+			db
+				.select({
+					id: shoppingItems.id,
+					name: shoppingItems.name,
+					createdAt: shoppingItems.createdAt,
+				})
+				.from(shoppingItems)
+				.where(and(eq(shoppingItems.wgId, wg.id), isNull(shoppingItems.boughtAt)))
+				.orderBy(asc(shoppingItems.createdAt))
+				.limit(120),
+			db
+				.select({
+					id: announcements.id,
+					content: announcements.content,
+					kind: announcements.kind,
+					createdAt: announcements.createdAt,
+				})
+				.from(announcements)
+				.where(
+					and(
+						eq(announcements.wgId, wg.id),
+						eq(announcements.status, 'open'),
+						inArray(announcements.kind, [...REMINDER_ANNOUNCEMENT_KINDS]),
+					),
+				)
+				.orderBy(asc(announcements.createdAt))
 				.limit(120),
 		]);
 
@@ -187,13 +221,11 @@ export const GET = withWgRoute(
 				limit: 80,
 			}),
 			reminders: getActivityReminders({
-				openShoppingItems: shoppingRows
-					.filter((item) => !item.boughtAt)
-					.map((item) => ({
-						id: item.id,
-						name: item.name,
-						createdAt: item.createdAt.toISOString(),
-					})),
+				openShoppingItems: openShoppingRows.map((item) => ({
+					id: item.id,
+					name: item.name,
+					createdAt: item.createdAt.toISOString(),
+				})),
 				dueChores: choreRows.map((item) => ({
 					id: item.id,
 					title: item.title,
@@ -202,14 +234,12 @@ export const GET = withWgRoute(
 						? (memberById.get(item.assignedMemberId)?.name ?? null)
 						: null,
 				})),
-				openAnnouncements: announcementRows
-					.filter((item) => item.status === 'open')
-					.map((item) => ({
-						id: item.id,
-						content: item.content,
-						kind: item.kind,
-						createdAt: item.createdAt.toISOString(),
-					})),
+				openAnnouncements: openAnnouncementRows.map((item) => ({
+					id: item.id,
+					content: item.content,
+					kind: item.kind,
+					createdAt: item.createdAt.toISOString(),
+				})),
 			}),
 		});
 	},

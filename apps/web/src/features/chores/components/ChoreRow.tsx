@@ -22,17 +22,19 @@ import {
 } from '@/components/ui/drawer';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
 import { Spinner } from '@/components/ui/spinner';
+import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { useConfirmDelete } from '@/core/hooks/useConfirmDelete';
 import { formatRelativeTime, parseValidDate } from '@/core/utils/time';
 import { getChoreRepairHint, getChoreStatus } from '@/features/chores/chore-status';
 import type { Chore, MemberInfo, RecurrenceType } from '@/features/chores/components/chore-types';
 import { cn } from '@/shared/lib/cn';
-import { Check, Hand, History, MessageSquareMore, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Check, Hand, MessageSquareMore, MoreHorizontal, Trash2 } from 'lucide-react';
 import { type ReactElement, memo, useState } from 'react';
 
 interface ChoreRowProps {
 	chore: Chore;
 	assignee: MemberInfo;
+	isMine: boolean;
 	isAdmin: boolean;
 	isPending: boolean;
 	isSwapPending: boolean;
@@ -66,6 +68,7 @@ function formatChoreCadence(interval: number, type: RecurrenceType): string {
 export const ChoreRow = memo(function ChoreRow({
 	chore,
 	assignee,
+	isMine,
 	isAdmin,
 	isPending,
 	isSwapPending,
@@ -83,77 +86,72 @@ export const ChoreRow = memo(function ChoreRow({
 	const [actionsOpen, setActionsOpen] = useState(false);
 	const removeConfirm = useConfirmDelete();
 	const status = getChoreStatus(chore.nextDueAt);
-	const needsTakeOver = getChoreRepairHint(chore) !== null;
+	// Taking over your own chore is a no-op, so the shortcut only shows for others'.
+	const needsTakeOver = !isMine && getChoreRepairHint(chore) !== null;
+	const cadence = formatChoreCadence(chore.intervalDays, chore.recurrenceType);
 	const busy = isPending || isTakePending || isSwapPending;
 
 	return (
 		<Item
 			id={`chore-${chore.id}`}
 			render={<li />}
-			variant="outline"
-			className={cn('scroll-mt-24', highlighted && 'ring-2 ring-inset ring-ring')}
+			className={cn(
+				'scroll-mt-24 rounded-none py-2 pr-1.5',
+				highlighted && 'ring-2 ring-inset ring-ring',
+			)}
 			aria-busy={busy}
 		>
-			<ItemContent className="min-w-0 basis-40">
-				<ItemTitle className="line-clamp-none break-words [overflow-wrap:anywhere]">
+			{chore.assignedMemberId ? (
+				<MemberAvatar name={assignee.name} size={28} />
+			) : (
+				<span
+					aria-hidden
+					className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-dashed text-muted-foreground"
+				>
+					?
+				</span>
+			)}
+			{/* Mindestbreite in rem: bei großer Schrift rutschen die Knöpfe unter den Titel statt ihn zu zerquetschen. */}
+			<ItemContent className="min-w-[7rem] gap-0.5">
+				<ItemTitle className="line-clamp-none w-auto break-words text-[14px] [overflow-wrap:anywhere]">
 					{chore.title}
 				</ItemTitle>
-				<ItemDescription className="line-clamp-none break-words">
-					Zuständig: <span>{assignee.name}</span> ·{' '}
-					{formatChoreCadence(chore.intervalDays, chore.recurrenceType)} ·{' '}
+				<ItemDescription className="line-clamp-none break-words text-[12px]">
+					<span className="sr-only">Zuständig: {isMine ? 'du' : assignee.name} · </span>
 					<span className={cn(status.state === 'overdue' && 'font-medium text-foreground')}>
 						{status.label}
 					</span>
-					{status.escalationLabel && ` · ${status.escalationLabel}`}
+					{' · '}
+					{cadence}
+					{nextAssigneeName && ` · danach ${nextAssigneeName}`}
 				</ItemDescription>
-				<ItemDescription className="line-clamp-none break-words">
-					{nextAssigneeName
-						? `Voraussichtlich als Nächstes: ${nextAssigneeName}.`
-						: 'Für die nächste Runde ist niemand verfügbar.'}
-				</ItemDescription>
-				{chore.lastCompletedAt && (
-					<ItemDescription className="line-clamp-none">
-						Nächste Fälligkeit:{' '}
-						{parseValidDate(chore.nextDueAt)?.toLocaleDateString('de-DE') ?? 'unbekannt'}
-					</ItemDescription>
-				)}
-				{chore.lastCompletedAt && chore.lastCompletedByName && (
-					<div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
-						<History className="size-3.5" aria-hidden />
-						<span>
-							Zuletzt {formatRelativeTime(chore.lastCompletedAt)} von {chore.lastCompletedByName}
-						</span>
-					</div>
-				)}
 				{needsTakeOver && (
 					<Button
 						variant="link"
+						size="sm"
 						onClick={() => onTakeOver(chore)}
 						disabled={busy}
 						aria-label={`Aufgabe übernehmen: ${chore.title}`}
-						className="self-start px-0"
+						className="h-auto self-start px-0 text-[12px]"
 					>
 						{isTakePending && <Spinner data-icon="inline-start" aria-hidden />}Ich übernehme
 					</Button>
 				)}
 			</ItemContent>
-			<ItemActions className="ml-auto">
+			<ItemActions className="ml-auto flex-nowrap gap-0.5">
 				<Button
 					onClick={() => onComplete(chore)}
 					disabled={busy}
-					variant="outline"
+					variant={status.state === 'planned' ? 'outline' : 'default'}
+					size="icon"
+					className="size-8 rounded-full"
 					aria-label={
 						status.actionLabel === 'Nachholen'
 							? `Aufgabe nachholen: ${chore.title}`
 							: `Als erledigt markieren: ${chore.title}`
 					}
 				>
-					{isPending ? (
-						<Spinner data-icon="inline-start" aria-hidden />
-					) : (
-						<Check data-icon="inline-start" aria-hidden />
-					)}
-					{status.actionLabel}
+					{isPending ? <Spinner aria-hidden /> : <Check aria-hidden />}
 				</Button>
 				<Drawer
 					open={actionsOpen}
@@ -167,7 +165,7 @@ export const ChoreRow = memo(function ChoreRow({
 							<Button
 								variant="ghost"
 								size="icon"
-								className="size-9"
+								className="size-8"
 								aria-label={`Aufgabenaktionen: ${chore.title}`}
 							/>
 						}
@@ -179,21 +177,47 @@ export const ChoreRow = memo(function ChoreRow({
 							<DrawerTitle className="break-words">{chore.title}</DrawerTitle>
 						</DrawerHeader>
 						<div className="flex flex-col gap-3 overflow-y-auto overscroll-contain p-4">
+							<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
+								<dt className="text-muted-foreground">Zuständig</dt>
+								<dd>{isMine ? 'du' : assignee.name}</dd>
+								<dt className="text-muted-foreground">Fällig</dt>
+								<dd>
+									{parseValidDate(chore.nextDueAt)?.toLocaleDateString('de-DE') ?? 'unbekannt'} (
+									{status.label})
+								</dd>
+								<dt className="text-muted-foreground">Rhythmus</dt>
+								<dd>{cadence}</dd>
+								<dt className="text-muted-foreground">Danach</dt>
+								<dd>{nextAssigneeName ?? 'niemand verfügbar'}</dd>
+								{chore.lastCompletedAt && chore.lastCompletedByName && (
+									<>
+										<dt className="text-muted-foreground">Zuletzt</dt>
+										<dd>
+											{formatRelativeTime(chore.lastCompletedAt)} von {chore.lastCompletedByName}
+										</dd>
+									</>
+								)}
+							</dl>
+							{/* Bei der eigenen Aufgabe gäbe es nichts zu übernehmen. */}
+							{!isMine && (
+								<Button
+									variant="outline"
+									className="min-h-11 shrink-0"
+									disabled={busy}
+									onClick={() => {
+										setActionsOpen(false);
+										onTakeOver(chore);
+									}}
+								>
+									<Hand data-icon="inline-start" aria-hidden />
+									Ich übernehme
+								</Button>
+							)}
 							<Button
 								variant="outline"
+								className="min-h-11 shrink-0"
 								disabled={busy}
-								onClick={() => {
-									setActionsOpen(false);
-									onTakeOver(chore);
-								}}
-							>
-								<Hand data-icon="inline-start" aria-hidden />
-								Ich übernehme
-							</Button>
-							<Button
-								variant="outline"
-								disabled={busy}
-								aria-label={`Tausch anfragen: ${chore.title}`}
+								aria-label={`Tausch auf der Pinnwand anfragen: ${chore.title}`}
 								onClick={() => {
 									setActionsOpen(false);
 									onSwapRequest(chore);
@@ -205,7 +229,7 @@ export const ChoreRow = memo(function ChoreRow({
 							{isAdmin && (
 								<>
 									{removeConfirm.confirmId === chore.id && (
-										<Alert>
+										<Alert className="shrink-0">
 											<AlertDescription>
 												Diese Aufgabe endgültig entfernen? Das lässt sich nicht rückgängig machen.
 											</AlertDescription>
@@ -213,8 +237,9 @@ export const ChoreRow = memo(function ChoreRow({
 									)}
 									<Button
 										variant="destructive"
+										className="min-h-11 shrink-0"
 										disabled={busy}
-										aria-label={`${removeConfirm.confirmId === chore.id ? 'Aufgabe entfernen bestätigen' : 'Aufgabe entfernen'}: ${chore.title}`}
+										aria-label={`${removeConfirm.confirmId === chore.id ? 'Endgültig entfernen' : 'Aufgabe entfernen'}: ${chore.title}`}
 										onClick={() => {
 											if (removeConfirm.request(chore.id)) {
 												setActionsOpen(false);
@@ -247,11 +272,9 @@ export const ChoreRow = memo(function ChoreRow({
 						<AlertDialogTitle>„{chore.title}“ erledigt?</AlertDialogTitle>
 						<AlertDialogDescription>
 							{nextAssigneeName
-								? `Voraussichtlich als Nächstes: ${nextAssigneeName}.`
-								: 'Aktuell ist niemand für die nächste Runde verfügbar.'}{' '}
-							Die Rotation berücksichtigt Aufgaben und Abwesenheiten. Die nächste zuständige Person
-							und Fälligkeit werden beim Speichern bestätigt. Der Abschluss bleibt im Verlauf und
-							lässt sich hier nicht zurücknehmen.
+								? `Danach ist ${nextAssigneeName} dran.`
+								: 'Für die nächste Runde ist gerade niemand verfügbar.'}{' '}
+							Lässt sich nicht rückgängig machen.
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					{completeError && (

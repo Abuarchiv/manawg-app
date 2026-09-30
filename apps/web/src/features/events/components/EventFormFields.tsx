@@ -27,6 +27,10 @@ interface EventFormFieldsProps {
 	onDescriptionChange: (value: string) => void;
 	recurrenceField: ReactNode;
 	disabled?: boolean;
+	/** Field the current form error belongs to, if any (from `validateEventForm`). */
+	errorField?: 'title' | 'startsAt' | 'endsAt' | null;
+	/** id of the element rendering the error message, for `aria-describedby`. */
+	errorId?: string;
 }
 
 export function EventFormFields({
@@ -45,6 +49,8 @@ export function EventFormFields({
 	onDescriptionChange,
 	recurrenceField,
 	disabled = false,
+	errorField = null,
+	errorId,
 }: EventFormFieldsProps) {
 	return (
 		<FieldGroup>
@@ -58,6 +64,9 @@ export function EventFormFields({
 					placeholder="z. B. WG-Meeting"
 					required
 					disabled={disabled}
+					enterKeyHint="next"
+					aria-invalid={errorField === 'title' ? true : undefined}
+					aria-describedby={errorField === 'title' ? errorId : undefined}
 					className="text-base"
 				/>
 			</Field>
@@ -93,6 +102,8 @@ export function EventFormFields({
 					}
 					required
 					disabled={disabled}
+					aria-invalid={errorField === 'startsAt' ? true : undefined}
+					aria-describedby={errorField === 'startsAt' ? errorId : undefined}
 					className="min-w-0 text-base"
 				/>
 			</Field>
@@ -108,6 +119,8 @@ export function EventFormFields({
 						)
 					}
 					disabled={disabled}
+					aria-invalid={errorField === 'endsAt' ? true : undefined}
+					aria-describedby={errorField === 'endsAt' ? errorId : undefined}
 					className="min-w-0 text-base"
 				/>
 			</Field>
@@ -120,6 +133,7 @@ export function EventFormFields({
 					maxLength={LOCATION_MAX}
 					placeholder="z. B. Küche"
 					disabled={disabled}
+					enterKeyHint="next"
 					className="text-base"
 				/>
 			</Field>

@@ -2,11 +2,12 @@ import { expect, test } from '@playwright/test';
 import { dismissOnboarding, navigateToFeature, setupMember } from './_helpers';
 
 test.skip(process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true', 'requires local fixture server');
+test.use({ serviceWorkers: 'block' });
 
 const SHARE_CODE = 'MTE8PZAT';
 const MEMBER_ID = '7d898f9e-5ad7-4f5d-abed-8c3e99a76973';
 
-function announcement(id: string, content: string) {
+function announcement(id: string, content: string, comments: Record<string, unknown>[] = []) {
 	return {
 		id,
 		authorMemberId: MEMBER_ID,
@@ -19,11 +20,11 @@ function announcement(id: string, content: string) {
 		pinnedAt: null,
 		resolvedAt: null,
 		resolvedByMemberId: null,
-		createdAt: '2026-09-20T08:00:00.000Z',
+		createdAt: new Date().toISOString(),
 		reactionCounts: {},
 		myReactions: [],
 		takers: [],
-		comments: [],
+		comments,
 	};
 }
 
@@ -39,9 +40,56 @@ function createRequestGate() {
 	return { started, gate, markStarted, release };
 }
 
+test('keeps the Pinnwand loading skeleton within a 320px viewport at 200% text', async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 320, height: 720 });
+	await setupMember(page);
+
+	let initialReadPending = true;
+	const initialRead = createRequestGate();
+	await page.route(`**/api/wg/${SHARE_CODE}/announcements*`, async (route) => {
+		if (route.request().method() !== 'GET') return route.continue();
+		if (initialReadPending) {
+			initialReadPending = false;
+			initialRead.markStarted();
+			await initialRead.gate;
+		}
+		return route.fulfill({ json: { announcements: [] } });
+	});
+
+	await navigateToFeature(page, `/wg/${SHARE_CODE}/pinnwand`);
+	await dismissOnboarding(page);
+	await initialRead.started;
+
+	const skeleton = page.getByLabel('Pinnwand wird geladen');
+	await expect(skeleton).toBeVisible();
+	await page.evaluate(() => {
+		document.documentElement.style.setProperty('font-size', '200%', 'important');
+	});
+	const geometry = await skeleton.evaluate((root) => {
+		const viewportWidth = document.documentElement.clientWidth;
+		return {
+			viewportWidth,
+			rootFontSize: getComputedStyle(document.documentElement).fontSize,
+			elements: [...root.querySelectorAll('*')]
+				.filter((element) => element.getBoundingClientRect().right > viewportWidth + 0.5)
+				.map((element) => ({
+					className: element.className.toString(),
+					left: element.getBoundingClientRect().left,
+					right: element.getBoundingClientRect().right,
+				})),
+		};
+	});
+	initialRead.release();
+	await expect(geometry.viewportWidth).toBe(320);
+	await expect(geometry.rootFontSize).toBe('32px');
+	await expect(geometry.elements).toEqual([]);
+});
+
 test('shows refresh error while cached Pinnwand posts stay visible', async ({ page }) => {
 	await setupMember(page);
-	let failNextRead = false;
+	let failReads = false;
 	let failedReads = 0;
 	let initialReadPending = true;
 	const initialRead = createRequestGate();
@@ -52,8 +100,7 @@ test('shows refresh error while cached Pinnwand posts stay visible', async ({ pa
 			initialRead.markStarted();
 			await initialRead.gate;
 		}
-		if (failNextRead) {
-			failNextRead = false;
+		if (failReads) {
 			failedReads += 1;
 			return route.fulfill({ status: 503, json: { error: 'service_unavailable' } });
 		}
@@ -68,10 +115,15 @@ test('shows refresh error while cached Pinnwand posts stay visible', async ({ pa
 	initialRead.release();
 	await expect(page.getByText('Cache-Beitrag', { exact: true })).toBeVisible();
 
-	failNextRead = true;
+	failReads = true;
 	await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-	await expect.poll(() => failedReads).toBe(1);
-	await expect(page.getByRole('button', { name: 'Pinnwand erneut laden' })).toBeVisible();
+	await expect.poll(() => failedReads).toBeGreaterThanOrEqual(1);
+	const retry = page.getByRole('button', { name: 'Pinnwand erneut laden' });
+	await expect(retry).toBeVisible();
+	await expect(page.getByText('Cache-Beitrag', { exact: true })).toBeVisible();
+	failReads = false;
+	await retry.click();
+	await expect(retry).toBeHidden();
 	await expect(page.getByText('Cache-Beitrag', { exact: true })).toBeVisible();
 });
 
@@ -90,9 +142,11 @@ test('removes a cached Pinnwand post missing from the focus refresh', async ({ p
 			initialRead.markStarted();
 			await initialRead.gate;
 		}
-		if (removeOnNextRead) {
+		// Once the server deleted the post it stays deleted for every later read
+		// (a focus can trigger more than one refresh).
+		if (removeOnNextRead || changedReads > 0) {
+			if (removeOnNextRead) changedReads += 1;
 			removeOnNextRead = false;
-			changedReads += 1;
 			return route.fulfill({ json: { announcements: [retained] } });
 		}
 		return route.fulfill({
@@ -163,4 +217,62 @@ test('does not resurrect a deleted post after two pending refreshes', async ({ p
 	await expect(pendingButton).toBeHidden();
 	await expect(page.getByText('Beitrag A', { exact: true })).toBeVisible();
 	await expect(page.getByText('Beitrag B gelöscht', { exact: true })).toBeHidden();
+});
+
+test('comment delete requires confirmation and only removes the comment once confirmed', async ({
+	page,
+}) => {
+	await setupMember(page);
+	const post = announcement('post-with-comment', 'Beitrag mit Kommentar', [
+		{
+			id: 'comment-1',
+			announcementId: 'post-with-comment',
+			memberId: MEMBER_ID,
+			content: 'Testkommentar',
+			createdAt: new Date().toISOString(),
+			authorName: 'dsaf',
+			authorColor: null,
+		},
+	]);
+	let deleteRequests = 0;
+	await page.route(`**/api/wg/${SHARE_CODE}/announcements*`, async (route) => {
+		if (route.request().method() !== 'GET') return route.continue();
+		return route.fulfill({ json: { announcements: [post] } });
+	});
+	await page.route(
+		`**/api/wg/${SHARE_CODE}/announcements/post-with-comment/comments/comment-1`,
+		async (route) => {
+			if (route.request().method() !== 'DELETE') return route.continue();
+			deleteRequests += 1;
+			post.comments = [];
+			return route.fulfill({ json: {} });
+		},
+	);
+
+	await navigateToFeature(page, `/wg/${SHARE_CODE}/pinnwand`);
+	await dismissOnboarding(page);
+	await expect(page.getByText('Beitrag mit Kommentar', { exact: true })).toBeVisible();
+
+	await page.getByRole('button', { name: /Antworten anzeigen/ }).click();
+	await expect(page.getByText('Testkommentar', { exact: true })).toBeVisible();
+
+	const deleteTrigger = page.getByRole('button', { name: /Kommentar entfernen: Testkommentar/ });
+	await deleteTrigger.click();
+
+	const dialog = page.getByRole('alertdialog', { name: 'Kommentar entfernen?' });
+	await expect(dialog).toBeVisible();
+	await expect(page.getByText('Testkommentar', { exact: true })).toBeVisible();
+
+	// Cancel keeps the comment and never calls the API.
+	await dialog.getByRole('button', { name: 'Abbrechen' }).click();
+	await expect(dialog).toBeHidden();
+	await expect(page.getByText('Testkommentar', { exact: true })).toBeVisible();
+	expect(deleteRequests).toBe(0);
+
+	// Confirming removes the comment and calls the delete endpoint exactly once.
+	await deleteTrigger.click();
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole('button', { name: /Kommentar entfernen bestätigen/ }).click();
+	await expect.poll(() => deleteRequests).toBe(1);
+	await expect(page.getByText('Testkommentar', { exact: true })).toBeHidden();
 });

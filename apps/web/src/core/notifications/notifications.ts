@@ -1,3 +1,4 @@
+import { berlinDayKey } from '@/core/utils/berlin-day';
 import { formatEuroCents } from '@/core/utils/money';
 
 export type NotificationEvent =
@@ -14,6 +15,7 @@ export type NotificationEvent =
 	| 'shopping.added'
 	| 'event.created'
 	| 'event.upcoming'
+	| 'event.today'
 	| 'inventory.low_stock'
 	| 'chat.message'
 	| 'chat.mention';
@@ -60,7 +62,7 @@ export function notificationCategoryForEvent(event: NotificationEvent): Notifica
 
 export function notificationPriorityForEvent(event: NotificationEvent): NotificationPriority {
 	if (event === 'chore.due') return 'urgent';
-	if (event === 'event.upcoming') return 'urgent';
+	if (event === 'event.upcoming' || event === 'event.today') return 'urgent';
 	if (event === 'announcement.reacted') return 'silent';
 	if (event === 'notification.test') return 'normal';
 	return 'normal';
@@ -96,13 +98,19 @@ function eventUrlPath(payload: Record<string, unknown>): string {
 	return id ? `/kalender?highlight=${encodeURIComponent(id)}` : '/kalender';
 }
 
-function formatEventTime(value: unknown): string {
+function formatEventTime(value: unknown, allDay = false): string {
 	if (typeof value !== 'string' || value.length === 0) return 'demnächst';
 	const date = new Date(value);
 	if (Number.isNaN(date.getTime())) return 'demnächst';
-	// Server-side Intl falls back to the runtime zone (UTC on Vercel), which
-	// would announce Berlin events 1-2 h early and shift the rendered date for
-	// everything between 00:00 and 02:00 Berlin time.
+	// All-day events start at Berlin midnight; a clock time would be noise.
+	if (allDay) {
+		const day = new Intl.DateTimeFormat('de-DE', {
+			day: '2-digit',
+			month: '2-digit',
+			timeZone: 'Europe/Berlin',
+		}).format(date);
+		return `${day} (ganztägig)`;
+	}
 	return new Intl.DateTimeFormat('de-DE', {
 		day: '2-digit',
 		month: '2-digit',
@@ -110,6 +118,32 @@ function formatEventTime(value: unknown): string {
 		minute: '2-digit',
 		timeZone: 'Europe/Berlin',
 	}).format(date);
+}
+
+function berlinDayNumber(date: Date): number {
+	const [year, month, day] = berlinDayKey(date).split('-').map(Number);
+	return Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1) / 86_400_000;
+}
+
+// Reminders also fire for chores overdue up to a week and for new chores due
+// tomorrow, so the copy follows the Berlin calendar distance to nextDueAt.
+function choreDueBody(payload: Record<string, unknown>, wgName: string): string {
+	const title = text(payload.title, 'Eine Aufgabe');
+	const dueAt = typeof payload.nextDueAt === 'string' ? new Date(payload.nextDueAt) : null;
+	if (!dueAt || Number.isNaN(dueAt.getTime())) return `${title} ist heute in ${wgName} fällig.`;
+	const diffDays = berlinDayNumber(dueAt) - berlinDayNumber(new Date());
+	if (diffDays < 0) {
+		const overdueDays = -diffDays;
+		return `${title} ist in ${wgName} seit ${overdueDays} ${overdueDays === 1 ? 'Tag' : 'Tagen'} offen.`;
+	}
+	if (diffDays === 0) return `${title} ist heute in ${wgName} fällig.`;
+	if (diffDays === 1) return `${title} ist morgen in ${wgName} fällig.`;
+	const day = new Intl.DateTimeFormat('de-DE', {
+		day: '2-digit',
+		month: '2-digit',
+		timeZone: 'Europe/Berlin',
+	}).format(dueAt);
+	return `${title} ist am ${day} in ${wgName} fällig.`;
 }
 
 function inventoryUrlPath(payload: Record<string, unknown>): string {
@@ -200,7 +234,7 @@ export function formatNotificationMessage(
 		case 'chore.due':
 			return {
 				title: 'Putzplan',
-				body: `${text(payload.title, 'Eine Aufgabe')} ist heute in ${wgName} fällig.`,
+				body: choreDueBody(payload, wgName),
 				urlPath: choreUrlPath(payload),
 			};
 		case 'shopping.added':
@@ -215,17 +249,34 @@ export function formatNotificationMessage(
 				body: `${text(payload.actorName, 'Jemand')} hat in ${wgName} „${text(
 					payload.title,
 					'Termin',
-				)}“ am ${formatEventTime(payload.startsAt)} eingetragen.`,
+				)}“ am ${formatEventTime(payload.startsAt, payload.allDay === true)} eingetragen.`,
 				urlPath: eventUrlPath(payload),
 			};
-		case 'event.upcoming':
+		case 'event.upcoming': {
+			const title = text(payload.title, 'Termin');
 			return {
 				title: 'Termin morgen',
-				body: `Morgen in ${wgName}: „${text(payload.title, 'Termin')}“ um ${formatEventTime(
-					payload.startsAt,
-				)}.`,
+				body:
+					payload.allDay === true
+						? `Morgen in ${wgName}: „${title}“ am ${formatEventTime(payload.startsAt, true)}.`
+						: `Morgen in ${wgName}: „${title}“ um ${formatEventTime(payload.startsAt)}.`,
 				urlPath: eventUrlPath(payload),
 			};
+		}
+		case 'event.today': {
+			const title = text(payload.title, 'Termin');
+			const body =
+				payload.allDay === true
+					? `Heute in ${wgName}: „${title}“ ist ganztägig.`
+					: payload.ongoing === true
+						? `Heute in ${wgName}: „${title}“ läuft noch.`
+						: `Heute in ${wgName}: „${title}“ um ${formatEventTime(payload.startsAt)}.`;
+			return {
+				title: 'Termin heute',
+				body,
+				urlPath: eventUrlPath(payload),
+			};
+		}
 		case 'inventory.low_stock': {
 			const itemName = text(payload.title, 'Vorrat');
 			const quantity = quantityNumber(payload.quantity);

@@ -99,3 +99,14 @@ test('cached shopping content stays visible while a revisit is revalidating', as
 	await expect(item).toBeVisible();
 	expect(shoppingReads).toBeGreaterThanOrEqual(2);
 });
+
+test('revoked membership hides the WG shell after member refresh', async ({ page }) => {
+	await setupMember(page);
+	await page.route(`**/api/wg/${SHARE_CODE}/members`, (route) =>
+		route.fulfill({ status: 401, json: { error: 'member_deactivated' } }),
+	);
+	await navigateToFeature(page, `/wg/${SHARE_CODE}`);
+
+	await expect(page.getByText('Deine Mitgliedschaft konnte nicht bestätigt werden.')).toBeVisible();
+	await expect(page.getByRole('link', { name: /Chat öffnen/ })).toHaveCount(0);
+});

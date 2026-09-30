@@ -93,6 +93,64 @@ test('expense edit keeps departed historical shares in manual splits', () => {
 	).toBe(true);
 });
 
+test('manual expense splits reject invalid entries and keep blank, zero, and valid shares', () => {
+	const { parseEuroAmount } = loadTs<{
+		parseEuroAmount: (value: string) => number | null;
+	}>(path.join(ROOT, 'src/core/utils/amount.ts'));
+	const splitInput = loadTs<{
+		buildSplitsFromForm: (input: {
+			splitMode: 'equal' | 'manual';
+			members: readonly { id: string; active?: boolean }[];
+			manualSplits: Record<string, string>;
+			amountCents: number;
+			rotationOffset: number;
+		}) => unknown;
+	}>(SPLIT_INPUT, {
+		'@/core/utils/amount': { parseEuroAmount },
+		'@/core/utils/money': { CENTS_PER_EURO: 100 },
+		'@/features/expenses/split-math': loadTs(SPLIT_MATH),
+	});
+	const members = [
+		{ id: CALLER_ID, active: true },
+		{ id: PAYER_ID, active: true },
+	];
+	const build = (manualSplits: Record<string, string>) =>
+		splitInput.buildSplitsFromForm({
+			splitMode: 'manual',
+			members,
+			manualSplits,
+			amountCents: 1000,
+			rotationOffset: 0,
+		});
+
+	expect(build({ [CALLER_ID]: '10', [PAYER_ID]: '-5' })).toEqual({
+		ok: false,
+		reason: 'invalid_share',
+	});
+	expect(build({ [CALLER_ID]: '10', [PAYER_ID]: 'invalid' })).toEqual({
+		ok: false,
+		reason: 'invalid_share',
+	});
+	expect(build({ [CALLER_ID]: '6', [PAYER_ID]: '4' })).toEqual({
+		ok: true,
+		splits: [
+			{ debtorMemberId: CALLER_ID, amountCents: 600 },
+			{ debtorMemberId: PAYER_ID, amountCents: 400 },
+		],
+	});
+	expect(build({ [CALLER_ID]: '10', [PAYER_ID]: '' })).toEqual({
+		ok: true,
+		splits: [{ debtorMemberId: CALLER_ID, amountCents: 1000 }],
+	});
+	expect(build({ [CALLER_ID]: '10', [PAYER_ID]: '0' })).toEqual({
+		ok: true,
+		splits: [
+			{ debtorMemberId: CALLER_ID, amountCents: 1000 },
+			{ debtorMemberId: PAYER_ID, amountCents: 0 },
+		],
+	});
+});
+
 function responseError(code: string, status: number): Response {
 	return Response.json({ error: code }, { status });
 }
@@ -123,11 +181,14 @@ test('recurring splits require a valid distribution, including zero-cent shares'
 	expect(recurringSplitsMatchAmount([first, second], 2)).toBe(false);
 });
 
-test('expense DELETE rechecks debtor authorization under the payment lock', async () => {
+test('expense DELETE rechecks authorization and blocks an active capture under the payment lock', async () => {
 	let locked = false;
 	let callerIsDebtor = true;
+	let removeDebtorAtLock = true;
+	let capturing = false;
 	let deleted = 0;
 	let lockedReads = 0;
+	let captureChecks = 0;
 	const expenseRow = { paidByMemberId: PAYER_ID, description: 'Einkauf', amountCents: 1200 };
 	const expenses = { name: 'expenses' };
 	const expenseSplits = { name: 'expenseSplits' };
@@ -175,7 +236,7 @@ test('expense DELETE rechecks debtor authorization under the payment lock', asyn
 		operation: (value: typeof tx) => Promise<unknown>,
 	) => {
 		locked = true;
-		callerIsDebtor = false;
+		if (removeDebtorAtLock) callerIsDebtor = false;
 		try {
 			return await operation(tx);
 		} finally {
@@ -183,11 +244,15 @@ test('expense DELETE rechecks debtor authorization under the payment lock', asyn
 		}
 	};
 	const db = { select: () => makeSelect(false) };
-	const response = await loadTs<{ DELETE: (req: Request, ctx: unknown) => Promise<Response> }>(
+	const route = loadTs<{ DELETE: (req: Request, ctx: unknown) => Promise<Response> }>(
 		EXPENSE_ROUTE,
 		{
 			'@/core/audit': { recordAuditEvent: async () => undefined },
 			'@/core/db': { db, expenseSplits, expenses, wgMembers: {} },
+			'@/core/db/private-image-deletions': {
+				assertPrivateImageCanBeAttached: async () => undefined,
+				revokePrivateImageIfUnreferenced: async () => undefined,
+			},
 			'@/core/db/transaction': { TransactionAbort: class TransactionAbort extends Error {} },
 			'@/core/errors': {
 				badRequest: (code: string) => responseError(code, 400),
@@ -223,6 +288,10 @@ test('expense DELETE rechecks debtor authorization under the payment lock', asyn
 			},
 			'@/features/expenses/expense-payments': {
 				withExpensePaymentLock: withPaymentLock,
+				hasCapturingExpensePayment: async () => {
+					captureChecks += 1;
+					return capturing;
+				},
 			},
 			'@/features/expenses/split-math': {
 				settledAtForOwnShare: () => null,
@@ -230,11 +299,27 @@ test('expense DELETE rechecks debtor authorization under the payment lock', asyn
 				validateSplits: () => ({ ok: true }),
 			},
 		},
-	).DELETE(new Request('http://localhost'), { code: 'MTE8PZAT', id: EXPENSE_ID });
+	);
+	const response = await route.DELETE(new Request('http://localhost'), {
+		code: 'MTE8PZAT',
+		id: EXPENSE_ID,
+	});
 
 	expect(response.status).toBe(403);
 	expect(await response.json()).toEqual({ error: 'not_owner' });
 	expect(lockedReads).toBe(2);
+	expect(deleted).toBe(0);
+
+	removeDebtorAtLock = false;
+	callerIsDebtor = true;
+	capturing = true;
+	const captureResponse = await route.DELETE(new Request('http://localhost'), {
+		code: 'MTE8PZAT',
+		id: EXPENSE_ID,
+	});
+	expect(captureResponse.status).toBe(409);
+	expect(await captureResponse.json()).toEqual({ error: 'paypal_payment_pending' });
+	expect(captureChecks).toBe(1);
 	expect(deleted).toBe(0);
 });
 
@@ -380,6 +465,7 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 	const initialUpdatedAt = new Date('2026-09-20T00:00:00.123Z');
 	const concurrentUpdatedAt = new Date('2026-09-20T00:00:00.123Z');
 	let mutateAtLock = true;
+	let capturing = false;
 	let currentExpense = {
 		id: EXPENSE_ID,
 		wgId: WG_ID,
@@ -486,6 +572,10 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 		{
 			'@/core/audit': { recordAuditEvent: async () => undefined },
 			'@/core/db': { db, expenseSplits, expenses, wgMembers },
+			'@/core/db/private-image-deletions': {
+				assertPrivateImageCanBeAttached: async () => undefined,
+				revokePrivateImageIfUnreferenced: async () => undefined,
+			},
 			'@/core/db/transaction': {
 				TransactionAbort: class TransactionAbort extends Error {
 					constructor(readonly code: string) {
@@ -526,6 +616,7 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 				AMOUNT_MIN_CENTS: 1,
 			},
 			'@/features/expenses/expense-payments': {
+				hasCapturingExpensePayment: async () => capturing,
 				withExpensePaymentLock: async (
 					_wgId: string,
 					operation: (value: typeof tx) => Promise<unknown>,
@@ -677,6 +768,28 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 	expect(currentSplits).toEqual([
 		{ expenseId: EXPENSE_ID, debtorMemberId: CALLER_ID, amountCents: 2000, settledAt: null },
 	]);
+	capturing = true;
+	const blockedFinancialEdit = await route.PATCH(
+		new Request('http://localhost', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ currency: 'USD' }),
+		}),
+		{ code: 'MTE8PZAT', id: EXPENSE_ID },
+	);
+	expect(blockedFinancialEdit.status).toBe(409);
+	expect(await blockedFinancialEdit.json()).toEqual({ error: 'paypal_payment_pending' });
+	expect(currentExpense.currency).toBe('EUR');
+	const cosmeticEdit = await route.PATCH(
+		new Request('http://localhost', {
+			method: 'PATCH',
+			headers: { 'content-type': 'application/json' },
+			body: JSON.stringify({ description: 'Nur Text' }),
+		}),
+		{ code: 'MTE8PZAT', id: EXPENSE_ID },
+	);
+	expect(cosmeticEdit.status).toBe(200);
+	expect(currentExpense.description).toBe('Nur Text');
 });
 
 test('both recurring expense PATCH routes guard financial edits without blocking ordinary changes', async () => {
@@ -1234,6 +1347,7 @@ test('import helper does not validate member mappings for skipped rows', async (
 		},
 		'@/core/utils/money': { formatEuroCents: () => '0,00 €' },
 		'@/features/expenses/expense-payments': {
+			hasCapturingExpensePayment: async () => false,
 			withExpensePaymentLock: withPaymentLock,
 		},
 		'@/features/expenses/split-math': { settledAtForOwnShare: () => null },

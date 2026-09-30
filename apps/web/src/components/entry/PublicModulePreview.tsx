@@ -195,7 +195,7 @@ function PreviewRows({
 
 	return (
 		<ItemGroup className="gap-2">
-			<Item size="sm" className="rounded-none px-0">
+			<Item size="sm" className="rounded-none px-0 @container">
 				<ItemMedia variant="icon">
 					<module.Icon aria-hidden />
 				</ItemMedia>
@@ -203,7 +203,9 @@ function PreviewRows({
 					<ItemTitle className="line-clamp-none break-words">{copy.title}</ItemTitle>
 					<ItemDescription className="line-clamp-none break-words">{copy.detail}</ItemDescription>
 				</ItemContent>
-				<Badge variant="outline">Beispiel</Badge>
+				<ItemActions className="@max-[320px]:basis-full @max-[320px]:justify-end">
+					<Badge variant="outline">Beispiel</Badge>
+				</ItemActions>
 			</Item>
 		</ItemGroup>
 	);

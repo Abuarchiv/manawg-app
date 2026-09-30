@@ -9,7 +9,9 @@ import { HTTP, apiError, badRequest, forbidden, notFound, tooMany } from '@/core
 import { isVerifiedWgAdmin } from '@/core/guards/admin';
 import { withIdempotentJsonResponse } from '@/core/guards/idempotency';
 import { requireWgMember } from '@/core/guards/require-wg-member';
+import { shareCodeMissResponse } from '@/core/guards/share-code-miss';
 import { withWgRoute } from '@/core/guards/with-wg-route';
+import { logApiError } from '@/core/infra/observability';
 import { checkRateLimit, clientIpKey, wgWriteLimiter } from '@/core/rate-limit';
 import { and, asc, count, eq } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -126,13 +128,21 @@ export const POST = withWgRoute('members POST', async (req, { code }) => {
 	if (!limit.success) {
 		return tooMany('join_rate_limited', 'join_rate_limited');
 	}
-	const user = await getAuthenticatedUser(req);
-	if (!user) return apiError('auth_required', 401, 'auth_required');
+	let authUser: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+	try {
+		authUser = await getAuthenticatedUser(req);
+	} catch (err) {
+		// A transient Auth outage is retryable, not an unauthenticated caller.
+		logApiError('[members POST] auth error', err);
+		return apiError('db_error', 503);
+	}
+	if (!authUser) return apiError('auth_required', 401, 'auth_required');
+	const user = authUser;
 	const wg = await db.query.wgs.findFirst({
 		where: (w, { eq }) => eq(w.shareCode, code),
 		columns: { id: true, joiningEnabled: true },
 	});
-	if (!wg) return notFound('wg_not_found');
+	if (!wg) return shareCodeMissResponse(user.id, notFound('wg_not_found'));
 	const authenticatedUser = user;
 
 	try {

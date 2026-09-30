@@ -76,7 +76,10 @@ function hasPathTraversal(value: string): boolean {
 	}
 }
 
-function parsePrivateImageUrl(value: string): PrivateImageKey | null {
+function parsePrivateImageUrl(
+	value: string,
+	requireCurrentOrigin = true,
+): (PrivateImageKey & { key: string }) | null {
 	let parsed: URL;
 	try {
 		parsed = new URL(value);
@@ -84,19 +87,42 @@ function parsePrivateImageUrl(value: string): PrivateImageKey | null {
 		return null;
 	}
 	if (parsed.username || parsed.password) return null;
-	let appOrigin: string;
-	try {
-		appOrigin = getTrustedAppOrigin();
-	} catch {
-		return null;
+	const isLocalDevelopmentHttp =
+		parsed.protocol === 'http:' &&
+		LOCAL_DEVELOPMENT_HOSTS.has(parsed.hostname.toLowerCase()) &&
+		process.env.VERCEL_ENV !== 'production';
+	if (parsed.protocol !== 'https:' && !isLocalDevelopmentHttp) return null;
+	if (requireCurrentOrigin) {
+		let appOrigin: string;
+		try {
+			appOrigin = getTrustedAppOrigin();
+		} catch {
+			return null;
+		}
+		if (parsed.origin !== appOrigin) return null;
 	}
-	if (parsed.origin !== appOrigin) return null;
 	if (parsed.pathname !== PRIVATE_IMAGE_PATH || parsed.hash || hasPathTraversal(value)) return null;
 	if (parsed.searchParams.size !== 1 || !parsed.searchParams.has('key')) return null;
 
 	const key = parsed.searchParams.get('key');
 	if (!key) return null;
-	return parsePrivateImageKey(key);
+	const privateImage = parsePrivateImageKey(key);
+	return privateImage ? { ...privateImage, key } : null;
+}
+
+export function getPrivateImageKeyFromStoredUrl(
+	value: string | null | undefined,
+	expectedWgId?: string,
+): (PrivateImageKey & { key: string }) | null {
+	if (!value || value.length > URL_MAX) return null;
+	const privateImage = parsePrivateImageUrl(value, false);
+	if (
+		!privateImage ||
+		(expectedWgId !== undefined && privateImage.wgId.toLowerCase() !== expectedWgId.toLowerCase())
+	) {
+		return null;
+	}
+	return privateImage;
 }
 
 function getAllowedHosts(): string[] {

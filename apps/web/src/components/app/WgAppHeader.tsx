@@ -36,7 +36,7 @@ export function WgAppHeader() {
 				/>
 				<div className="min-w-0 flex-[1_1_128px] py-1">
 					<h1
-						aria-label={`Start – ${wg.name}`}
+						aria-label={`${wg.name} – Start`}
 						title={wg.name}
 						className="truncate text-xl font-semibold tracking-tight"
 					>

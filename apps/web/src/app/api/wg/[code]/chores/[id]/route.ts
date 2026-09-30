@@ -44,6 +44,20 @@ const patchSchema = z
 		}
 	});
 
+export const GET = withWgRoute<{ id: string }>('chores GET id', async (req, { code, id }) => {
+	if (!UUID_PATTERN.test(id)) return badRequest('id_invalid');
+	const auth = await requireWgMember(req, code);
+	if (!auth.ok) return auth.response;
+	const rows = await db
+		.select()
+		.from(chores)
+		.where(and(eq(chores.id, id), eq(chores.wgId, auth.wg.id)))
+		.limit(1);
+	const chore = rows[0];
+	if (!chore) return notFound('chore_not_found');
+	return NextResponse.json({ chore });
+});
+
 export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { code, id }) => {
 	if (!UUID_PATTERN.test(id)) return badRequest('id_invalid');
 

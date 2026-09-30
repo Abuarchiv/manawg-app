@@ -1,6 +1,7 @@
-import { db, expenseSplits, expenses, idempotencyResponses } from '@/core/db';
-import { TransactionAbort } from '@/core/db/transaction';
-import { apiError, badRequest, serverError, tooMany } from '@/core/errors';
+import { db, expenseSplits, expenses, idempotencyResponses, recurringExpenses } from '@/core/db';
+import { assertPrivateImageCanBeAttached } from '@/core/db/private-image-deletions';
+import { type DbTransaction, TransactionAbort } from '@/core/db/transaction';
+import { apiError, badRequest, conflict, notFound, serverError, tooMany } from '@/core/errors';
 import {
 	ReplayCache,
 	type ReplayReservation,
@@ -18,11 +19,12 @@ import {
 import type { RouteCtx } from '@/core/infra/api-types';
 import { logApiError } from '@/core/infra/observability';
 import type { NotificationDispatchWarning } from '@/core/notifications/notification-dispatch';
-import { checkRateLimit, wgReadLimiter, wgWriteLimiter } from '@/core/rate-limit';
+import { checkRateLimit, expensesReadLimiter, wgWriteLimiter } from '@/core/rate-limit';
 import { currencySchema } from '@/core/validators/currency';
 import { imageUrlSchema, isAllowedImageUrlForWg } from '@/core/validators/image-url';
 import { AMOUNT_MAX_CENTS, AMOUNT_MIN_CENTS } from '@/features/expenses/expense-constants';
 import {
+	hasCapturingExpensePayment,
 	loadCompletedExpensePayments,
 	withExpensePaymentLock,
 } from '@/features/expenses/expense-payments';
@@ -34,7 +36,7 @@ import {
 	resolveExpensePayer,
 } from '@/features/expenses/expenses';
 import { splitValidationErrorCode, validateSplits } from '@/features/expenses/split-math';
-import { and, count, desc, eq, gt, inArray, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, gt, sql } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -42,26 +44,6 @@ const DESCRIPTION_MIN = 1;
 const DESCRIPTION_MAX = 200;
 const MAX_SPLITS = 50;
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
-
-// GET pagination, mirroring `members`: the default keeps the historic
-// full-history payload (the ausgaben/mahnungen pages compute net balances
-// from this list), while the hard ceiling is what bounds the read — it keeps
-// the `inArray(expenseId, ids)` below Postgres' 65,535 bind-parameter cap
-// (a WG past that row count answered 500 instead of data) and lets clients
-// page with limit/offset.
-const EXPENSES_PAGE_LIMIT_DEFAULT = 50_000;
-const EXPENSES_PAGE_LIMIT_MAX = 50_000;
-
-function readPageParams(req: NextRequest): { limit: number; offset: number } {
-	const params = req.nextUrl.searchParams;
-	const rawLimit = Number.parseInt(params.get('limit') ?? '', 10);
-	const rawOffset = Number.parseInt(params.get('offset') ?? '', 10);
-	const limit = Number.isFinite(rawLimit)
-		? Math.min(Math.max(rawLimit, 1), EXPENSES_PAGE_LIMIT_MAX)
-		: EXPENSES_PAGE_LIMIT_DEFAULT;
-	const offset = Number.isFinite(rawOffset) ? Math.max(rawOffset, 0) : 0;
-	return { limit, offset };
-}
 
 type ExpenseCreateResponseBody = { expense: unknown; warning: NotificationDispatchWarning };
 
@@ -91,6 +73,8 @@ const createExpenseSchema = z
 		description: z.string().trim().min(DESCRIPTION_MIN).max(DESCRIPTION_MAX),
 		imageUrl: imageUrlSchema,
 		occurredAt: z.string().datetime({ offset: true }).optional(),
+		recurringExpenseId: z.string().uuid().optional(),
+		expectedRecurringNextDueAt: z.string().datetime({ offset: true }).optional(),
 		splits: z.array(splitSchema).min(1).max(MAX_SPLITS),
 	})
 	.superRefine((value, ctx) => {
@@ -110,6 +94,109 @@ const createExpenseSchema = z
 		}
 	});
 
+async function lockExpenseCreateClaim(
+	tx: DbTransaction,
+	scope: string,
+	key: string,
+): Promise<ExpenseCreateResponseBody | null> {
+	const [slot] = await tx
+		.select({ body: idempotencyResponses.responseBody, expiresAt: idempotencyResponses.expiresAt })
+		.from(idempotencyResponses)
+		.where(and(eq(idempotencyResponses.scope, scope), eq(idempotencyResponses.key, key)))
+		.limit(1)
+		.for('update');
+	if (!slot) throw new TransactionAbort('idempotency_claim_missing');
+	if (slot.body && typeof slot.body === 'object' && 'expense' in slot.body) {
+		return slot.body as ExpenseCreateResponseBody;
+	}
+	if (
+		slot.expiresAt <= new Date() ||
+		!slot.body ||
+		typeof slot.body !== 'object' ||
+		Array.isArray(slot.body) ||
+		Object.keys(slot.body).length !== 1 ||
+		(slot.body as Record<string, unknown>)._claimed !== true
+	) {
+		throw new TransactionAbort('idempotency_claim_invalid');
+	}
+	return null;
+}
+
+async function findRecurringExpense(
+	tx: DbTransaction,
+	wgId: string,
+	recurringExpenseId: string,
+	recurringDueAt: Date,
+): Promise<{
+	expense: typeof expenses.$inferSelect;
+	splits: (typeof expenseSplits.$inferSelect)[];
+} | null> {
+	const [expense] = await tx
+		.select()
+		.from(expenses)
+		.where(
+			and(
+				eq(expenses.wgId, wgId),
+				eq(expenses.recurringExpenseId, recurringExpenseId),
+				eq(expenses.recurringDueAt, recurringDueAt),
+			),
+		)
+		.limit(1);
+	if (!expense) return null;
+	const splits = await tx
+		.select()
+		.from(expenseSplits)
+		.where(eq(expenseSplits.expenseId, expense.id));
+	return { expense, splits };
+}
+
+async function finalizeExpenseCreateClaim(
+	tx: DbTransaction,
+	scope: string,
+	key: string,
+	body: ExpenseCreateResponseBody,
+): Promise<void> {
+	const rows = await tx
+		.update(idempotencyResponses)
+		.set({
+			responseBody: body,
+			expiresAt: new Date(Date.now() + RESPONSE_REPLAY_TTL_SECONDS * 1000),
+		})
+		.where(
+			and(
+				eq(idempotencyResponses.scope, scope),
+				eq(idempotencyResponses.key, key),
+				gt(idempotencyResponses.expiresAt, new Date()),
+				sql`${idempotencyResponses.responseBody} = '{"_claimed":true}'::jsonb`,
+			),
+		)
+		.returning({ scope: idempotencyResponses.scope });
+	if (rows.length !== 1) throw new TransactionAbort('idempotency_claim_missing');
+}
+
+function expenseCreateAbortResponse(error: unknown): NextResponse | null {
+	if (!(error instanceof TransactionAbort)) return null;
+	if (error.code === 'image_removed') return conflict('image_removed', 'image_removed');
+	if (error.code === 'paypal_payment_pending') return conflict('paypal_payment_pending');
+	if (error.code === 'recurring_expense_not_found') return notFound('recurring_expense_not_found');
+	if (error.code === 'abo_paused') return badRequest('abo_paused');
+	if (error.code === 'recurring_expense_already_advanced') {
+		return conflict('recurring_expense_already_advanced');
+	}
+	return null;
+}
+
+function isRecurringDueUniqueViolation(error: unknown): boolean {
+	const cause = error instanceof Error && error.cause !== undefined ? error.cause : error;
+	if (!cause || typeof cause !== 'object') return false;
+	const pgError = cause as { code?: unknown; constraint?: unknown; constraint_name?: unknown };
+	return (
+		pgError.code === '23505' &&
+		(pgError.constraint === 'expenses_recurring_due_unique_idx' ||
+			pgError.constraint_name === 'expenses_recurring_due_unique_idx')
+	);
+}
+
 export const GET = withWgRoute(
 	'expenses GET',
 	async (req, { code }) => {
@@ -117,32 +204,31 @@ export const GET = withWgRoute(
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;
 
-		// Route-level read budget on top of the middleware's per-IP limit: keyed
-		// per member so flatmates behind one NAT share neither the scrape budget
-		// nor the lockout (same rationale as the dashboard throttle).
-		const limited = await checkRateLimit(wgReadLimiter, `expenses:${wgId}:${auth.member.memberId}`);
-		if (!limited.success) return tooMany();
+		// Per-member bucket on top of the middleware's per-IP read limit: this
+		// returns the WG's whole expense history.
+		const limit = await checkRateLimit(
+			expensesReadLimiter,
+			`expenses:${wgId}:${auth.member.memberId}`,
+		);
+		if (!limit.success) return tooMany('rate_limited');
 
-		const { limit, offset } = readPageParams(req);
-		const [rows, totalRows] = await Promise.all([
-			db
-				.select()
-				.from(expenses)
-				.where(eq(expenses.wgId, wgId))
-				.orderBy(desc(expenses.occurredAt), desc(expenses.id))
-				.limit(limit)
-				.offset(offset),
-			db.select({ total: count() }).from(expenses).where(eq(expenses.wgId, wgId)),
-		]);
+		const rows = await db
+			.select()
+			.from(expenses)
+			.where(eq(expenses.wgId, wgId))
+			.orderBy(desc(expenses.occurredAt));
 
-		const pagination = { total: totalRows[0]?.total ?? 0, limit, offset };
-		if (rows.length === 0) return NextResponse.json({ expenses: [], pagination });
+		if (rows.length === 0) return NextResponse.json({ expenses: [] });
 
-		// Bounded by the page limit above (≤ EXPENSES_PAGE_LIMIT_MAX < 65,535),
-		// so this inArray can never exceed Postgres' bind-parameter cap.
-		const expenseIds = rows.map((r) => r.id);
+		// Balances need the full history, so the list stays complete. Splits are
+		// joined by WG instead of `inArray(expenseIds)`: one bind parameter per
+		// expense would exceed PostgreSQL's 65,535-parameter limit for large WGs.
 		const [splits, payments] = await Promise.all([
-			db.select().from(expenseSplits).where(inArray(expenseSplits.expenseId, expenseIds)),
+			db
+				.select(getTableColumns(expenseSplits))
+				.from(expenseSplits)
+				.innerJoin(expenses, eq(expenseSplits.expenseId, expenses.id))
+				.where(eq(expenses.wgId, wgId)),
 			loadCompletedExpensePayments(wgId),
 		]);
 
@@ -159,7 +245,6 @@ export const GET = withWgRoute(
 				splits: splitsByExpense.get(e.id) ?? [],
 			})),
 			payments,
-			pagination,
 		});
 	},
 	{
@@ -200,6 +285,9 @@ export async function POST(
 		if (issues.fieldErrors.currency) return badRequest('currency_invalid');
 		if (issues.fieldErrors.imageUrl) return badRequest('image_invalid');
 		if (issues.fieldErrors.occurredAt) return badRequest('occurred_at_invalid');
+		if (issues.fieldErrors.recurringExpenseId) return badRequest('recurring_expense_invalid');
+		if (issues.fieldErrors.expectedRecurringNextDueAt)
+			return badRequest('recurring_due_at_invalid');
 		if (issues.fieldErrors.splits) {
 			// The schema-level sum check uses the runtime error code as its
 			// message, so the API contract stays identical for clients.
@@ -210,6 +298,12 @@ export async function POST(
 		}
 		return badRequest('invalid_body');
 	}
+	if (
+		(parsed.data.recurringExpenseId === undefined) !==
+		(parsed.data.expectedRecurringNextDueAt === undefined)
+	) {
+		return badRequest('recurring_expense_fields_required');
+	}
 
 	const {
 		amountCents,
@@ -219,6 +313,8 @@ export async function POST(
 		occurredAt: occurredAtStr,
 		splits: validatedSplits,
 		paidByMemberId,
+		recurringExpenseId,
+		expectedRecurringNextDueAt,
 	} = parsed.data;
 
 	const occurredAt = occurredAtStr ? new Date(occurredAtStr) : new Date();
@@ -298,32 +394,44 @@ export async function POST(
 			  };
 		try {
 			written = await withExpensePaymentLock(wg.id, async (tx) => {
+				await assertPrivateImageCanBeAttached(tx, wg.id, safeImageUrl);
 				if (idemScope && idemKey) {
-					const [slot] = await tx
-						.select({
-							body: idempotencyResponses.responseBody,
-							expiresAt: idempotencyResponses.expiresAt,
-						})
-						.from(idempotencyResponses)
+					const replay = await lockExpenseCreateClaim(tx, idemScope, idemKey);
+					if (replay) return { replayed: true as const, body: replay };
+				}
+
+				let recurringDueAt: Date | undefined;
+				if (recurringExpenseId && expectedRecurringNextDueAt) {
+					const expectedDueAt = new Date(expectedRecurringNextDueAt);
+					const existing = await findRecurringExpense(tx, wg.id, recurringExpenseId, expectedDueAt);
+					if (existing) {
+						const body: ExpenseCreateResponseBody = {
+							expense: { ...existing.expense, splits: existing.splits },
+							warning: null,
+						};
+						if (idemScope && idemKey) {
+							await finalizeExpenseCreateClaim(tx, idemScope, idemKey, body);
+						}
+						return { replayed: true as const, body };
+					}
+
+					const [template] = await tx
+						.select()
+						.from(recurringExpenses)
 						.where(
-							and(eq(idempotencyResponses.scope, idemScope), eq(idempotencyResponses.key, idemKey)),
+							and(eq(recurringExpenses.id, recurringExpenseId), eq(recurringExpenses.wgId, wg.id)),
 						)
 						.limit(1)
 						.for('update');
-					if (!slot) throw new TransactionAbort('idempotency_claim_missing');
-					if (slot.body && typeof slot.body === 'object' && 'expense' in slot.body) {
-						return { replayed: true as const, body: slot.body as ExpenseCreateResponseBody };
+					if (!template) throw new TransactionAbort('recurring_expense_not_found');
+					if (template.pausedAt) throw new TransactionAbort('abo_paused');
+					if (template.nextDueAt.getTime() !== expectedDueAt.getTime()) {
+						throw new TransactionAbort('recurring_expense_already_advanced');
 					}
-					if (
-						slot.expiresAt <= new Date() ||
-						!slot.body ||
-						typeof slot.body !== 'object' ||
-						Array.isArray(slot.body) ||
-						Object.keys(slot.body).length !== 1 ||
-						(slot.body as Record<string, unknown>)._claimed !== true
-					) {
-						throw new TransactionAbort('idempotency_claim_invalid');
-					}
+					recurringDueAt = template.nextDueAt;
+				}
+				if (await hasCapturingExpensePayment(tx, wg.id)) {
+					throw new TransactionAbort('paypal_payment_pending');
 				}
 				const created = await insertExpenseWithSplits(tx, {
 					wgId: wg.id,
@@ -334,32 +442,69 @@ export async function POST(
 					imageUrl: safeImageUrl,
 					occurredAt,
 					splits: validatedSplits,
+					...(recurringExpenseId && recurringDueAt ? { recurringExpenseId, recurringDueAt } : {}),
 				});
 				const body: ExpenseCreateResponseBody = {
 					expense: { ...created.expense, splits: created.splits },
 					warning: null,
 				};
 				if (idemScope && idemKey) {
-					const rows = await tx
-						.update(idempotencyResponses)
-						.set({
-							responseBody: body,
-							expiresAt: new Date(Date.now() + RESPONSE_REPLAY_TTL_SECONDS * 1000),
-						})
-						.where(
-							and(
-								eq(idempotencyResponses.scope, idemScope),
-								eq(idempotencyResponses.key, idemKey),
-								gt(idempotencyResponses.expiresAt, new Date()),
-								sql`${idempotencyResponses.responseBody} = '{"_claimed":true}'::jsonb`,
-							),
-						)
-						.returning({ scope: idempotencyResponses.scope });
-					if (rows.length !== 1) throw new TransactionAbort('idempotency_claim_missing');
+					await finalizeExpenseCreateClaim(tx, idemScope, idemKey, body);
 				}
 				return { replayed: false as const, expense: created.expense, body };
 			});
 		} catch (writeErr) {
+			if (
+				recurringExpenseId &&
+				expectedRecurringNextDueAt &&
+				isRecurringDueUniqueViolation(writeErr)
+			) {
+				const replayed = await withExpensePaymentLock(wg.id, async (tx) => {
+					if (idemScope && idemKey) {
+						const replay = await lockExpenseCreateClaim(tx, idemScope, idemKey);
+						if (replay) return replay;
+					}
+					const existing = await findRecurringExpense(
+						tx,
+						wg.id,
+						recurringExpenseId,
+						new Date(expectedRecurringNextDueAt),
+					);
+					if (!existing) return null;
+					const body: ExpenseCreateResponseBody = {
+						expense: { ...existing.expense, splits: existing.splits },
+						warning: null,
+					};
+					if (idemScope && idemKey) {
+						await finalizeExpenseCreateClaim(tx, idemScope, idemKey, body);
+					}
+					return body;
+				});
+				if (replayed) {
+					replayReservation?.resolve(replayed);
+					return NextResponse.json(replayed);
+				}
+			}
+
+			const recurringErrorResponse = expenseCreateAbortResponse(writeErr);
+			if (recurringErrorResponse) {
+				if (idemScope && idemKey) {
+					await withExpensePaymentLock(wg.id, async (tx) => {
+						await tx
+							.delete(idempotencyResponses)
+							.where(
+								and(
+									eq(idempotencyResponses.scope, idemScope),
+									eq(idempotencyResponses.key, idemKey),
+									sql`${idempotencyResponses.responseBody} = '{"_claimed":true}'::jsonb`,
+								),
+							);
+					});
+				}
+				replayReservation?.reject(writeErr);
+				return recurringErrorResponse;
+			}
+
 			replayReservation?.reject(writeErr);
 			if (writeErr instanceof TransactionAbort) return serverError(writeErr.code);
 			throw writeErr;
@@ -409,6 +554,8 @@ export async function POST(
 		return NextResponse.json(responseBody);
 	} catch (err) {
 		replayReservation?.reject(err);
+		const recurringErrorResponse = expenseCreateAbortResponse(err);
+		if (recurringErrorResponse) return recurringErrorResponse;
 		logApiError('[expenses POST]', err);
 		return serverError(err);
 	}

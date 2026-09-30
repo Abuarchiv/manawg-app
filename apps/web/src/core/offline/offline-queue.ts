@@ -82,9 +82,12 @@ interface QueuedShoppingInput extends QueuedIdentityInput {
 }
 
 interface QueuedShoppingUpdateInput extends QueuedIdentityInput {
+	idempotencyKey?: string;
 	itemId: string;
 	name: string;
 	bought: boolean;
+	expectedUpdatedAt: string;
+	expectedBoughtAt: string | null;
 	now?: number;
 }
 
@@ -99,6 +102,8 @@ interface QueuedAnnouncementInput extends QueuedIdentityInput {
 interface QueuedChoreCompletionInput extends QueuedIdentityInput {
 	idempotencyKey?: string;
 	choreId: string;
+	expectedNextDueAt: string;
+	expectedAssignedMemberId: string | null;
 	now?: number;
 }
 
@@ -257,8 +262,15 @@ export function createQueuedShoppingUpdate(input: QueuedShoppingUpdateInput): Of
 		input.wgId,
 		input.shareCode,
 		input.memberId,
-		{ itemId: input.itemId, name: input.name, bought: input.bought },
+		{
+			itemId: input.itemId,
+			name: input.name,
+			bought: input.bought,
+			expectedUpdatedAt: input.expectedUpdatedAt,
+			expectedBoughtAt: input.expectedBoughtAt,
+		},
 		now,
+		input.idempotencyKey,
 	);
 }
 
@@ -286,7 +298,11 @@ export function createQueuedChoreCompletion(input: QueuedChoreCompletionInput): 
 		input.wgId,
 		input.shareCode,
 		input.memberId,
-		{ choreId: input.choreId },
+		{
+			choreId: input.choreId,
+			expectedNextDueAt: input.expectedNextDueAt,
+			expectedAssignedMemberId: input.expectedAssignedMemberId,
+		},
 		now,
 		input.idempotencyKey,
 	);
@@ -406,6 +422,52 @@ export function getOfflineActionRequest(action: OfflineAction): OfflineActionReq
 	return offlineActionHandlers[action.type].buildRequest(action);
 }
 
+export function hasQueuedShoppingUpdate(
+	actions: readonly OfflineAction[],
+	shareCode: string,
+	memberId: string,
+	itemId: string,
+): boolean {
+	return actions.some(
+		(action) =>
+			action.type === 'shopping.update' &&
+			action.shareCode === shareCode &&
+			action.memberId === memberId &&
+			action.payload.itemId === itemId,
+	);
+}
+
+const QUEUED_CREATE_ID_RE = /^(?:shopping|chore-create|absence):[^:]+:\d+:/;
+
+/**
+ * True for the synthetic id of a create made offline (e.g.
+ * `shopping:<code>:<ms>:<slug>`). The server never issues such ids, so a row
+ * carrying one is local-only even after its queue entry was discarded.
+ */
+export function isQueuedCreateId(id: string): boolean {
+	return QUEUED_CREATE_ID_RE.test(id);
+}
+
+/**
+ * Returns the queue without the queued create `id` of this WG and without
+ * follow-up actions that target it, or `null` when no such entry is queued.
+ */
+export function withoutQueuedEntry(
+	actions: readonly OfflineAction[],
+	shareCode: string,
+	id: string,
+): OfflineAction[] | null {
+	const sameWg = (action: OfflineAction) => action.shareCode === shareCode;
+	if (!actions.some((action) => sameWg(action) && action.id === id)) return null;
+	return actions.filter(
+		(action) =>
+			!(
+				sameWg(action) &&
+				(action.id === id || action.payload.itemId === id || action.payload.choreId === id)
+			),
+	);
+}
+
 export function getOfflineActionSummary(action: OfflineAction): OfflineActionSummary {
 	return offlineActionHandlers[action.type].summary(action);
 }
@@ -434,7 +496,11 @@ const offlineActionHandlers: Record<OfflineActionType, OfflineActionHandler> = {
 		buildRequest: (action) => ({
 			path: `/api/wg/${pathSegment(action.shareCode)}/shopping/${pathSegment(action.payload.itemId)}`,
 			method: 'PATCH',
-			body: { bought: action.payload.bought },
+			body: {
+				bought: action.payload.bought,
+				expectedUpdatedAt: action.payload.expectedUpdatedAt,
+				expectedBoughtAt: action.payload.expectedBoughtAt,
+			},
 		}),
 		summary: (action) => ({
 			title: 'Einkauf',
@@ -504,7 +570,10 @@ const offlineActionHandlers: Record<OfflineActionType, OfflineActionHandler> = {
 		buildRequest: (action) => ({
 			path: `/api/wg/${pathSegment(action.shareCode)}/chores/${pathSegment(action.payload.choreId)}/complete`,
 			method: 'POST',
-			body: {},
+			body: {
+				expectedNextDueAt: action.payload.expectedNextDueAt,
+				expectedAssignedMemberId: action.payload.expectedAssignedMemberId,
+			},
 		}),
 		summary: () => ({
 			title: 'Putzplan',
@@ -518,16 +587,11 @@ const offlineActionHandlers: Record<OfflineActionType, OfflineActionHandler> = {
 
 	'expense.create': {
 		buildRequest: (action) => {
-			const {
-				recurringExpenseId: _recurringExpenseId,
-				expectedRecurringNextDueAt: _expectedRecurringNextDueAt,
-				...expensePayload
-			} = action.payload;
 			return {
 				path: `/api/wg/${pathSegment(action.shareCode)}/expenses`,
 				method: 'POST',
 				body: Object.fromEntries(
-					Object.entries(expensePayload).filter(([, value]) => value !== null),
+					Object.entries(action.payload).filter(([, value]) => value !== null),
 				),
 			};
 		},
@@ -643,6 +707,20 @@ export function explainOfflineActionFailure(
 			title: 'Einkauf fehlt',
 			detail:
 				'Der Artikel existiert nicht mehr. Entferne diese Offline-Aktion oder lege den Einkauf neu an.',
+		};
+	}
+	if (error === 'shopping_item_changed') {
+		return {
+			title: 'Einkaufsstatus geändert',
+			detail:
+				'Jemand hat den Artikel inzwischen geändert. Prüfe den aktuellen Stand, bevor du die Aktion neu anlegst.',
+		};
+	}
+	if (error === 'chore_occurrence_changed') {
+		return {
+			title: 'Putztermin geändert',
+			detail:
+				'Der Termin wurde inzwischen erledigt oder neu zugewiesen. Prüfe den aktuellen Plan, bevor du die Aktion neu anlegst.',
 		};
 	}
 	if (error === 'chore_not_found') {

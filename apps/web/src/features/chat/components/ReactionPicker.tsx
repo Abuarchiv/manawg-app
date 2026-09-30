@@ -8,7 +8,6 @@ import {
 	DrawerDescription,
 	DrawerHeader,
 	DrawerTitle,
-	DrawerTrigger,
 } from '@/components/ui/drawer';
 import { Field, FieldLabel } from '@/components/ui/field';
 import {
@@ -19,19 +18,24 @@ import {
 } from '@/components/ui/input-group';
 import { Spinner } from '@/components/ui/spinner';
 import { haptic } from '@/shared/lib/haptics';
-import { Smile } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { type RefObject, useRef, useState } from 'react';
 
 const QUICK_EMOJIS = ['👍', '❤️', '😂', '🎉', '🙏', '🔥', '😢', '👀'] as const;
 
 interface ReactionPickerProps {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
 	onSelect: (emoji: string) => Promise<boolean>;
-	triggerLabel?: string;
-	disabled?: boolean;
+	/** Wird aus einem Menü geöffnet; danach geht der Fokus dorthin zurück. */
+	returnFocusRef: RefObject<HTMLElement | null>;
 }
 
-export function ReactionPicker({ onSelect, triggerLabel, disabled }: ReactionPickerProps) {
-	const [open, setOpen] = useState(false);
+export function ReactionPicker({
+	open,
+	onOpenChange: setOpen,
+	onSelect,
+	returnFocusRef,
+}: ReactionPickerProps) {
 	const [custom, setCustom] = useState('');
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState(false);
@@ -65,14 +69,7 @@ export function ReactionPicker({ onSelect, triggerLabel, disabled }: ReactionPic
 				}
 			}}
 		>
-			<DrawerTrigger
-				render={<Button variant="ghost" size="icon" />}
-				disabled={disabled}
-				aria-label={triggerLabel ?? 'Reaktion hinzufügen'}
-			>
-				<Smile aria-hidden />
-			</DrawerTrigger>
-			<DrawerContent>
+			<DrawerContent finalFocus={returnFocusRef}>
 				<DrawerHeader>
 					<DrawerTitle>Reaktion wählen</DrawerTitle>
 					<DrawerDescription>Ein Emoji für diese Nachricht.</DrawerDescription>

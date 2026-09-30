@@ -1,14 +1,41 @@
 'use client';
 
 import { cn } from '@/shared/lib/cn';
+import { useDismissOnBack } from '@/shared/lib/use-dismiss-on-back';
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog';
-import type * as React from 'react';
+import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { XIcon } from 'lucide-react';
 
-function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-	return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+function Dialog({
+	open: openProp,
+	defaultOpen = false,
+	onOpenChange,
+	actionsRef: _ignoredActionsRef,
+	...props
+}: DialogPrimitive.Root.Props) {
+	// Back-button dismissal needs the primitive's imperative close() action, so
+	// this wrapper always owns actionsRef (no caller uses it today).
+	const actionsRef = React.useRef<DialogPrimitive.Root.Actions>(null);
+	const [uncontrolledOpen, setUncontrolledOpen] = React.useState(defaultOpen);
+	const open = openProp ?? uncontrolledOpen;
+
+	useDismissOnBack(open, actionsRef);
+
+	return (
+		<DialogPrimitive.Root
+			data-slot="dialog"
+			open={openProp}
+			defaultOpen={defaultOpen}
+			actionsRef={actionsRef}
+			onOpenChange={(nextOpen, eventDetails) => {
+				setUncontrolledOpen(nextOpen);
+				onOpenChange?.(nextOpen, eventDetails);
+			}}
+			{...props}
+		/>
+	);
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { setupMember } from './_helpers';
 
 test.skip(process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true', 'requires local fixture server');
 
@@ -8,6 +9,7 @@ for (const colorScheme of ['light'] as const) {
 	}) => {
 		await page.setViewportSize({ width: 320, height: 740 });
 		await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' });
+		await setupMember(page);
 		const member = { id: '0ab8c8f2-5d03-4a84-aadc-4c5d7e8abf55', name: 'Test', active: true };
 		await page.route('**/api/wg/MTE8PZAT', (route) =>
 			route.fulfill({ json: { currentMember: { memberId: member.id, name: member.name } } }),

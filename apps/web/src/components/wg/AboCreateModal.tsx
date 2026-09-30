@@ -22,7 +22,7 @@ export function AboCreateModal({
 	onSubmit,
 }: AboCreateModalProps) {
 	return (
-		<AboModalShell title="Neues Abo" onClose={onClose} submitting={submitting}>
+		<AboModalShell title="Neue Fixkosten" onClose={onClose} submitting={submitting}>
 			{(requestClose) => (
 				<AboForm
 					mode="create"

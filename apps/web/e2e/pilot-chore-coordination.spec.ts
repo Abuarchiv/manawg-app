@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 test.setTimeout(120_000);
@@ -36,7 +37,12 @@ test('completing a chore resolves only its linked swap post and shows the next d
 		});
 		expect(response.ok()).toBe(true);
 		return (await response.json()) as {
-			chore: { id: string; nextDueAt: string; createdAt: string };
+			chore: {
+				id: string;
+				nextDueAt: string;
+				assignedMemberId: string | null;
+				createdAt: string;
+			};
 		};
 	};
 
@@ -58,14 +64,36 @@ test('completing a chore resolves only its linked swap post and shows the next d
 
 		const linkedSourcePath = `/putzen?highlight=${encodeURIComponent(choreId)}`;
 		const unrelatedSourcePath = `/putzen?highlight=${encodeURIComponent(otherChoreId)}`;
-		for (const swapChoreId of [choreId, otherChoreId]) {
-			const swapResponse = await request.post(
-				`/api/wg/${shareCode}/chores/${encodeURIComponent(swapChoreId)}/swap-request`,
-			);
-			expect(swapResponse.ok()).toBe(true);
-			const swapBody = (await swapResponse.json()) as { announcement: { id: string } };
-			createdAnnouncementIds.push(swapBody.announcement.id);
-		}
+		const linkedSwapEndpoint = `/api/wg/${shareCode}/chores/${encodeURIComponent(choreId)}/swap-request`;
+		const keylessSwapResponse = await request.post(linkedSwapEndpoint);
+		expect(keylessSwapResponse.status()).toBe(400);
+		expect(await keylessSwapResponse.json()).toMatchObject({ error: 'idempotency_key_required' });
+		const linkedIdempotencyKey = randomUUID();
+		const linkedSwapResponse = await request.post(linkedSwapEndpoint, {
+			headers: { 'Idempotency-Key': linkedIdempotencyKey },
+		});
+		expect(linkedSwapResponse.ok()).toBe(true);
+		const linkedSwapBody = (await linkedSwapResponse.json()) as { announcement: { id: string } };
+		createdAnnouncementIds.push(linkedSwapBody.announcement.id);
+
+		const replayedSwapResponse = await request.post(linkedSwapEndpoint, {
+			headers: { 'Idempotency-Key': linkedIdempotencyKey },
+		});
+		expect(replayedSwapResponse.ok()).toBe(true);
+		const replayedSwapBody = (await replayedSwapResponse.json()) as {
+			announcement: { id: string };
+		};
+		expect(replayedSwapBody.announcement.id).toBe(linkedSwapBody.announcement.id);
+
+		const unrelatedSwapResponse = await request.post(
+			`/api/wg/${shareCode}/chores/${encodeURIComponent(otherChoreId)}/swap-request`,
+			{ headers: { 'Idempotency-Key': randomUUID() } },
+		);
+		expect(unrelatedSwapResponse.ok()).toBe(true);
+		const unrelatedSwapBody = (await unrelatedSwapResponse.json()) as {
+			announcement: { id: string };
+		};
+		createdAnnouncementIds.push(unrelatedSwapBody.announcement.id);
 
 		const manualResponse = await request.post(`/api/wg/${shareCode}/announcements`, {
 			data: { content: `${title} manueller Beitrag`, kind: 'info' },
@@ -76,6 +104,12 @@ test('completing a chore resolves only its linked swap post and shows the next d
 
 		const completeResponse = await request.post(
 			`/api/wg/${shareCode}/chores/${encodeURIComponent(choreId)}/complete`,
+			{
+				data: {
+					expectedNextDueAt: choreBody.chore.nextDueAt,
+					expectedAssignedMemberId: choreBody.chore.assignedMemberId,
+				},
+			},
 		);
 		expect(completeResponse.ok()).toBe(true);
 
@@ -145,7 +179,7 @@ test('completing a chore resolves only its linked swap post and shows the next d
 		});
 
 		await page.goto(`/wg/${shareCode}/putzen`);
-		await expect(page.locator(`li#chore-${choreId}`)).toContainText('Nächste Fälligkeit:');
+		await expect(page.locator(`li#chore-${choreId}`)).toContainText('wöchentlich');
 		await page.getByRole('button', { name: 'Putzaufgabe erfassen' }).click();
 		await expect(page.getByText('Erste Fälligkeit: in 7 Tagen.', { exact: false })).toBeVisible();
 	} finally {

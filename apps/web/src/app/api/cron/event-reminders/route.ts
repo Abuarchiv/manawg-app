@@ -1,13 +1,15 @@
-import { db, idempotencyResponses, wgEvents, wgs } from '@/core/db';
+import { db, idempotencyResponses, wgEvents, wgMembers, wgs } from '@/core/db';
 import { verifyCronSecret } from '@/core/infra/cron-auth';
 import { withCronLogging } from '@/core/infra/observability';
 import { dispatchNotification } from '@/core/notifications/notification-dispatch';
+import { startOfBerlinDay } from '@/core/utils/berlin-day';
 import { MS_PER_DAY } from '@/core/utils/time';
 import {
 	EVENT_REMINDER_BUDGET,
+	type EventReminderCopy,
 	collectReminderOccurrences,
 	processReminderBatches,
-	startsInReminderWindow,
+	reminderCopyForOccurrence,
 } from '@/features/events/event-reminder-dispatch';
 import {
 	buildEventsWindowFilter,
@@ -15,11 +17,12 @@ import {
 	withEventWindowCandidates,
 } from '@/features/events/event-reminder-window';
 import { type EventInput, expandRecurrence } from '@/features/events/events';
-import { and, asc, eq, gt, or } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, lte, or } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 
 const REMINDER_CLAIM_SCOPE = 'event-reminders';
 const REMINDER_CLAIM_TTL_MS = 32 * MS_PER_DAY;
+const REMINDER_CLAIM_LEASE_MS = 60 * 60 * 1000;
 
 interface EventRow {
 	id: string;
@@ -48,35 +51,75 @@ function toEventInput(row: EventRow): EventInput {
 	};
 }
 
-function reminderClaimKey(item: EventRow & { occurrenceStartsAt: string }): string {
+type ReminderDelivery = EventRow & {
+	occurrenceStartsAt: string;
+	occurrenceEndsAt: string | null;
+	memberId: string;
+	reminderCopy: EventReminderCopy;
+};
+
+function legacyReminderClaimKey(
+	item: Pick<EventRow, 'id'> & { occurrenceStartsAt: string },
+): string {
 	return `${item.id}:${item.occurrenceStartsAt}`;
 }
 
-async function claimReminderDispatch(
-	item: EventRow & { occurrenceStartsAt: string },
-	now: Date,
-): Promise<boolean> {
+function reminderClaimKey(item: ReminderDelivery): string {
+	return `${legacyReminderClaimKey(item)}:${item.memberId}`;
+}
+
+async function claimReminderDispatch(item: ReminderDelivery, now: Date): Promise<boolean> {
 	const key = reminderClaimKey(item);
+	const responseBody = {
+		eventId: item.id,
+		occurrenceStartsAt: item.occurrenceStartsAt,
+		occurrenceEndsAt: item.occurrenceEndsAt,
+		memberId: item.memberId,
+	};
 	const inserted = await db
 		.insert(idempotencyResponses)
 		.values({
 			scope: REMINDER_CLAIM_SCOPE,
 			key,
-			responseBody: { eventId: item.id, occurrenceStartsAt: item.occurrenceStartsAt },
-			expiresAt: new Date(now.getTime() + REMINDER_CLAIM_TTL_MS),
+			responseBody,
+			expiresAt: new Date(now.getTime() + REMINDER_CLAIM_LEASE_MS),
 		})
-		.onConflictDoNothing()
+		.onConflictDoUpdate({
+			target: [idempotencyResponses.scope, idempotencyResponses.key],
+			set: { responseBody, expiresAt: new Date(now.getTime() + REMINDER_CLAIM_LEASE_MS) },
+			where: lte(idempotencyResponses.expiresAt, now),
+		})
 		.returning({ key: idempotencyResponses.key });
 
 	return inserted.length > 0;
 }
 
+async function keepReminderDispatchClaim(item: ReminderDelivery, now: Date): Promise<void> {
+	const occurrenceEndMs = Date.parse(item.occurrenceEndsAt ?? item.occurrenceStartsAt);
+	const expiresAt = new Date(
+		Math.max(now.getTime(), Number.isFinite(occurrenceEndMs) ? occurrenceEndMs : now.getTime()) +
+			REMINDER_CLAIM_TTL_MS,
+	);
+	await db
+		.update(idempotencyResponses)
+		.set({ expiresAt })
+		.where(
+			and(
+				eq(idempotencyResponses.scope, REMINDER_CLAIM_SCOPE),
+				eq(idempotencyResponses.key, reminderClaimKey(item)),
+			),
+		);
+}
+
 /** Free the claim so a failed dispatch retries on the next cron run. */
-async function releaseReminderDispatchClaim(key: string): Promise<void> {
+async function releaseReminderDispatchClaim(item: ReminderDelivery): Promise<void> {
 	await db
 		.delete(idempotencyResponses)
 		.where(
-			and(eq(idempotencyResponses.scope, REMINDER_CLAIM_SCOPE), eq(idempotencyResponses.key, key)),
+			and(
+				eq(idempotencyResponses.scope, REMINDER_CLAIM_SCOPE),
+				eq(idempotencyResponses.key, reminderClaimKey(item)),
+			),
 		);
 }
 
@@ -90,10 +133,11 @@ export const GET = withCronLogging(
 		}
 
 		const now = new Date();
+		const todayStart = startOfBerlinDay(now);
 		const { start: tomorrowStart, end: tomorrowEnd } = computeTomorrowUtcWindow(now);
 
 		return withEventWindowCandidates(
-			tomorrowStart,
+			todayStart,
 			async (cursor, pageLimit) => {
 				const cursorFilter = cursor
 					? or(
@@ -101,7 +145,7 @@ export const GET = withCronLogging(
 							and(eq(wgEvents.startsAt, cursor.startsAt), gt(wgEvents.id, cursor.id)),
 						)
 					: undefined;
-				const windowFilter = buildEventsWindowFilter(tomorrowStart, tomorrowEnd);
+				const windowFilter = buildEventsWindowFilter(todayStart, tomorrowEnd);
 				const where = cursorFilter ? and(windowFilter, cursorFilter) : windowFilter;
 				return db
 					.select({
@@ -125,40 +169,112 @@ export const GET = withCronLogging(
 			},
 			() => NextResponse.json({ error: 'events_window_too_large' }, { status: 503 }),
 			async (candidateRows) => {
-				const due = collectReminderOccurrences(candidateRows, (row) =>
-					expandRecurrence(toEventInput(row), tomorrowStart, tomorrowEnd)
-						.filter((occ) => startsInReminderWindow(occ, tomorrowStart, tomorrowEnd))
-						.map((occ) => ({ ...row, occurrenceStartsAt: occ.startsAt })),
+				const occurrences = collectReminderOccurrences(candidateRows, (row) =>
+					expandRecurrence(toEventInput(row), todayStart, tomorrowEnd).flatMap((occ) => {
+						const reminderCopy = reminderCopyForOccurrence(
+							occ,
+							now,
+							todayStart,
+							tomorrowStart,
+							tomorrowEnd,
+						);
+						return reminderCopy
+							? [
+									{
+										...row,
+										occurrenceStartsAt: occ.startsAt,
+										occurrenceEndsAt: occ.endsAt,
+										reminderCopy,
+									},
+								]
+							: [];
+					}),
 				);
-				if (due === null) {
+				if (occurrences === null) {
 					return NextResponse.json({ error: 'events_window_too_large' }, { status: 503 });
 				}
 
-				if (due.length === 0) return NextResponse.json({ ok: true, sent: 0 });
+				if (occurrences.length === 0) return NextResponse.json({ ok: true, sent: 0 });
 
-				const sent = await processReminderBatches(
-					due,
+				const legacyKeys = [...new Set(occurrences.map(legacyReminderClaimKey))];
+				const legacyClaims = await db
+					.select({ key: idempotencyResponses.key })
+					.from(idempotencyResponses)
+					.where(
+						and(
+							eq(idempotencyResponses.scope, REMINDER_CLAIM_SCOPE),
+							gt(idempotencyResponses.expiresAt, now),
+							inArray(idempotencyResponses.key, legacyKeys),
+						),
+					);
+				const legacyClaimKeys = new Set(legacyClaims.map((claim) => claim.key));
+				const eligibleOccurrences = occurrences.filter(
+					(occurrence) => !legacyClaimKeys.has(legacyReminderClaimKey(occurrence)),
+				);
+				if (eligibleOccurrences.length === 0) return NextResponse.json({ ok: true, sent: 0 });
+
+				const wgIds = [...new Set(eligibleOccurrences.map((occurrence) => occurrence.wgId))];
+				const members = await db
+					.select({ id: wgMembers.id, wgId: wgMembers.wgId })
+					.from(wgMembers)
+					.where(and(inArray(wgMembers.wgId, wgIds), isNull(wgMembers.deactivatedAt)));
+				const membersByWg = new Map<string, string[]>();
+				for (const member of members) {
+					const memberIds = membersByWg.get(member.wgId) ?? [];
+					memberIds.push(member.id);
+					membersByWg.set(member.wgId, memberIds);
+				}
+
+				const deliveries = collectReminderOccurrences(eligibleOccurrences, (occurrence) =>
+					(membersByWg.get(occurrence.wgId) ?? []).map((memberId) => ({
+						...occurrence,
+						memberId,
+					})),
+				);
+				if (deliveries === null) {
+					return NextResponse.json({ error: 'events_window_too_large' }, { status: 503 });
+				}
+				if (deliveries.length === 0) return NextResponse.json({ ok: true, sent: 0 });
+
+				// ponytail: retry while the occurrence is current; use durable state if recovery after it ends matters.
+				const { sent, failed } = await processReminderBatches(
+					deliveries,
 					(item) => claimReminderDispatch(item, now),
 					async (item) => {
 						try {
-							return await dispatchNotification({
+							// A partial retry may repeat a successful device for this member.
+							// ponytail: per-subscription claims only if that duplication matters.
+							const result = await dispatchNotification({
 								wg: { id: item.wgId, name: item.wgName, shareCode: item.shareCode },
-								event: 'event.upcoming',
+								event: item.reminderCopy === 'today' ? 'event.today' : 'event.upcoming',
+								targetMemberIds: [item.memberId],
 								payload: {
 									eventId: item.id,
 									title: item.title,
 									startsAt: item.occurrenceStartsAt,
+									allDay: item.allDay,
+									ongoing:
+										item.reminderCopy === 'today' &&
+										!item.allDay &&
+										Date.parse(item.occurrenceStartsAt) < now.getTime(),
 								},
 							});
+							if (result.sent > 0 && result.failures.length === 0) {
+								await keepReminderDispatchClaim(item, now);
+							}
+							return result;
 						} catch (err) {
 							console.warn('[event-reminders] notification dispatch failed');
 							return { sent: 0, failures: [err] };
 						}
 					},
-					(item) => releaseReminderDispatchClaim(reminderClaimKey(item)),
+					(item) => releaseReminderDispatchClaim(item),
 				);
 
-				return NextResponse.json({ ok: true, sent });
+				return NextResponse.json(
+					{ ok: failed === 0, sent, failed },
+					{ status: failed > 0 ? 503 : 200 },
+				);
 			},
 			EVENT_REMINDER_BUDGET,
 		);
