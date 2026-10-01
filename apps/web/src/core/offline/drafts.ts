@@ -99,6 +99,7 @@ export function isEmptyModuleDraft(
 			recurringNextDueAt: null,
 			recurringSourceId: null,
 			editingExpense: null,
+			editingRecurringExpenseId: null,
 		},
 		shopping: { name: '', quantity: '', queueEditId: null },
 		announcement: { content: '', kind: 'info', imageUrl: null, queueEditId: null },

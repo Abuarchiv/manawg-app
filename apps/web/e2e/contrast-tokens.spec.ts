@@ -22,25 +22,36 @@ function sampleBoundaryContrast(args: {
 	against?: { selector: string; pseudo?: string };
 }) {
 	function parseToLinearSrgb(str: string) {
-		const oklchM = str.match(/oklch\(([^)]+)\)/);
-		const oklabM = str.match(/oklab\(([^)]+)\)/);
-		const rgbM = str.match(/rgba?\(([^)]+)\)/);
-		const oklchOrOklabM = oklchM ?? oklabM;
-		if (oklchOrOklabM) {
-			const raw = oklchOrOklabM[1];
-			const [main, alphaPart] = raw.split('/').map((s) => s.trim());
-			const nums = main.split(/\s+/).map((s) => Number.parseFloat(s));
-			const a = alphaPart ? Number.parseFloat(alphaPart) : 1;
+		const oklchRaw = str.match(/oklch\(([^)]+)\)/)?.[1];
+		const oklabRaw = str.match(/oklab\(([^)]+)\)/)?.[1];
+		const rgbRaw = str.match(/rgba?\(([^)]+)\)/)?.[1];
+		const colorSpaceRaw = oklchRaw ?? oklabRaw;
+		if (colorSpaceRaw !== undefined) {
+			const slashParts = colorSpaceRaw.split('/');
+			const main = slashParts[0]?.trim();
+			const alphaPart = slashParts[1]?.trim();
+			if (slashParts.length > 2 || main === undefined || (slashParts.length === 2 && !alphaPart)) {
+				return null;
+			}
+			const nums = main.split(/\s+/).map(Number);
+			const alpha = alphaPart === undefined ? 1 : Number(alphaPart);
+			if (nums.length !== 3 || nums.some((value) => !Number.isFinite(value))) return null;
+			if (!Number.isFinite(alpha) || alpha < 0 || alpha > 1) return null;
+			const first = nums[0];
+			const second = nums[1];
+			const third = nums[2];
+			if (first === undefined || second === undefined || third === undefined) return null;
 			let L: number;
 			let A: number;
 			let B: number;
-			if (oklchM) {
-				const [l, c, h] = nums;
-				L = l;
-				A = c * Math.cos((h * Math.PI) / 180);
-				B = c * Math.sin((h * Math.PI) / 180);
+			if (oklchRaw !== undefined) {
+				L = first;
+				A = second * Math.cos((third * Math.PI) / 180);
+				B = second * Math.sin((third * Math.PI) / 180);
 			} else {
-				[L, A, B] = nums;
+				L = first;
+				A = second;
+				B = third;
 			}
 			const l_ = L + 0.3963377774 * A + 0.2158037573 * B;
 			const m_ = L - 0.1055613458 * A - 0.0638541728 * B;
@@ -51,19 +62,42 @@ function sampleBoundaryContrast(args: {
 			const r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
 			const g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
 			const b = -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s;
-			return { r, g, b, a };
+			if (![r, g, b].every(Number.isFinite)) return null;
+			return { r, g, b, a: alpha };
 		}
-		if (rgbM) {
-			const parts = rgbM[1].split(',').map((s) => Number.parseFloat(s.trim()));
+		if (rgbRaw !== undefined) {
+			const parts = rgbRaw.split(',').map((part) => Number(part.trim()));
+			if (parts.length !== 3 && parts.length !== 4) return null;
+			const red = parts[0];
+			const green = parts[1];
+			const blue = parts[2];
+			const alpha = parts.length === 4 ? parts[3] : 1;
+			if (
+				red === undefined ||
+				green === undefined ||
+				blue === undefined ||
+				alpha === undefined ||
+				![red, green, blue, alpha].every(Number.isFinite) ||
+				red < 0 ||
+				red > 255 ||
+				green < 0 ||
+				green > 255 ||
+				blue < 0 ||
+				blue > 255 ||
+				alpha < 0 ||
+				alpha > 1
+			) {
+				return null;
+			}
 			const srgbToLinear = (v: number) => {
 				const c = v / 255;
 				return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
 			};
 			return {
-				r: srgbToLinear(parts[0]),
-				g: srgbToLinear(parts[1]),
-				b: srgbToLinear(parts[2]),
-				a: parts.length > 3 ? parts[3] : 1,
+				r: srgbToLinear(red),
+				g: srgbToLinear(green),
+				b: srgbToLinear(blue),
+				a: alpha,
 			};
 		}
 		return null;
@@ -181,6 +215,15 @@ for (const scheme of ['light', 'dark'] as const) {
 		const unchecked = page.getByRole('switch', { name: 'Ausgaben', exact: true });
 		await expect(checked).toBeChecked();
 		await expect(unchecked).not.toBeChecked();
+		await Promise.all(
+			[checked, unchecked].map((switchControl) =>
+				switchControl.evaluate(async (element) => {
+					const thumb = element.querySelector<HTMLElement>('[data-slot="switch-thumb"]');
+					if (!thumb) throw new Error('Switch thumb must be present');
+					await Promise.all(thumb.getAnimations().map((animation) => animation.finished));
+				}),
+			),
+		);
 
 		for (const [label, expectChecked] of [
 			['Putzplan', true],

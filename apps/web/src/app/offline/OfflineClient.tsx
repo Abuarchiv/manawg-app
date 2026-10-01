@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Item, ItemContent, ItemDescription, ItemGroup, ItemTitle } from '@/components/ui/item';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
+import { hasSupabaseEnv } from '@/core/auth/env';
 import { readOfflineQueue, syncOfflineActions } from '@/core/offline/offline-client';
 import {
 	formatManualOfflineSyncResult,
@@ -94,20 +95,30 @@ export function OfflineClient() {
 	const [message, setMessage] = useState<string | null>(null);
 	const [status, setStatus] = useState<OfflineStatus>('checking');
 	const syncingRef = useRef(false);
+	const refreshGenerationRef = useRef(0);
+	const authObserverReadyRef = useRef(false);
+	const authObserverBootstrapInFlightRef = useRef(false);
+	const startAuthObserverRef = useRef<() => void>(() => {});
 
 	const refresh = useCallback(async (): Promise<OfflineAction[]> => {
+		const generation = ++refreshGenerationRef.current;
 		const browserOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 		setOnline(!browserOffline);
 		setMessage(null);
+		setKnownWgs([]);
+		setQueue([]);
+		setStatus('checking');
 		if (browserOffline) {
-			const localQueue = readOfflineQueue();
-			setKnownWgs(getKnownWgs());
-			setQueue(localQueue);
 			setStatus('browser-offline');
-			return localQueue;
+			return [];
+		}
+		if (!authObserverReadyRef.current) {
+			startAuthObserverRef.current();
+			return [];
 		}
 		try {
 			const memberships = await getAccountMemberships();
+			if (generation !== refreshGenerationRef.current) return [];
 			if (!memberships) {
 				setKnownWgs([]);
 				setQueue([]);
@@ -124,24 +135,77 @@ export function OfflineClient() {
 			setStatus('ready');
 			return nextQueue;
 		} catch {
-			const localQueue = readOfflineQueue();
-			setKnownWgs(getKnownWgs());
-			setQueue(localQueue);
+			if (generation !== refreshGenerationRef.current) return [];
 			setStatus('server-unreachable');
-			return localQueue;
+			return [];
 		}
 	}, []);
 
 	useEffect(() => {
-		void refresh();
 		const refreshOnEvent = () => void refresh();
 		window.addEventListener('online', refreshOnEvent);
 		window.addEventListener('offline', refreshOnEvent);
+		window.addEventListener('focus', refreshOnEvent);
 		window.addEventListener('manawg:offline-queue', refreshOnEvent);
+		let cancelled = false;
+		let authSubscription: { unsubscribe: () => void } | undefined;
+		const startAuthObserver = () => {
+			if (cancelled || authObserverReadyRef.current || authObserverBootstrapInFlightRef.current) {
+				return;
+			}
+			authObserverBootstrapInFlightRef.current = true;
+			if (!hasSupabaseEnv()) {
+				authObserverReadyRef.current = true;
+				authObserverBootstrapInFlightRef.current = false;
+				void refresh();
+				return;
+			}
+			void import('@/core/auth/client')
+				.then(({ createSupabaseBrowserClient }) => {
+					if (cancelled) return;
+					try {
+						const { data } = createSupabaseBrowserClient().auth.onAuthStateChange((event) => {
+							if (cancelled) return;
+							if (event !== 'INITIAL_SESSION' && event !== 'SIGNED_IN' && event !== 'SIGNED_OUT') {
+								return;
+							}
+							authObserverReadyRef.current = true;
+							authObserverBootstrapInFlightRef.current = false;
+							if (event !== 'INITIAL_SESSION') {
+								refreshGenerationRef.current += 1;
+								setKnownWgs([]);
+								setQueue([]);
+								setMessage(null);
+								setStatus('checking');
+							}
+							void refresh();
+						});
+						authSubscription = data.subscription;
+					} catch {
+						authObserverBootstrapInFlightRef.current = false;
+						setStatus('server-unreachable');
+					}
+				})
+				.catch(() => {
+					if (!cancelled) {
+						authObserverBootstrapInFlightRef.current = false;
+						setStatus('server-unreachable');
+					}
+				});
+		};
+		startAuthObserverRef.current = startAuthObserver;
+		startAuthObserver();
 		return () => {
+			cancelled = true;
+			authObserverReadyRef.current = false;
+			authObserverBootstrapInFlightRef.current = false;
+			startAuthObserverRef.current = () => {};
+			refreshGenerationRef.current += 1;
 			window.removeEventListener('online', refreshOnEvent);
 			window.removeEventListener('offline', refreshOnEvent);
+			window.removeEventListener('focus', refreshOnEvent);
 			window.removeEventListener('manawg:offline-queue', refreshOnEvent);
+			authSubscription?.unsubscribe();
 		};
 	}, [refresh]);
 
@@ -176,12 +240,18 @@ export function OfflineClient() {
 		status === 'checking'
 			? 'Einen Moment, wir prüfen deine Verbindung und dein Konto.'
 			: status === 'browser-offline'
-				? 'Deine lokal gespeicherten Aktionen bleiben sichtbar. Sobald du wieder online bist, kannst du sie synchronisieren.'
+				? 'Deine lokalen Aktionen bleiben gespeichert. Details erscheinen, sobald die Verbindung dein Konto bestätigen kann.'
 				: status === 'server-unreachable'
-					? 'Der Server antwortet gerade nicht. Deine lokal gespeicherten Aktionen bleiben erhalten; versuche es später erneut.'
+					? 'Der Server antwortet gerade nicht. Deine Aktionen bleiben gespeichert; Details erscheinen nach der Konto-Prüfung.'
 					: status === 'unauthenticated'
 						? 'Offline-Aktionen und gemerkte WGs hängen an deinem Konto.'
 						: 'ManaWG speichert vorbereitete Aktionen auf diesem Gerät. Sobald das Netz zurück ist, kannst du sie synchronisieren und in deine WG zurückspringen.';
+	const queueDescription =
+		status === 'checking' || status === 'browser-offline' || status === 'server-unreachable'
+			? 'Wartende Aktionen werden nach der Konto-Prüfung angezeigt.'
+			: status === 'unauthenticated'
+				? 'Melde dich an, um Offline-Aktionen zu prüfen.'
+				: formatQueuedActionCount(queue.length);
 
 	async function syncNow() {
 		if (syncingRef.current || queue.length === 0) return;
@@ -305,9 +375,7 @@ export function OfflineClient() {
 							>
 								Warteschlange
 							</h2>
-							<p className="mt-1 text-sm text-muted-foreground">
-								{formatQueuedActionCount(queue.length)}
-							</p>
+							<p className="mt-1 text-sm text-muted-foreground">{queueDescription}</p>
 						</div>
 					</div>
 					{recentQueue.length > 0 && (
@@ -374,8 +442,11 @@ export function OfflineClient() {
 					<div className="space-y-2">
 						{knownWgs.length === 0 ? (
 							<p className="text-sm leading-relaxed text-muted-foreground">
-								Noch keine WG auf diesem Gerät gemerkt. Sobald du wieder online bist, kannst du mit
-								deinem Code erneut beitreten.
+								{status === 'checking' ||
+								status === 'browser-offline' ||
+								status === 'server-unreachable'
+									? 'Gespeicherte WGs werden angezeigt, sobald dein Konto bestätigt ist.'
+									: 'Noch keine WG auf diesem Gerät gemerkt. Sobald du wieder online bist, kannst du mit deinem Code erneut beitreten.'}
 							</p>
 						) : (
 							<ItemGroup aria-label="Bekannte WGs">

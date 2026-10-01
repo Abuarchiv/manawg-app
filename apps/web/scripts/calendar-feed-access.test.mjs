@@ -1,11 +1,27 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
+import { createRequire, registerHooks } from 'node:module';
 import path from 'node:path';
 import test from 'node:test';
+import { pathToFileURL } from 'node:url';
 
 const requireFromWeb = createRequire(path.join(process.cwd(), 'package.json'));
 const { ModuleKind, ScriptTarget, transpileModule } = requireFromWeb('typescript');
+registerHooks({
+	resolve(specifier, context, nextResolve) {
+		return specifier.startsWith('@/')
+			? nextResolve(
+					pathToFileURL(path.resolve(process.cwd(), 'src', `${specifier.slice(2)}.ts`)).href,
+					context,
+				)
+			: nextResolve(specifier, context);
+	},
+});
+const [{ expandRecurrence }, { calendarFeedToIcs }, berlinDays] = await Promise.all([
+	import('../src/features/events/events.ts'),
+	import('../src/features/events/ics.ts'),
+	import('../src/core/utils/berlin-day.ts'),
+]);
 const routePath = path.join(process.cwd(), 'src/app/api/calendar/[id]/[token]/route.ts');
 const id = '11111111-1111-4111-8111-111111111111';
 const wgId = '22222222-2222-4222-8222-222222222222';
@@ -19,14 +35,20 @@ const wgMembers = { id: 'id', authUserId: 'authUserId', deactivatedAt: 'deactiva
 const wgs = { id: 'id' };
 const wgEvents = { wgId: 'wgId', startsAt: 'startsAt' };
 
-function harness({ authUserId = 'auth-user', deactivatedAt = null, revokedAt = null } = {}) {
+function harness({
+	authUserId = 'auth-user',
+	deactivatedAt = null,
+	revokedAt = null,
+	events,
+	now = '2026-09-26T12:00:00.000Z',
+} = {}) {
 	const state = {
 		authUserId,
 		deactivatedAt,
 		revokedAt,
 		wgExists: true,
 		steps: [],
-		events: [
+		events: events ?? [
 			{
 				id: 'event-1',
 				title: 'Other member event',
@@ -101,15 +123,16 @@ function harness({ authUserId = 'auth-user', deactivatedAt = null, revokedAt = n
 			wgReadLimiter: {},
 		},
 		'@/core/utils/time': { MS_PER_DAY: 86_400_000 },
+		'@/core/utils/berlin-day': berlinDays,
 		'@/features/events/calendar-subscription': {
 			isCalendarFeedToken: () => true,
 			verifyCalendarFeedToken: (_id, seed, token) => seed === 'seed' && token === 'valid',
 		},
 		'@/features/events/events': {
-			expandRecurrence: (event) => [event],
+			expandRecurrence,
 		},
 		'@/features/events/ics': {
-			calendarFeedToIcs: (events) => events.map((event) => event.title).join('\n'),
+			calendarFeedToIcs,
 		},
 		'drizzle-orm': {
 			and: (...parts) => ({ kind: 'and', parts }),
@@ -129,10 +152,21 @@ function harness({ authUserId = 'auth-user', deactivatedAt = null, revokedAt = n
 		},
 	}).outputText;
 	const module = { exports: {} };
-	new Function('require', 'module', 'exports', compiled)(
+	const runtimeDate = now
+		? class extends Date {
+				constructor(...args) {
+					super(...(args.length === 0 ? [now] : args));
+				}
+				static now() {
+					return new Date(now).getTime();
+				}
+			}
+		: Date;
+	new Function('require', 'module', 'exports', 'Date', compiled)(
 		(name) => (Object.hasOwn(mocks, name) ? mocks[name] : requireFromWeb(name)),
 		module,
 		module.exports,
+		runtimeDate,
 	);
 	const request = new Request(`https://example.test/api/calendar/${id}/valid`);
 	return {
@@ -147,6 +181,33 @@ test('active Auth-linked calendar feed returns events after locking the WG', asy
 	assert.equal(response.status, 200);
 	assert.match(await response.text(), /Other member event/);
 	assert.deepEqual(state.steps, ['wg-lock', 'member-check', 'events']);
+});
+
+test("today's all-day event remains in the ICS feed after its start instant", async () => {
+	const { get } = harness({
+		now: '2026-09-26T12:00:00.000Z',
+		events: [
+			{
+				id: 'today-all-day',
+				title: 'Today all-day event',
+				description: null,
+				startsAt: new Date('2026-09-26T00:00:00.000Z'),
+				endsAt: null,
+				allDay: true,
+				location: null,
+				recurrence: null,
+				createdAt: new Date('2026-09-25T00:00:00.000Z'),
+				updatedAt: new Date('2026-09-25T00:00:00.000Z'),
+			},
+		],
+	});
+
+	const response = await get();
+	const body = await response.text();
+	assert.equal(response.status, 200);
+	assert.match(body, /SUMMARY:Today all-day event/);
+	assert.match(body, /DTSTART;VALUE=DATE:20260926/);
+	assert.match(body, /DTEND;VALUE=DATE:20260927/);
 });
 
 test('detached or deactivated membership cannot use its old calendar URL', async () => {

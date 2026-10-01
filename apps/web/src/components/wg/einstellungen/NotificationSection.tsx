@@ -16,11 +16,7 @@ import {
 } from '@/core/guards/settings-errors';
 import { apiFetch } from '@/core/infra/api-client';
 import { parseQuietHour } from '@/core/notifications/notification-preferences';
-import {
-	persistExistingWebPushSubscription,
-	subscribeWebPush,
-	unsubscribeWebPush,
-} from '@/core/notifications/push-subscribe';
+import { subscribeWebPush, unsubscribeWebPush } from '@/core/notifications/push-subscribe';
 import {
 	formatPushActivationError,
 	formatPushDeactivationError,
@@ -101,7 +97,6 @@ export function NotificationSection({
 	const pendingRef = useRef(false);
 	const notificationRequestKeysRef = useRef(new Map<string, string>());
 	const loadStatusRequestIdRef = useRef(0);
-	const pushResyncAttemptedKeyRef = useRef<string | null>(null);
 	const encodedCode = encodeURIComponent(code);
 
 	const loadStatus = useCallback(async (): Promise<void> => {
@@ -130,44 +125,6 @@ export function NotificationSection({
 	useEffect(() => {
 		void loadStatus();
 	}, [loadStatus]);
-
-	// Reconcile server opt-in when the browser still has a live push subscription.
-	useEffect(() => {
-		let cancelled = false;
-		async function syncPushSubscriptionState(): Promise<void> {
-			if (status?.pushOptIn !== false) return;
-			const resyncKey = `${code}:${memberId}`;
-			if (pushResyncAttemptedKeyRef.current === resyncKey) return;
-			pushResyncAttemptedKeyRef.current = resyncKey;
-			if (typeof window === 'undefined') return;
-			if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-			let subscription: PushSubscription | null = null;
-			try {
-				const registration = await navigator.serviceWorker.getRegistration();
-				if (!registration) return;
-				const sub = await registration.pushManager.getSubscription();
-				if (cancelled) return;
-				if (!sub) return;
-				subscription = sub;
-			} catch {
-				return;
-			}
-			if (!subscription) return;
-			try {
-				await persistExistingWebPushSubscription(code, memberId, subscription, memberToken);
-				if (cancelled) return;
-				setStatus((prev) =>
-					prev && prev.pushOptIn === false ? { ...prev, pushOptIn: true } : prev,
-				);
-			} catch (err) {
-				if (!cancelled) setError(formatPushActivationError(err));
-			}
-		}
-		void syncPushSubscriptionState();
-		return () => {
-			cancelled = true;
-		};
-	}, [code, memberId, memberToken, status?.pushOptIn]);
 
 	async function activatePush() {
 		if (pendingRef.current) return;

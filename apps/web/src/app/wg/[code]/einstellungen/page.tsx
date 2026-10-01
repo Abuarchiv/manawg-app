@@ -52,57 +52,77 @@ export default function EinstellungenPage() {
 	const { wg, members, identity } = useWg();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const wgBaseHref = `/wg/${encodedShareCode}`;
-	const [exportSummary, setExportSummary] =
-		useState<ReturnType<typeof buildExportSummary>>(buildEmptyExportSummary);
-	const [exportSummaryError, setExportSummaryError] = useState<string | null>(null);
+	const exportContextKey = `${wg.id}:${wg.shareCode}:${identity.memberId}`;
+	const [exportState, setExportState] = useState<{
+		contextKey: string;
+		summary: ReturnType<typeof buildExportSummary>;
+		error: string | null;
+	}>(() => ({ contextKey: '', summary: buildEmptyExportSummary(), error: null }));
+	const hasCurrentExportSummary = exportState.contextKey === exportContextKey;
+	const exportSummary = hasCurrentExportSummary ? exportState.summary : buildEmptyExportSummary();
+	const exportSummaryError = hasCurrentExportSummary ? exportState.error : null;
 	const [activeTab, setActiveTab] = useState<SettingsTab>(() =>
 		typeof window === 'undefined' ? 'profile' : getSettingsTabFromHash(window.location.hash),
 	);
 
-	// Load the export summary eagerly on mount, independent of the active tab, so
-	// the Daten tab shows section counts the instant it is opened. Kept in the
-	// page (always mounted) rather than DataTab (conditionally rendered) so the
-	// fetch fires on first paint regardless of which tab is active.
 	useEffect(() => {
-		let cancelled = false;
+		if (activeTab !== 'data') return;
+
+		const controller = new AbortController();
 		async function loadExportSummary(): Promise<void> {
 			try {
 				const response = await fetch(`/api/wg/${encodedShareCode}/export`, {
 					headers: memberAuthHeader(identity.memberId),
+					signal: controller.signal,
 				});
-				if (cancelled) return;
+				if (controller.signal.aborted) return;
 				if (!response.ok) {
-					setExportSummaryError(
-						getWgLoadErrorMessage(
-							'Export-Zusammenfassung',
-							response.status,
-							await readResponseErrorCode(response),
-						),
-					);
+					const errorCode = await readResponseErrorCode(response);
+					if (controller.signal.aborted) return;
+					setExportState({
+						contextKey: exportContextKey,
+						summary: buildEmptyExportSummary(),
+						error: getWgLoadErrorMessage('Export-Zusammenfassung', response.status, errorCode),
+					});
 					return;
 				}
-				setExportSummary(buildExportSummary((await response.json()) as WgExport));
-				setExportSummaryError(null);
+				const data = (await response.json()) as WgExport;
+				if (controller.signal.aborted) return;
+				setExportState({
+					contextKey: exportContextKey,
+					summary: buildExportSummary(data),
+					error: null,
+				});
 			} catch {
-				if (!cancelled) {
-					setExportSummaryError(
-						getWgLoadErrorMessage('Export-Zusammenfassung', 0, 'Netzwerkfehler'),
-					);
+				if (!controller.signal.aborted) {
+					setExportState({
+						contextKey: exportContextKey,
+						summary: buildEmptyExportSummary(),
+						error: getWgLoadErrorMessage('Export-Zusammenfassung', 0, 'Netzwerkfehler'),
+					});
 				}
 			}
 		}
 		void loadExportSummary();
-		return () => {
-			cancelled = true;
-		};
-	}, [encodedShareCode, identity.memberId]);
+		return () => controller.abort();
+	}, [activeTab, encodedShareCode, exportContextKey, identity.memberId]);
 
 	useEffect(() => {
-		const update = () => setActiveTab(getSettingsTabFromHash(window.location.hash));
+		const update = () => {
+			const nextTab = getSettingsTabFromHash(window.location.hash);
+			if (nextTab === 'data') {
+				setExportState({
+					contextKey: exportContextKey,
+					summary: buildEmptyExportSummary(),
+					error: null,
+				});
+			}
+			setActiveTab(nextTab);
+		};
 		window.addEventListener('hashchange', update);
 		update();
 		return () => window.removeEventListener('hashchange', update);
-	}, []);
+	}, [exportContextKey]);
 
 	// WCAG 2.4.11: measure the sticky tab strip so the scroll-padding rule in
 	// globals.css (html:has([data-sticky-tabs])) clears exactly its height,
@@ -146,6 +166,13 @@ export default function EinstellungenPage() {
 						const tabId = next as SettingsTab;
 						const target = SETTINGS_TABS.find((t) => t.id === tabId);
 						if (target) window.history.replaceState(null, '', target.hash);
+						if (tabId === 'data') {
+							setExportState({
+								contextKey: exportContextKey,
+								summary: buildEmptyExportSummary(),
+								error: null,
+							});
+						}
 						setActiveTab(tabId);
 					}}
 				>

@@ -84,6 +84,7 @@ import type { ExpensePaymentInput } from '@/features/expenses/expense-payments';
 import {
 	type SplitInputResult,
 	buildSplitsFromForm,
+	isEqualExpenseSplit,
 	payerOptions,
 	splitCandidates,
 } from '@/features/expenses/expense-split-input';
@@ -557,7 +558,7 @@ export default function AusgabenPage() {
 	const selectableSplitMembers = splitCandidates(members, splitMode, manualSplits);
 
 	function buildSplits(amountCents: number): SplitInputResult {
-		return buildSplitsFromForm({
+		const result = buildSplitsFromForm({
 			splitMode,
 			members,
 			manualSplits,
@@ -566,6 +567,30 @@ export default function AusgabenPage() {
 			// doesn't always eat the leftover cent on uneven splits.
 			rotationOffset: expenses.length,
 		});
+		if (!result.ok || splitMode !== 'equal' || !editingExpense) return result;
+		const original = expenses.find((expense) => expense.id === editingExpense.id);
+		if (
+			!original ||
+			original.amountCents !== amountCents ||
+			!isEqualExpenseSplit(original.amountCents, original.splits, members)
+		) {
+			return result;
+		}
+		const originalMembers = original.splits.map((split) => split.debtorMemberId).sort();
+		const nextMembers = result.splits.map((split) => split.debtorMemberId).sort();
+		if (
+			originalMembers.length !== nextMembers.length ||
+			originalMembers.some((memberId, index) => memberId !== nextMembers[index])
+		) {
+			return result;
+		}
+		return {
+			...result,
+			splits: original.splits.map(({ debtorMemberId, amountCents: splitAmountCents }) => ({
+				debtorMemberId,
+				amountCents: splitAmountCents,
+			})),
+		};
 	}
 
 	async function submit(): Promise<void> {

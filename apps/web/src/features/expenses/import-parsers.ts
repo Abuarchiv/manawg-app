@@ -207,26 +207,59 @@ function parseCsv(input: string, delimiter: string): CsvRow[] {
 	return rows.filter((r) => r.fields.some((f) => f.trim().length > 0));
 }
 
-function parseAmountToCents(raw: string): number | null {
-	const trimmed = raw.trim().replace(/€|EUR/gi, '').trim();
-	if (!trimmed) return null;
-	let normalized = trimmed.replace(/\s/g, '');
-	const lastComma = normalized.lastIndexOf(',');
-	const lastDot = normalized.lastIndexOf('.');
-	if (lastComma > -1 && lastDot > -1) {
-		if (lastComma > lastDot) {
-			normalized = normalized.replace(/\./g, '').replace(',', '.');
-		} else {
-			normalized = normalized.replace(/,/g, '');
+export function parseAmountToCents(raw: string): number | null {
+	let value = raw.trim().replace(/\s+/g, ' ').replace(/−/g, '-');
+	const prefix = value.match(/^(?:€|EUR)\s*/i);
+	if (prefix) value = value.slice(prefix[0].length);
+	else value = value.replace(/\s*(?:€|EUR)$/i, '');
+	const match = value.match(/^([+-]?)(.*)$/);
+	const sign = match?.[1] === '-' ? -1 : 1;
+	const amount = match?.[2]?.trimStart() ?? '';
+	if (!amount) return null;
+
+	const comma = amount.lastIndexOf(',');
+	const dot = amount.lastIndexOf('.');
+	const decimalIndex = Math.max(comma, dot);
+	let integerPart = amount;
+	let fraction = '';
+	let decimalSeparator: string | null = null;
+	if (decimalIndex !== -1) {
+		const separator = amount[decimalIndex] ?? '';
+		const trailingDigits = amount.length - decimalIndex - 1;
+		const separatorCount = amount.split(separator).length - 1;
+		const hasOtherSeparator = amount.includes(separator === ',' ? '.' : ',');
+		if (trailingDigits >= 1 && trailingDigits <= 2 && (hasOtherSeparator || separatorCount === 1)) {
+			decimalSeparator = separator;
+			integerPart = amount.slice(0, decimalIndex);
+			fraction = amount.slice(decimalIndex + 1);
+		} else if (trailingDigits !== 3 || hasOtherSeparator) {
+			return null;
 		}
-	} else if (lastComma > -1) {
-		const decimals = normalized.length - lastComma - 1;
-		normalized = decimals === 2 ? normalized.replace(',', '.') : normalized.replace(/,/g, '');
 	}
-	const num = Number(normalized);
-	if (!Number.isFinite(num)) return null;
-	const cents = Math.round(num * CENTS_PER_EURO);
-	if (!Number.isInteger(cents) || Math.abs(cents) > AMOUNT_MAX_CENTS) return null;
+
+	const normalizedInteger = integerPart.replace(/\s+/g, ' ');
+	if (!/^\d+(?:[., ]\d+)*$/.test(normalizedInteger)) return null;
+	const separators = new Set(normalizedInteger.match(/[., ]/g) ?? []);
+	if (decimalSeparator) separators.delete(decimalSeparator);
+	if (separators.size > 1) return null;
+	const groupingSeparator = separators.values().next().value as string | undefined;
+	let integerDigits = normalizedInteger;
+	if (groupingSeparator) {
+		if (decimalSeparator === groupingSeparator) return null;
+		const groups = normalizedInteger.split(groupingSeparator);
+		if (
+			!/^[1-9]\d{0,2}$/.test(groups[0] ?? '') ||
+			!groups.slice(1).every((group) => /^\d{3}$/.test(group))
+		) {
+			return null;
+		}
+		integerDigits = groups.join('');
+	}
+	if (!/^\d+$/.test(integerDigits)) return null;
+
+	const whole = Number(integerDigits);
+	const cents = sign * (whole * CENTS_PER_EURO + Number(fraction.padEnd(2, '0') || 0));
+	if (!Number.isSafeInteger(cents) || Math.abs(cents) > AMOUNT_MAX_CENTS) return null;
 	return cents;
 }
 

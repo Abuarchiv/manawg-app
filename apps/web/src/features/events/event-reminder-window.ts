@@ -1,13 +1,12 @@
-import {
-	berlinDayKey,
-	berlinWallMinutes,
-	instantAtBerlinWallTime,
-	nextBerlinDayStart,
-	startOfBerlinDay,
-} from '@/core/utils/berlin-day';
+import { berlinDayKey, nextBerlinDayStart, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { and, eq, gt, gte, isNotNull, isNull, lte, or } from 'drizzle-orm';
 import { wgEvents } from '../../core/db/schema';
-import { EVENTS_LIST_LIMIT, eventDateForDisplay, parseRecurrenceRule } from './events';
+import {
+	EVENTS_LIST_LIMIT,
+	eventDateForDisplay,
+	parseRecurrenceRule,
+	recurrenceStartAtBerlinWallTime,
+} from './events';
 
 const EVENT_WINDOW_PAGE_SIZE = 500;
 const EVENT_WINDOW_SCAN_LIMIT = 10_000;
@@ -46,13 +45,19 @@ function recurrenceWeekdays(rule: ParsedRecurrenceRule): number[] {
 	return [...new Set(weekdays)].sort((a, b) => a - b);
 }
 
+function berlinCalendarDate(date: Date): Date {
+	return new Date(`${berlinDayKey(date)}T00:00:00.000Z`);
+}
+
 function recurrenceRawStartAtIndex(
 	anchor: Date,
 	rule: ParsedRecurrenceRule,
 	index: number,
+	allDay: boolean,
 ): number | null {
 	if (!Number.isInteger(index) || index < 0) return null;
-	const startMs = anchor.getTime();
+	const calendarAnchor = allDay ? anchor : berlinCalendarDate(anchor);
+	const startMs = calendarAnchor.getTime();
 	if (rule.freq === 'DAILY') return startMs + index * rule.interval * MS_PER_DAY;
 	if (rule.freq === 'WEEKLY' && !rule.byDay) {
 		return startMs + index * rule.interval * 7 * MS_PER_DAY;
@@ -60,7 +65,7 @@ function recurrenceRawStartAtIndex(
 	if (rule.freq === 'WEEKLY' && rule.byDay) {
 		const weekdays = recurrenceWeekdays(rule);
 		if (weekdays.length === 0) return null;
-		const anchorWeekday = anchor.getUTCDay();
+		const anchorWeekday = calendarAnchor.getUTCDay();
 		const firstWeekdays = weekdays.filter((weekday) => weekday >= anchorWeekday);
 		let weekBlock: number;
 		let weekday: number;
@@ -81,8 +86,8 @@ function recurrenceRawStartAtIndex(
 		return anchorWeekStart + (weekBlock * 7 + weekday) * MS_PER_DAY;
 	}
 	if (rule.freq === 'MONTHLY' || rule.freq === 'YEARLY') {
-		const candidate = new Date(anchor);
-		const anchorDay = anchor.getUTCDate();
+		const candidate = new Date(calendarAnchor);
+		const anchorDay = calendarAnchor.getUTCDate();
 		if (rule.freq === 'MONTHLY') {
 			candidate.setUTCDate(1);
 			candidate.setUTCMonth(candidate.getUTCMonth() + rule.interval * index);
@@ -91,33 +96,79 @@ function recurrenceRawStartAtIndex(
 			).getUTCDate();
 			candidate.setUTCDate(Math.min(anchorDay, lastDay));
 		} else {
-			candidate.setUTCFullYear(anchor.getUTCFullYear() + rule.interval * index);
+			candidate.setUTCFullYear(calendarAnchor.getUTCFullYear() + rule.interval * index);
 		}
 		return candidate.getTime();
 	}
 	return null;
 }
 
+function recurrenceStartAtIndex(
+	anchor: Date,
+	rule: ParsedRecurrenceRule,
+	index: number,
+	allDay: boolean,
+): number | null {
+	const calendarMs = recurrenceRawStartAtIndex(anchor, rule, index, allDay);
+	if (calendarMs === null || allDay) return calendarMs;
+	return (
+		recurrenceStartAtBerlinWallTime(
+			anchor,
+			new Date(calendarMs).toISOString().slice(0, 10),
+		)?.getTime() ?? null
+	);
+}
+
+function clampIndexToActualUntil(
+	anchor: Date,
+	rule: ParsedRecurrenceRule,
+	index: number,
+	untilMs: number,
+	allDay: boolean,
+): number | null {
+	if (index < 0) return index;
+	const startMs = recurrenceStartAtIndex(anchor, rule, index, allDay);
+	if (startMs === null) return null;
+	return startMs > untilMs ? index - 1 : index;
+}
+
 function lastRecurrenceIndexAtOrBefore(
 	anchor: Date,
 	rule: ParsedRecurrenceRule,
 	untilMs: number,
-): number {
-	const startMs = anchor.getTime();
-	if (!Number.isFinite(untilMs) || untilMs < startMs) return -1;
+	allDay: boolean,
+): number | null {
+	const calendarAnchor = allDay ? anchor : berlinCalendarDate(anchor);
+	const untilDate = allDay ? new Date(untilMs) : berlinCalendarDate(new Date(untilMs));
+	const startMs = calendarAnchor.getTime();
+	const untilCalendarMs = untilDate.getTime();
+	if (!Number.isFinite(untilMs) || untilMs < anchor.getTime()) return -1;
+	if (!Number.isFinite(untilCalendarMs)) return null;
 	if (rule.freq === 'DAILY') {
-		return Math.floor((untilMs - startMs) / (rule.interval * MS_PER_DAY));
+		return clampIndexToActualUntil(
+			anchor,
+			rule,
+			Math.floor((untilCalendarMs - startMs) / (rule.interval * MS_PER_DAY)),
+			untilMs,
+			allDay,
+		);
 	}
 	if (rule.freq === 'WEEKLY' && !rule.byDay) {
-		return Math.floor((untilMs - startMs) / (rule.interval * 7 * MS_PER_DAY));
+		return clampIndexToActualUntil(
+			anchor,
+			rule,
+			Math.floor((untilCalendarMs - startMs) / (rule.interval * 7 * MS_PER_DAY)),
+			untilMs,
+			allDay,
+		);
 	}
 	if (rule.freq === 'WEEKLY' && rule.byDay) {
 		const weekdays = recurrenceWeekdays(rule);
 		if (weekdays.length === 0) return -1;
-		const anchorWeekday = anchor.getUTCDay();
+		const anchorWeekday = calendarAnchor.getUTCDay();
 		const firstWeekdays = weekdays.filter((weekday) => weekday >= anchorWeekday);
 		const anchorWeekStart = startMs - anchorWeekday * MS_PER_DAY;
-		const untilWeek = Math.floor((untilMs - anchorWeekStart) / (7 * MS_PER_DAY));
+		const untilWeek = Math.floor((untilCalendarMs - anchorWeekStart) / (7 * MS_PER_DAY));
 		let weekBlock = Math.floor(untilWeek / rule.interval) * rule.interval;
 		for (let blockCount = 0; blockCount < 2 && weekBlock >= 0; blockCount += 1) {
 			const available = weekBlock === 0 ? firstWeekdays : weekdays;
@@ -125,28 +176,37 @@ function lastRecurrenceIndexAtOrBefore(
 				const weekday = available[dayIndex];
 				if (weekday === undefined) continue;
 				const rawStart = anchorWeekStart + (weekBlock * 7 + weekday) * MS_PER_DAY;
-				if (rawStart > untilMs) continue;
-				if (weekBlock === 0) return firstWeekdays.indexOf(weekday);
+				if (rawStart > untilCalendarMs) continue;
+				if (weekBlock === 0) {
+					return clampIndexToActualUntil(
+						anchor,
+						rule,
+						firstWeekdays.indexOf(weekday),
+						untilMs,
+						allDay,
+					);
+				}
 				const blockOrdinal = weekBlock / rule.interval;
-				return (
-					firstWeekdays.length + (blockOrdinal - 1) * weekdays.length + weekdays.indexOf(weekday)
-				);
+				const index =
+					firstWeekdays.length + (blockOrdinal - 1) * weekdays.length + weekdays.indexOf(weekday);
+				return clampIndexToActualUntil(anchor, rule, index, untilMs, allDay);
 			}
 			weekBlock -= rule.interval;
 		}
 		return -1;
 	}
 	if (rule.freq === 'MONTHLY' || rule.freq === 'YEARLY') {
-		const until = new Date(untilMs);
 		const units =
 			rule.freq === 'MONTHLY'
-				? (until.getUTCFullYear() - anchor.getUTCFullYear()) * 12 +
-					(until.getUTCMonth() - anchor.getUTCMonth())
-				: until.getUTCFullYear() - anchor.getUTCFullYear();
+				? (untilDate.getUTCFullYear() - calendarAnchor.getUTCFullYear()) * 12 +
+					(untilDate.getUTCMonth() - calendarAnchor.getUTCMonth())
+				: untilDate.getUTCFullYear() - calendarAnchor.getUTCFullYear();
 		let index = Math.floor(units / rule.interval);
 		for (; index >= 0; index -= 1) {
-			const rawStart = recurrenceRawStartAtIndex(anchor, rule, index);
-			if (rawStart !== null && rawStart <= untilMs) return index;
+			const rawStart = recurrenceRawStartAtIndex(anchor, rule, index, allDay);
+			if (rawStart !== null && rawStart <= untilCalendarMs) {
+				return clampIndexToActualUntil(anchor, rule, index, untilMs, allDay);
+			}
 		}
 		return -1;
 	}
@@ -162,18 +222,18 @@ function lastRecurrenceStartMs(
 	const anchor = new Date(anchorMs);
 	let lastIndex = rule.count === undefined ? null : rule.count - 1;
 	if (rule.until !== undefined) {
-		const untilIndex = lastRecurrenceIndexAtOrBefore(anchor, rule, Date.parse(rule.until));
+		const untilIndex = lastRecurrenceIndexAtOrBefore(
+			anchor,
+			rule,
+			Date.parse(rule.until),
+			candidate.allDay,
+		);
+		if (untilIndex === null) return null;
 		lastIndex = lastIndex === null ? untilIndex : Math.min(lastIndex, untilIndex);
 	}
 	if (lastIndex === null || lastIndex < 0) return lastIndex;
-	const rawStart = recurrenceRawStartAtIndex(anchor, rule, lastIndex);
-	if (rawStart === null || !Number.isFinite(rawStart)) return null;
-	if (candidate.allDay) return rawStart;
-	const rawYear = new Date(rawStart).getUTCFullYear();
-	if (rawYear < 1000 || rawYear >= 9999) return null;
-	const wallMinutes = berlinWallMinutes(anchor);
-	const wallAligned = instantAtBerlinWallTime(berlinDayKey(new Date(rawStart)), wallMinutes);
-	return (wallAligned ?? new Date(rawStart)).getTime();
+	const lastStartMs = recurrenceStartAtIndex(anchor, rule, lastIndex, candidate.allDay);
+	return lastStartMs !== null && Number.isFinite(lastStartMs) ? lastStartMs : null;
 }
 
 function durationMs(candidate: EventWindowCandidate, rootStartMs: number): number | null {

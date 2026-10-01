@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { captureException } from '@/core/infra/observability';
 import { AlertTriangle } from 'lucide-react';
 import Link from 'next/link';
+import { useParams } from 'next/navigation';
 import { useEffect } from 'react';
 
 interface Props {
@@ -14,6 +15,9 @@ interface Props {
 }
 
 export default function ImportError({ error, reset }: Props) {
+	const { code } = useParams<{ code: string }>();
+	const wgBaseHref = `/wg/${encodeURIComponent(code)}`;
+
 	useEffect(() => {
 		captureException(error, { boundary: 'wg-import' });
 	}, [error]);
@@ -33,7 +37,7 @@ export default function ImportError({ error, reset }: Props) {
 				<Button
 					variant="outline"
 					className="flex-1"
-					render={<Link href="../ausgaben" />}
+					render={<Link href={`${wgBaseHref}/ausgaben`} />}
 					nativeButton={false}
 				>
 					Zurück zu Ausgaben

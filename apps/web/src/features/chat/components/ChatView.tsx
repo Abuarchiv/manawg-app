@@ -93,6 +93,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 	const [bootstrapError, setBootstrapError] = useState(false);
 	const [loadingOlder, setLoadingOlder] = useState(false);
 	const loadingOlderRef = useRef(false);
+	const historyStartIdRef = useRef(initialMessages[0]?.id ?? null);
 	const refreshOlderOffsetRef = useRef(0);
 	const refreshRequestSequenceRef = useRef(0);
 	const refreshPromiseRef = useRef<Promise<boolean> | null>(null);
@@ -226,6 +227,14 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 				: prev,
 		);
 		const refreshedLoadedMessages = res.data.refreshedMessages ?? [];
+		const latestMessageIds = new Set(res.data.messages.map((message) => message.id));
+		const rebasingHistory =
+			messages.length > 0 &&
+			res.data.messages.length > 0 &&
+			!messages.some((message) => latestMessageIds.has(message.id));
+		if (messages.length === 0 || rebasingHistory) {
+			historyStartIdRef.current = res.data.messages[0]?.id ?? null;
+		}
 		const refreshedMessageIds = new Set(
 			[...res.data.messages, ...refreshedLoadedMessages].map((message) => message.id),
 		);
@@ -237,16 +246,19 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 		setReactionRows((prev) => {
 			if (!isLatestChatRefreshResponse(requestSequence, refreshRequestSequenceRef.current))
 				return prev;
+			const messageIdsToReconcile = rebasingHistory
+				? new Set([...prev.map((row) => row.messageId), ...latestMessageIds])
+				: refreshedMessageIds;
 			const preservedLocalKeys = reactionKeysToPreserve(
 				reactionMutationVersionsRef.current,
 				pendingReactionMutationsRef.current,
 				mutationVersionsAtRequest,
-				refreshedMessageIds,
+				messageIdsToReconcile,
 			);
 			return reconcileChatReactions(
 				prev,
 				res.data.reactions,
-				refreshedMessageIds,
+				messageIdsToReconcile,
 				preservedLocalKeys,
 			);
 		});
@@ -255,7 +267,9 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 		// history is exhausted.
 		setHasMoreOlder((prev) =>
 			isLatestChatRefreshResponse(requestSequence, refreshRequestSequenceRef.current)
-				? prev || res.data.messages.length >= PAGE_SIZE
+				? rebasingHistory
+					? res.data.messages.length >= PAGE_SIZE
+					: prev || res.data.messages.length >= PAGE_SIZE
 				: prev,
 		);
 		return true;
@@ -318,7 +332,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 	async function loadOlder(): Promise<void> {
 		if (loadingOlderRef.current || !hasMoreOlder) return;
 		const oldest = messages[0];
-		if (!oldest) return;
+		if (!oldest || historyStartIdRef.current !== oldest.id) return;
 		loadingOlderRef.current = true;
 		setOlderError(false);
 		setLoadingOlder(true);
@@ -327,14 +341,17 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 				`/api/wg/${encodedShareCode}/chat/messages?limit=${PAGE_SIZE}&before=${encodeURIComponent(oldest.createdAt)}&beforeId=${encodeURIComponent(oldest.id)}`,
 				{ memberId: identity.memberId },
 			);
+			if (historyStartIdRef.current !== oldest.id) return;
 			if (!res.ok) {
 				setOlderError(true);
 				return;
 			}
-			if (res.data.messages.length === 0) {
+			const firstOlderMessage = res.data.messages[0];
+			if (!firstOlderMessage) {
 				setHasMoreOlder(false);
 				return;
 			}
+			historyStartIdRef.current = firstOlderMessage.id;
 			setMessages((prev) => mergePagedMessagesById(res.data.messages, prev));
 			setReactionRows((prev) => mergePagedReactions(res.data.reactions, prev));
 			setHasMoreOlder(res.data.messages.length >= PAGE_SIZE);
@@ -377,6 +394,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 			return false;
 		}
 		pendingMessageRequestRef.current = null;
+		if (historyStartIdRef.current === null) historyStartIdRef.current = res.data.message.id;
 		refreshRequestSequenceRef.current = advanceChatRefreshSequence(
 			refreshRequestSequenceRef.current,
 		);

@@ -276,6 +276,71 @@ test('reconciliation preserves database order when timestamps lose microseconds'
 	]);
 });
 
+test('a disjoint latest page rebases the displayed history to the current window', () => {
+	const oldWindow = Array.from({ length: 50 }, (_, index) => ({ id: `message-${index + 1}` }));
+	const latestPage = Array.from({ length: 50 }, (_, index) => ({ id: `message-${index + 101}` }));
+
+	assert.deepEqual(chat.reconcileChatMessages(oldWindow, latestPage, []), latestPage);
+});
+
+test('polling rebases the cursor window without changing the read marker', async () => {
+	const oldWindow = Array.from({ length: 50 }, (_, index) => ({ id: `message-${index + 1}` }));
+	const latestPage = Array.from({ length: 50 }, (_, index) => ({
+		id: `message-${index + 101}`,
+		createdAt: `2026-09-26T10:${String(index).padStart(2, '0')}:00.000Z`,
+	}));
+	const { scope, refresh } = refreshHarness(
+		async () => ({
+			ok: true,
+			data: { messages: latestPage, reactions: [] },
+		}),
+		oldWindow,
+	);
+	scope.lastReadSentIdRef.current = 'last-read-message';
+
+	assert.equal(await refresh(), true);
+	assert.deepEqual(scope.messages, latestPage);
+	assert.equal(scope.messages[0].id, 'message-101');
+	assert.equal(scope.lastReadSentIdRef.current, 'last-read-message');
+});
+
+test('a delayed older-page response cannot restore the pre-rebase history', async () => {
+	const oldWindow = Array.from({ length: 50 }, (_, index) => ({
+		id: `message-${index + 1}`,
+		createdAt: `2026-09-25T10:${String(index).padStart(2, '0')}:00.000Z`,
+	}));
+	const latestPage = Array.from({ length: 50 }, (_, index) => ({
+		id: `message-${index + 101}`,
+		createdAt: `2026-09-26T10:${String(index).padStart(2, '0')}:00.000Z`,
+	}));
+	let completeOlderPage;
+	const requests = [];
+	const { scope, refresh, loadOlder } = refreshHarness((url) => {
+		requests.push(url);
+		if (url.includes('&before=')) {
+			return new Promise((resolve) => {
+				completeOlderPage = resolve;
+			});
+		}
+		return Promise.resolve({ ok: true, data: { messages: latestPage, reactions: [] } });
+	}, oldWindow);
+	scope.hasMoreOlder = true;
+
+	const olderPending = loadOlder();
+	assert.match(requests[0], /beforeId=message-1/);
+	assert.equal(await refresh(), true);
+	completeOlderPage({
+		ok: true,
+		data: {
+			messages: Array.from({ length: 50 }, (_, index) => ({ id: `older-${index}` })),
+			reactions: [],
+		},
+	});
+	await olderPending;
+
+	assert.deepEqual(scope.messages, latestPage);
+});
+
 // Execute the component's real request callbacks with controlled transport and
 // state, so polling latency is tested without a browser or duplicating the loop.
 function refreshHarness(apiFetch, initialMessages = []) {
@@ -293,11 +358,13 @@ function refreshHarness(apiFetch, initialMessages = []) {
 			['fetchMessages', 'refresh'].includes(node.name.getText(source))
 		) {
 			declarations.push(`const ${node.getText(source)};`);
+		} else if (ts.isFunctionDeclaration(node) && node.name?.getText(source) === 'loadOlder') {
+			declarations.push(node.getText(source));
 		}
 		ts.forEachChild(node, visit);
 	}
 	visit(source);
-	assert.equal(declarations.length, 2);
+	assert.equal(declarations.length, 3);
 	const scope = {
 		...chat,
 		PAGE_SIZE: 50,
@@ -305,6 +372,10 @@ function refreshHarness(apiFetch, initialMessages = []) {
 		encodedShareCode: 'test',
 		identity: { memberId: 'member' },
 		apiFetch,
+		lastReadSentIdRef: { current: null },
+		historyStartIdRef: { current: initialMessages[0]?.id ?? null },
+		loadingOlderRef: { current: false },
+		hasMoreOlder: initialMessages.length >= 50,
 		useCallback: (callback) => callback,
 		refreshPromiseRef: { current: null },
 		refreshRequestSequenceRef: { current: 0 },
@@ -321,15 +392,24 @@ function refreshHarness(apiFetch, initialMessages = []) {
 			scope.reactions = update(scope.reactions ?? []);
 		},
 		setHasMoreOlder: (update) => {
-			scope.hasMore = update(scope.hasMore ?? false);
+			scope.hasMoreOlder =
+				typeof update === 'function' ? update(scope.hasMoreOlder ?? false) : update;
 		},
+		setOlderError: (value) => {
+			scope.olderError = typeof value === 'function' ? value(scope.olderError ?? false) : value;
+		},
+		setLoadingOlder: (value) => {
+			scope.loadingOlder = typeof value === 'function' ? value(scope.loadingOlder ?? false) : value;
+		},
+		mergePagedMessagesById: chat.mergePagedMessagesById,
+		mergePagedReactions: chat.mergePagedReactions,
 	};
 	const code = ts.transpileModule(declarations.join('\n'), {
 		compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 	}).outputText;
 	return {
 		scope,
-		refresh: new Function('scope', `with (scope) { ${code}; return refresh; }`)(scope),
+		...new Function('scope', `with (scope) { ${code}; return { refresh, loadOlder }; }`)(scope),
 	};
 }
 

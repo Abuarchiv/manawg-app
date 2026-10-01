@@ -49,6 +49,7 @@ interface FormMember {
 type ExpenseDraft = {
 	recurringSourceId?: string | null;
 	editingExpense?: unknown;
+	editingRecurringExpenseId?: unknown;
 	description?: string;
 	amountStr?: string;
 	imageUrl?: string | null;
@@ -115,6 +116,7 @@ export function useExpenseForm({
 	const [editingRecurringExpense, setEditingRecurringExpense] = useState<RecurringExpense | null>(
 		null,
 	);
+	const [pendingRecurringEditId, setPendingRecurringEditId] = useState<string | null>(null);
 	const [queueEditId, setQueueEditId] = useState<string | null>(null);
 	const [queueEditType, setQueueEditType] = useState<OfflineActionType | null>(null);
 	const [recurringIntervalMonths, setRecurringIntervalMonths] = useState(1);
@@ -146,7 +148,16 @@ export function useExpenseForm({
 		// every visit.
 		if (!isEmptyModuleDraft('expense', draft, identityMemberId)) setShowForm(true);
 		const target = draft.editingExpense;
-		if (target !== undefined && target !== null) {
+		const recurringTarget = draft.editingRecurringExpenseId;
+		const hasExpenseEdit = target !== undefined && target !== null;
+		const hasRecurringEdit = recurringTarget !== undefined && recurringTarget !== null;
+		if (hasExpenseEdit && hasRecurringEdit) {
+			setInvalidEditDraft(true);
+			setShowForm(true);
+			setFormError(
+				'Die Zuordnung dieses Entwurfs ist beschädigt. Deine Eingaben bleiben erhalten; öffne die ursprüngliche Ausgabe erneut oder verwirf den Entwurf.',
+			);
+		} else if (hasExpenseEdit) {
 			if (
 				typeof target === 'object' &&
 				'id' in target &&
@@ -162,6 +173,22 @@ export function useExpenseForm({
 					updatedAt: target.updatedAt,
 					...(currency?.success ? { currency: currency.data } : {}),
 				});
+			} else {
+				setInvalidEditDraft(true);
+				setShowForm(true);
+				setFormError(
+					'Die Zuordnung dieses Entwurfs ist beschädigt. Deine Eingaben bleiben erhalten; öffne die ursprüngliche Ausgabe erneut oder verwirf den Entwurf.',
+				);
+			}
+		} else if (hasRecurringEdit) {
+			if (typeof recurringTarget === 'string' && /^[a-z0-9-]{1,128}$/i.test(recurringTarget)) {
+				setPendingRecurringEditId(recurringTarget);
+				setEditingExpense(null);
+				setShowForm(true);
+				setInvalidEditDraft(true);
+				setFormError(
+					'Die Zuordnung dieses Entwurfs wird geprüft. Deine Eingaben bleiben erhalten; ein Speichern ist bis zur Vorlage gesperrt.',
+				);
 			} else {
 				setInvalidEditDraft(true);
 				setShowForm(true);
@@ -185,11 +212,25 @@ export function useExpenseForm({
 	}, [draftKey, identityMemberId]);
 
 	useEffect(() => {
+		if (!draftHydrated || !pendingRecurringEditId) return;
+		const template = recurringExpenses.find((item) => item.id === pendingRecurringEditId);
+		if (!template) return;
+		setEditingExpense(null);
+		setEditingRecurringExpense(template);
+		setPendingRecurringEditId(null);
+		setInvalidEditDraft(false);
+		setFormError(null);
+	}, [draftHydrated, pendingRecurringEditId, recurringExpenses]);
+
+	useEffect(() => {
 		if (!draftHydrated) return;
+		const recurringEditId = editingRecurringExpense?.id ?? pendingRecurringEditId;
+		const invalidEditReference = invalidEditDraft && recurringEditId === null;
 		writeDraft(draftKey, {
 			...readDraft<ExpenseDraft>(draftKey),
 			recurringSourceId,
-			editingExpense: invalidEditDraft ? { invalid: true } : editingExpense,
+			editingExpense: invalidEditReference ? { invalid: true } : editingExpense,
+			editingRecurringExpenseId: recurringEditId,
 			description,
 			amountStr,
 			imageUrl,
@@ -205,6 +246,7 @@ export function useExpenseForm({
 		amountStr,
 		description,
 		editingExpense,
+		editingRecurringExpense,
 		invalidEditDraft,
 		draftHydrated,
 		draftKey,
@@ -213,6 +255,7 @@ export function useExpenseForm({
 		paidByMemberId,
 		queueEditId,
 		queueEditType,
+		pendingRecurringEditId,
 		recurringIntervalMonths,
 		recurringNextDueAt,
 		recurringSourceId,
@@ -246,6 +289,7 @@ export function useExpenseForm({
 			setEditingExpense(null);
 			setInvalidEditDraft(false);
 			setEditingRecurringExpense(null);
+			setPendingRecurringEditId(null);
 			setFormError(null);
 			setPendingPrefill(null);
 			setShowForm(true);
@@ -322,6 +366,7 @@ export function useExpenseForm({
 		setEditingExpense(null);
 		setInvalidEditDraft(false);
 		setEditingRecurringExpense(null);
+		setPendingRecurringEditId(null);
 		setQueueEditId(null);
 		setQueueEditType(null);
 		setRecurringIntervalMonths(1);
@@ -370,6 +415,8 @@ export function useExpenseForm({
 			updatedAt: expense.updatedAt,
 			currency: expense.currency,
 		});
+		setPendingRecurringEditId(null);
+		setEditingRecurringExpense(null);
 		setInvalidEditDraft(false);
 		setShowForm(true);
 	}
@@ -387,6 +434,7 @@ export function useExpenseForm({
 		setManualSplits(splitsToManualInput(template.splits));
 		setRecurringIntervalMonths(template.intervalMonths);
 		setEditingExpense(null);
+		setPendingRecurringEditId(null);
 		setInvalidEditDraft(false);
 		setEditingRecurringExpense(template);
 		setQueueEditId(null);

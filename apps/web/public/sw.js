@@ -105,7 +105,7 @@ self.addEventListener('notificationclick', (event) => {
 	event.notification.close();
 	const url = event.notification.data?.url || '/';
 	event.waitUntil(
-		clients.matchAll({ type: 'window' }).then((wins) => {
+		clients.matchAll({ type: 'window' }).then(async (wins) => {
 			let targetUrl = null;
 			try {
 				targetUrl = new URL(url, self.location.origin);
@@ -132,6 +132,10 @@ self.addEventListener('notificationclick', (event) => {
 					windowUrl.pathname === targetUrl.pathname &&
 					'focus' in w
 				) {
+					if (w.url !== targetUrl.href) {
+						if (typeof w.navigate !== 'function') continue;
+						await w.navigate(targetUrl.href);
+					}
 					return w.focus();
 				}
 			}

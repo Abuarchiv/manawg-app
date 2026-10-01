@@ -13,7 +13,20 @@
 		"e2e/rate-limit-fail-open-env.spec.ts",
 		"e2e/rate-limit-fail-open-stats.spec.ts",
 		"e2e/shopping-mutation-regression.spec.ts",
-		"e2e/upload-sign-s3-config-contract.spec.ts"
+		"e2e/upload-sign-s3-config-contract.spec.ts",
+		"e2e/api-infra-security-contracts.spec.ts",
+		"e2e/expense-edit-payer.spec.ts",
+		"e2e/offline-queue-regression.spec.ts",
+		"e2e/pilot-chore-coordination.spec.ts",
+		"e2e/settings-data-access-permissions.spec.ts",
+		"e2e/daily-overview-home.spec.ts",
+		"e2e/offline-drafts.spec.ts",
+		"e2e/offline-page.spec.ts",
+		"e2e/overlay-back-dismiss.spec.ts",
+		"e2e/settings-access-responsive.spec.ts",
+		"e2e/debt-summary-reminder-link.spec.ts",
+		"e2e/contrast-tokens.spec.ts",
+		"e2e/pwa-platform.spec.ts"
 	],
 	"exclude": ["node_modules", ".next", "playwright.config.ts"]
 }

@@ -5,6 +5,7 @@ import { isUuid } from '@/core/guards/api-auth';
 import type { RouteCtx } from '@/core/infra/api-types';
 import { logApiError } from '@/core/infra/observability';
 import { checkRateLimit, clientIpKey, wgReadLimiter } from '@/core/rate-limit';
+import { endOfBerlinDay, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { MS_PER_DAY } from '@/core/utils/time';
 import {
 	isCalendarFeedToken,
@@ -85,9 +86,16 @@ export async function GET(
 
 		const from = new Date();
 		const to = new Date(from.getTime() + FEED_HORIZON_DAYS * MS_PER_DAY);
-		const occurrences: CalendarFeedOccurrence[] = events.flatMap((row) =>
-			expandRecurrence(eventToInput(row), from, to),
-		);
+		const berlinFrom = startOfBerlinDay(from);
+		const berlinTo = endOfBerlinDay(to);
+		const occurrences: CalendarFeedOccurrence[] = events.flatMap((row) => {
+			const event = eventToInput(row);
+			return expandRecurrence(
+				event,
+				event.allDay ? berlinFrom : from,
+				event.allDay ? berlinTo : to,
+			);
+		});
 		const body = calendarFeedToIcs(occurrences, 'ManaWG');
 		return new NextResponse(body, {
 			headers: {

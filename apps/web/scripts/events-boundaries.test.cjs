@@ -46,6 +46,7 @@ const {
 	processReminderBatches,
 	startsInReminderWindow,
 } = require('../src/features/events/event-reminder-dispatch.ts');
+const { formatNotificationMessage } = require('../src/core/notifications/notifications.ts');
 
 function eventCandidate(id, startsAt, recurrence, { allDay = false, endsAt = null } = {}) {
 	return {
@@ -256,6 +257,276 @@ test('spring DST wall time is included when its raw UTC recurrence is beyond win
 		occurrences.map(({ startsAt }) => startsAt),
 		['2026-03-29T01:30:00.000Z'],
 	);
+});
+
+test('daily recurrence preserves Berlin dates and COUNT indices across spring DST', () => {
+	const event = {
+		id: 'daily-spring-dst',
+		title: 'Late event',
+		description: null,
+		startsAt: '2026-03-27T22:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=DAILY;COUNT=7',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-03-27T00:00:00.000Z'),
+		new Date('2026-04-02T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt, occurrenceIndex }) => [startsAt, occurrenceIndex]),
+		[
+			['2026-03-27T22:30:00.000Z', 0],
+			['2026-03-28T22:30:00.000Z', 1],
+			['2026-03-29T21:30:00.000Z', 2],
+			['2026-03-30T21:30:00.000Z', 3],
+			['2026-03-31T21:30:00.000Z', 4],
+			['2026-04-01T21:30:00.000Z', 5],
+			['2026-04-02T21:30:00.000Z', 6],
+		],
+	);
+
+	const fastForwarded = expandRecurrence(
+		event,
+		new Date('2026-03-30T00:00:00.000Z'),
+		new Date('2026-04-02T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		fastForwarded.map(({ occurrenceIndex }) => occurrenceIndex),
+		[3, 4, 5, 6],
+	);
+});
+
+test('daily recurrence advances its Berlin date after autumn DST', () => {
+	const event = {
+		id: 'daily-autumn-dst',
+		title: 'Early event',
+		description: null,
+		startsAt: '2026-10-24T22:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=DAILY;COUNT=3',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-10-24T00:00:00.000Z'),
+		new Date('2026-10-27T23:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-10-24T22:30:00.000Z', '2026-10-25T23:30:00.000Z', '2026-10-26T23:30:00.000Z'],
+	);
+});
+
+test('a nonexistent spring 02:30 occurrence moves to 03:30 Berlin time', () => {
+	const event = {
+		id: 'spring-gap-series',
+		title: 'Early event',
+		description: null,
+		startsAt: '2026-03-22T01:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=WEEKLY;COUNT=2',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-03-22T00:00:00.000Z'),
+		new Date('2026-03-29T02:00:00.000Z'),
+	);
+	assert.equal(occurrences[1]?.startsAt, '2026-03-29T01:30:00.000Z');
+	assert.equal(
+		new Intl.DateTimeFormat('de-DE', {
+			hour: '2-digit',
+			minute: '2-digit',
+			timeZone: 'Europe/Berlin',
+		}).format(new Date(occurrences[1]?.startsAt ?? '')),
+		'03:30',
+	);
+});
+
+test('weekly BYDAY matches the Berlin weekday after spring DST', () => {
+	const event = {
+		id: 'sunday-series',
+		title: 'Sunday event',
+		description: null,
+		startsAt: '2026-03-27T22:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=WEEKLY;BYDAY=SU;COUNT=2',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-03-27T00:00:00.000Z'),
+		new Date('2026-04-05T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-03-29T21:30:00.000Z', '2026-04-05T21:30:00.000Z'],
+	);
+	const fastForwarded = expandRecurrence(
+		event,
+		new Date('2026-04-05T00:00:00.000Z'),
+		new Date('2026-04-05T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		fastForwarded.map(({ startsAt, occurrenceIndex }) => [startsAt, occurrenceIndex]),
+		[['2026-04-05T21:30:00.000Z', 1]],
+	);
+});
+
+test('monthly recurrence clamps the Berlin anchor day', () => {
+	const event = {
+		id: 'month-end-series',
+		title: 'Monthly event',
+		description: null,
+		startsAt: '2026-01-30T23:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=MONTHLY;COUNT=3',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-01-01T00:00:00.000Z'),
+		new Date('2026-04-02T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-01-30T23:30:00.000Z', '2026-02-27T23:30:00.000Z', '2026-03-30T22:30:00.000Z'],
+	);
+	const fastForwarded = expandRecurrence(
+		event,
+		new Date('2026-03-01T00:00:00.000Z'),
+		new Date('2026-04-02T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		fastForwarded.map(({ startsAt, occurrenceIndex }) => [startsAt, occurrenceIndex]),
+		[['2026-03-30T22:30:00.000Z', 2]],
+	);
+});
+
+test('yearly recurrence keeps a Berlin New Year anchor', () => {
+	const event = {
+		id: 'new-year-series',
+		title: 'New Year event',
+		description: null,
+		startsAt: '2026-12-31T23:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=YEARLY;COUNT=3',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-12-31T00:00:00.000Z'),
+		new Date('2028-12-31T23:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-12-31T23:30:00.000Z', '2027-12-31T23:30:00.000Z', '2028-12-31T23:30:00.000Z'],
+	);
+});
+
+test('UNTIL includes the Berlin occurrence exactly at its instant boundary', () => {
+	const event = {
+		id: 'until-spring-dst',
+		title: 'Late event',
+		description: null,
+		startsAt: '2026-03-27T22:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=DAILY;UNTIL=2026-03-29T21:30:00.000Z',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-03-27T00:00:00.000Z'),
+		new Date('2026-03-30T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-03-27T22:30:00.000Z', '2026-03-28T22:30:00.000Z', '2026-03-29T21:30:00.000Z'],
+	);
+});
+
+test('UNTIL excludes a Berlin occurrence after its instant cutoff on the same date', () => {
+	const event = {
+		id: 'before-until-spring-dst',
+		title: 'Late event',
+		description: null,
+		startsAt: '2026-03-27T22:30:00.000Z',
+		endsAt: null,
+		allDay: false,
+		location: null,
+		recurrence: 'FREQ=DAILY;UNTIL=2026-03-29T21:29:59.999Z',
+	};
+	const occurrences = expandRecurrence(
+		event,
+		new Date('2026-03-27T00:00:00.000Z'),
+		new Date('2026-03-30T21:59:59.999Z'),
+	);
+	assert.deepEqual(
+		occurrences.map(({ startsAt }) => startsAt),
+		['2026-03-27T22:30:00.000Z', '2026-03-28T22:30:00.000Z'],
+	);
+});
+
+test('finite weekly BYDAY roots expire at their last Berlin occurrence', async () => {
+	const root = eventCandidate(
+		'finite-sunday-series',
+		'2026-03-22T22:30:00.000Z',
+		'FREQ=WEEKLY;BYDAY=SU;COUNT=2',
+	);
+	const result = await withEventWindowCandidates(
+		new Date('2026-03-29T23:00:00.000Z'),
+		eventCandidatePages([root]),
+		() => ({ status: 503 }),
+		(candidates) => candidates.map(({ id }) => id),
+	);
+	assert.deepEqual(result, []);
+});
+
+test('finite UNTIL roots remain active through the final Berlin-day occurrence', async () => {
+	const root = eventCandidate(
+		'finite-daily-until',
+		'2026-03-27T22:30:00.000Z',
+		'FREQ=DAILY;UNTIL=2026-03-29T21:30:00.000Z',
+	);
+	const result = await withEventWindowCandidates(
+		new Date('2026-03-29T00:00:00.000Z'),
+		eventCandidatePages([root]),
+		() => ({ status: 503 }),
+		(candidates) => candidates.map(({ id }) => id),
+	);
+	assert.deepEqual(result, ['finite-daily-until']);
+});
+
+test('finite UNTIL root remains active when cutoff follows its actual anchor instant', async () => {
+	const root = eventCandidate(
+		'same-berlin-day-until',
+		'2026-06-01T22:30:00.000Z',
+		'FREQ=DAILY;UNTIL=2026-06-01T22:45:00.000Z',
+	);
+	const result = await withEventWindowCandidates(
+		new Date('2026-06-01T22:00:00.000Z'),
+		eventCandidatePages([root]),
+		() => ({ status: 503 }),
+		(candidates) => candidates.map(({ id }) => id),
+	);
+	assert.deepEqual(result, ['same-berlin-day-until']);
+});
+
+test('event push messages format startsAt in Berlin time', () => {
+	const event = formatNotificationMessage('event.upcoming', {
+		title: 'Abendessen',
+		startsAt: '2026-09-27T18:00:00.000Z',
+	});
+	assert.match(event.body, /20:00/);
 });
 
 test('prunes old finite COUNT and UNTIL roots but retains long BYDAY and unknown rules', async () => {

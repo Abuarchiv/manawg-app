@@ -712,7 +712,10 @@ export default function PutzenPage() {
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
 				headers: { 'Idempotency-Key': idempotencyKey },
-				body: JSON.stringify({ completedByMemberId: identity.memberId }),
+				body: JSON.stringify({
+					completedByMemberId: identity.memberId,
+					expectedNextDueAt: chore.nextDueAt,
+				}),
 			},
 		);
 
@@ -727,6 +730,7 @@ export default function PutzenPage() {
 						memberId: identity.memberId,
 						idempotencyKey,
 						choreId: chore.id,
+						expectedNextDueAt: chore.nextDueAt,
 					}),
 				);
 				if (queuedCount === 0) {
@@ -754,6 +758,21 @@ export default function PutzenPage() {
 				setItems((current) => current.filter((item) => item.id !== chore.id));
 				setCompleteConfirmId(null);
 				const message = 'Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.';
+				setActionError(message);
+				toast.error(message);
+				void load(false);
+				endPending(chore.id);
+				return;
+			}
+			if (result.status === 409 && result.error === 'chore_state_changed') {
+				updateChores((current) =>
+					current.some((item) => item.id === chore.id)
+						? current.map((item) => (item.id === chore.id ? previousChore : item))
+						: [...current, previousChore],
+				);
+				setCompleteConfirmId(null);
+				const message =
+					'Diese Putzaufgabe oder ihr Termin wurde inzwischen geändert. Die Erledigung wurde nicht übernommen. Prüfe den aktualisierten Plan.';
 				setActionError(message);
 				toast.error(message);
 				void load(false);

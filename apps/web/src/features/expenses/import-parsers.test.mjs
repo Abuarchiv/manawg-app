@@ -11,11 +11,79 @@ registerHooks({
 			const path = resolve(appRoot, 'src', `${specifier.slice(2)}.ts`);
 			return nextResolve(pathToFileURL(path).href, context);
 		}
+		if (specifier.startsWith('./') && !/\.[^/]+$/.test(specifier)) {
+			return nextResolve(`${specifier}.ts`, context);
+		}
 		return nextResolve(specifier, context);
 	},
 });
 
-const { parseSplitwiseCsv } = await import('./import-parsers.ts');
+const { parseAmountToCents, parseSplitwiseCsv, parseSplidCsv } = await import(
+	'./import-parsers.ts'
+);
+const { parseOcrText } = await import('./ocr.ts');
+
+test('expense amounts preserve decimal and thousands separators without accepting junk', () => {
+	assert.equal(parseAmountToCents('12,5'), 1250);
+	assert.equal(parseAmountToCents('- 12,5'), -1250);
+	assert.equal(parseAmountToCents('−12,5'), -1250);
+	assert.equal(parseAmountToCents('12.50 EUR'), 1250);
+	assert.equal(parseAmountToCents('1.234,56'), 123456);
+	assert.equal(parseAmountToCents('1,234.56'), 123456);
+	assert.equal(parseAmountToCents('1 234,56'), 123456);
+	assert.equal(parseAmountToCents('1,234'), 123400);
+	assert.equal(parseAmountToCents('12,34,56'), null);
+	assert.equal(parseAmountToCents('12,5%'), null);
+	assert.equal(parseAmountToCents('1 2'), null);
+	assert.equal(parseAmountToCents('12 EUR USD'), null);
+});
+
+test('Splid imports one-decimal German amounts as cents', () => {
+	const [expense] = parseSplidCsv(
+		[
+			'Datum;Beschreibung;Betrag;Bezahlt von;Teilnehmer',
+			'26.09.2026;Strom;12,5;Anna;Anna|Bob',
+		].join('\n'),
+	);
+
+	assert.equal(expense?.amountCents, 1250);
+});
+
+test('OCR shares the strict amount parser and ignores percentages', () => {
+	assert.equal(
+		parseOcrText('Internet 12.50 EUR', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		1250,
+	);
+	assert.equal(
+		parseOcrText('Gas 1.234,56 EUR', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		123456,
+	);
+	assert.equal(
+		parseOcrText('Gas 1 234,56 EUR', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		123456,
+	);
+	assert.equal(
+		parseOcrText('Taxi 12,50 pro Fahrt', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		1250,
+	);
+	assert.equal(
+		parseOcrText('BUS 12,50', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		1250,
+	);
+	assert.equal(
+		parseOcrText('GAS 12,50', '2026-09-26T00:00:00.000Z').expenses[0]?.amountCents,
+		1250,
+	);
+	assert.deepEqual(parseOcrText('Rabatt 12.50 %', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Storno -12.50 EUR', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Storno - 12.50 EUR', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Storno −12,50 EUR', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Storno -€ 12,50', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Storno - EUR 12.50', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Gas 12.50 USD', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('CHF 12.50 Taxi', '2026-09-26T00:00:00.000Z').expenses, []);
+	assert.deepEqual(parseOcrText('Datum 26.09.2026', '2026-09-26T00:00:00.000Z').expenses, []);
+});
 
 test('parseSplitwiseCsv recovers the payer share from their net-balance column', () => {
 	// Splitwise CSV convention: each person's column holds their NET balance

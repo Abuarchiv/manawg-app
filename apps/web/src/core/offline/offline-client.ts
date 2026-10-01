@@ -2,7 +2,7 @@
 
 import { apiFetch } from '@/core/infra/api-client';
 import { getIdentity } from '@/shared/lib/identity';
-import { isPendingImageToken, uploadPendingImageToken } from './offline-images';
+import { isPendingImageToken, removePendingImage, uploadPendingImageToken } from './offline-images';
 import {
 	type OfflineAction,
 	type OfflineActionType,
@@ -41,6 +41,8 @@ const REAUTH_REQUIRED_ERROR =
 	'Erneute Anmeldung erforderlich: Öffne die WG erneut oder tritt mit einem aktuellen Einladungslink bei.';
 const IDEMPOTENCY_KEY_ERROR =
 	'Idempotenz-Schlüssel konnte nicht erzeugt werden. Die Aktion bleibt gespeichert und wird nicht gesendet.';
+const CHORE_STATE_CHANGED_ERROR =
+	'Aufgabenstand hat sich geändert. Prüfe den aktuellen Server-Stand, bevor du den Abschluss erneut versuchst.';
 const syncInFlight = new Map<string, Promise<number>>();
 let syncTail: Promise<unknown> = Promise.resolve();
 
@@ -254,7 +256,7 @@ export function countOfflineActions(shareCode?: string, options?: { memberId?: s
 	).length;
 }
 
-export function writeOfflineQueue(actions: OfflineAction[]): boolean {
+function persistOfflineQueue(actions: OfflineAction[]): boolean {
 	const storage = getOfflineStorage();
 	if (!storage) return false;
 	try {
@@ -271,6 +273,16 @@ export function writeOfflineQueue(actions: OfflineAction[]): boolean {
 	}
 }
 
+export function writeOfflineQueue(actions: OfflineAction[]): boolean {
+	const existing = new Map(readOfflineQueue().map((action) => [action.id, action]));
+	return persistOfflineQueue(
+		actions.map((action) => {
+			const previous = existing.get(action.id);
+			return previous ? rekeyEditedPost(previous, action, previous) : action;
+		}),
+	);
+}
+
 export function enqueueOfflineAction(action: OfflineAction): number {
 	const next = [...readOfflineQueue(), action];
 	return writeOfflineQueue(next) ? next.length : 0;
@@ -279,7 +291,9 @@ export function enqueueOfflineAction(action: OfflineAction): number {
 async function resolvePendingImages(action: OfflineAction): Promise<OfflineAction> {
 	const imageUrl = action.payload.imageUrl;
 	if (typeof imageUrl !== 'string' || !isPendingImageToken(imageUrl)) return action;
-	const publicUrl = await uploadPendingImageToken(imageUrl, action.memberId);
+	const publicUrl = await uploadPendingImageToken(imageUrl, action.memberId, {
+		removeAfterUpload: false,
+	});
 	return {
 		...action,
 		payload: {
@@ -287,6 +301,37 @@ async function resolvePendingImages(action: OfflineAction): Promise<OfflineActio
 			imageUrl: publicUrl,
 		},
 	};
+}
+
+function hasSameOfflineAction(left: OfflineAction, right: OfflineAction): boolean {
+	return serializeOfflineAction(left) === serializeOfflineAction(right);
+}
+
+function rekeyEditedPost(
+	snapshot: OfflineAction,
+	current: OfflineAction,
+	sent: OfflineAction | undefined,
+): OfflineAction {
+	if (!sent || current.idempotencyKey !== snapshot.idempotencyKey) return current;
+	const sentRequest = getOfflineActionRequest(sent);
+	const currentRequest = getOfflineActionRequest(current);
+	if (
+		sentRequest.method !== 'POST' ||
+		currentRequest.method !== 'POST' ||
+		(sentRequest.path === currentRequest.path &&
+			JSON.stringify(sentRequest.body) === JSON.stringify(currentRequest.body))
+	) {
+		return current;
+	}
+	const idempotencyKey = createOfflineIdempotencyKey();
+	if (idempotencyKey) return { ...current, idempotencyKey };
+	const withoutStaleKey = { ...current };
+	Reflect.deleteProperty(withoutStaleKey, 'idempotencyKey');
+	return withoutStaleKey;
+}
+
+function isChoreStateChangedConflict(action: OfflineAction): boolean {
+	return action.type === 'chore.complete' && action.lastError === CHORE_STATE_CHANGED_ERROR;
 }
 
 function removeMissingPendingImage(action: OfflineAction): OfflineAction {
@@ -397,10 +442,12 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 	// the just-read snapshot races with concurrent enqueues only for the few
 	// microseconds until the next line; the final write-back below re-reads
 	// and merges, which is what actually protects longer-running syncs.
-	if (!writeOfflineQueue(queue)) return 0;
+	if (!persistOfflineQueue(queue)) return 0;
 	const remaining: OfflineAction[] = [];
 	let synced = 0;
 	const syncedActionIds: string[] = [];
+	const sentActionsById = new Map<string, OfflineAction>();
+	const uploadedImages = new Map<string, { token: string; memberId: string; publicUrl: string }>();
 	const syncedByShareCode: Record<string, number> = {};
 	const now = Date.now();
 	const recordSynced = (action: OfflineAction) => {
@@ -410,6 +457,8 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 	};
 
 	for (const action of queue) {
+		const current = readOfflineQueue().find((item) => item.id === action.id);
+		if (!current || !hasSameOfflineAction(current, action)) continue;
 		if (shareCode && action.shareCode !== shareCode) {
 			remaining.push(action);
 			continue;
@@ -418,7 +467,10 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 			remaining.push(action);
 			continue;
 		}
-		if (!options?.force && !shouldRetryOfflineAction(action, now)) {
+		if (
+			!options?.force &&
+			(isChoreStateChangedConflict(action) || !shouldRetryOfflineAction(action, now))
+		) {
 			remaining.push(action);
 			continue;
 		}
@@ -443,9 +495,27 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 			});
 			continue;
 		}
+		let retryAction = action;
 		try {
 			const readyAction = await resolvePendingImages(action);
+			retryAction = readyAction;
+			const imageUrl = action.payload.imageUrl;
+			if (
+				typeof imageUrl === 'string' &&
+				isPendingImageToken(imageUrl) &&
+				typeof readyAction.payload.imageUrl === 'string' &&
+				readyAction.payload.imageUrl !== imageUrl
+			) {
+				uploadedImages.set(JSON.stringify([action.memberId, imageUrl]), {
+					token: imageUrl,
+					memberId: action.memberId,
+					publicUrl: readyAction.payload.imageUrl,
+				});
+			}
+			const current = readOfflineQueue().find((item) => item.id === action.id);
+			if (!current || !hasSameOfflineAction(current, action)) continue;
 			const request = getOfflineActionRequest(readyAction);
+			sentActionsById.set(action.id, readyAction);
 			const res = await apiFetch<unknown>(request.path, {
 				method: request.method,
 				memberId: readyAction.memberId,
@@ -479,6 +549,17 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 					}
 				}
 			} else if (
+				readyAction.type === 'chore.complete' &&
+				res.status === 409 &&
+				res.error === 'chore_state_changed'
+			) {
+				remaining.push({
+					...readyAction,
+					attempts: (readyAction.attempts ?? 0) + 1,
+					lastAttemptAt: new Date(now).toISOString(),
+					lastError: CHORE_STATE_CHANGED_ERROR,
+				});
+			} else if (
 				(readyAction.type === 'recurring.advance' && isRecurringAlreadyAdvanced(res)) ||
 				isChoreAlreadyCompleted(readyAction, res)
 			) {
@@ -494,7 +575,9 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 			}
 		} catch (err) {
 			const missingPendingImage = err instanceof Error && err.message === 'pending-image-missing';
-			const retryAction = missingPendingImage ? removeMissingPendingImage(action) : action;
+			const failedAction = missingPendingImage
+				? removeMissingPendingImage(retryAction)
+				: retryAction;
 			const pendingImageUploadError = explainPendingImageUploadError(err);
 			const lastError = missingPendingImage
 				? MISSING_PENDING_IMAGE_ERROR
@@ -504,26 +587,83 @@ async function runOfflineSync(shareCode?: string, options?: OfflineSyncOptions):
 						return `${failure.title}: ${failure.detail}`;
 					})());
 			remaining.push({
-				...retryAction,
-				attempts: (retryAction.attempts ?? 0) + 1,
+				...failedAction,
+				attempts: (failedAction.attempts ?? 0) + 1,
 				lastAttemptAt: new Date(now).toISOString(),
 				lastError,
 			});
 		}
 	}
 
-	// Re-read instead of trusting the startup snapshot: actions enqueued (or
-	// removed by the user) while this sync was in flight must survive the
-	// write-back. Keep everything not processed by THIS run, plus our
-	// remaining set.
-	const processedIds = new Set(queue.map((action) => action.id));
-	const current = readOfflineQueue().filter((action) => !processedIds.has(action.id));
-	const queueSaved = writeOfflineQueue([...current, ...remaining]);
+	const snapshotIds = new Set(queue.map((action) => action.id));
+	const remainingById = new Map(remaining.map((action) => [action.id, action]));
+	const currentById = new Map(readOfflineQueue().map((action) => [action.id, action]));
+	const syncedIds = new Set(syncedActionIds);
+	const unchangedSyncedIds: string[] = [];
+	const merged: OfflineAction[] = [];
+	for (const snapshot of queue) {
+		const current = currentById.get(snapshot.id);
+		if (!current) continue;
+		currentById.delete(snapshot.id);
+		if (hasSameOfflineAction(current, snapshot)) {
+			const retry = remainingById.get(snapshot.id);
+			if (retry) merged.push(retry);
+			else if (syncedIds.has(snapshot.id)) unchangedSyncedIds.push(snapshot.id);
+			else merged.push(current);
+			continue;
+		}
+		let edited = current;
+		const uploadedImage = uploadedImages.get(
+			JSON.stringify([current.memberId, snapshot.payload.imageUrl]),
+		);
+		if (
+			uploadedImage &&
+			current.payload.imageUrl === uploadedImage.token &&
+			isPendingImageToken(uploadedImage.token)
+		) {
+			edited = {
+				...current,
+				payload: { ...current.payload, imageUrl: uploadedImage.publicUrl },
+			};
+		}
+		merged.push(rekeyEditedPost(snapshot, edited, sentActionsById.get(snapshot.id)));
+	}
+	const mergedIds = new Set(merged.map((action) => action.id));
+	for (const current of currentById.values()) {
+		if (!mergedIds.has(current.id)) {
+			merged.push(current);
+			mergedIds.add(current.id);
+		}
+	}
+	for (const action of remaining) {
+		if (!snapshotIds.has(action.id) && !mergedIds.has(action.id)) {
+			merged.push(action);
+			mergedIds.add(action.id);
+		}
+	}
+	const queueSaved = persistOfflineQueue(merged);
 	if (!queueSaved) {
-		for (const actionId of syncedActionIds) {
+		for (const actionId of unchangedSyncedIds) {
 			syncedAfterFailedQueueSave.add(actionId);
 		}
-		persistSyncedIds(syncedActionIds);
+		persistSyncedIds(unchangedSyncedIds);
+	} else {
+		const retainedImages = new Set(
+			merged.flatMap((action) => {
+				const imageUrl = action.payload.imageUrl;
+				return typeof imageUrl === 'string' && isPendingImageToken(imageUrl)
+					? [JSON.stringify([action.memberId, imageUrl])]
+					: [];
+			}),
+		);
+		for (const [key, image] of uploadedImages) {
+			if (retainedImages.has(key)) continue;
+			try {
+				await removePendingImage(image.token, image.memberId);
+			} catch {
+				// The durable queue no longer needs this blob; a failed cleanup only leaves an orphan.
+			}
+		}
 	}
 	if (synced > 0) {
 		window.dispatchEvent(

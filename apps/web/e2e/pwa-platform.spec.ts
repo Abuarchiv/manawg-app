@@ -82,8 +82,6 @@ test('WG install prompt stays above and does not block the bottom navigation', a
 		await expect(bottomNav.getByRole('link', { name: label })).toBeVisible();
 	}
 
-	// Let the 220 ms entrance animation settle before measuring final hit regions.
-	await page.waitForTimeout(250);
 	const measurements: Array<{
 		width: number;
 		theme: 'light' | 'dark';
@@ -120,8 +118,14 @@ test('WG install prompt stays above and does not block the bottom navigation', a
 							const sharedHeight = Number.parseFloat(
 								getComputedStyle(document.documentElement).getPropertyValue('--app-nav-height'),
 							);
+							const promptCard = document.querySelector(
+								'section[aria-label="App installieren"] [data-slot="card"]',
+							);
+							if (!nav || !promptCard) return false;
+							const navBounds = nav.getBoundingClientRect();
 							return (
-								nav !== null && Math.abs(nav.getBoundingClientRect().height - sharedHeight) < 0.1
+								Math.abs(navBounds.height - sharedHeight) < 0.1 &&
+								promptCard.getBoundingClientRect().bottom <= navBounds.top
 							);
 						}),
 					)

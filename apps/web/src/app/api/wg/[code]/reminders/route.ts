@@ -173,6 +173,7 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 					debtorName: debtor.name,
 					creditorName: creditor.name,
 					amountCents: pair.amountCents,
+					currency,
 					oldestDebtAgeDays: oldestAge,
 				});
 
@@ -210,18 +211,21 @@ export const POST = withWgRoute('reminders POST', async (req, { code }) => {
 				},
 			});
 
-			const { warning }: { warning: ReminderResponseWarning } = await dispatchNotificationSafely({
-				wg,
-				event: 'expense.reminder',
-				payload: {
-					amountCents: pair.amountCents,
-					currency,
-					creditorName: creditor.name,
-					debtorName: debtor.name,
-					oldestDebtAgeDays: inserted.oldestDebtAgeDays,
-				},
-				targetMemberIds: [debtorMemberId],
-			});
+			const { warning }: { warning: ReminderResponseWarning } =
+				channel === 'push'
+					? await dispatchNotificationSafely({
+							wg,
+							event: 'expense.reminder',
+							payload: {
+								amountCents: pair.amountCents,
+								currency,
+								creditorName: creditor.name,
+								debtorName: debtor.name,
+								oldestDebtAgeDays: inserted.oldestDebtAgeDays,
+							},
+							targetMemberIds: [debtorMemberId],
+						})
+					: { warning: null };
 
 			return NextResponse.json({ reminder: inserted, warning });
 		},

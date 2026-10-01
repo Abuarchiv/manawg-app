@@ -72,12 +72,18 @@ async function withStore<T>(
 	return new Promise((resolve, reject) => {
 		const tx = db.transaction(STORE_NAME, mode);
 		const request = run(tx.objectStore(STORE_NAME));
-		request.onsuccess = () => resolve(request.result);
-		request.onerror = () => reject(request.error);
-		tx.oncomplete = () => db.close();
+		request.onerror = () => reject(request.error ?? new Error('offline-image-request-failed'));
+		tx.oncomplete = () => {
+			db.close();
+			resolve(request.result);
+		};
 		tx.onerror = () => {
 			db.close();
-			reject(tx.error);
+			reject(tx.error ?? request.error ?? new Error('offline-image-transaction-failed'));
+		};
+		tx.onabort = () => {
+			db.close();
+			reject(tx.error ?? request.error ?? new Error('offline-image-transaction-aborted'));
 		};
 	});
 }
@@ -123,7 +129,11 @@ export async function removePendingImage(token: string, memberId: string): Promi
 	await withStore('readwrite', (store) => store.delete(pendingImageIdFromToken(token)));
 }
 
-export async function uploadPendingImageToken(token: string, memberId: string): Promise<string> {
+export async function uploadPendingImageToken(
+	token: string,
+	memberId: string,
+	options: { removeAfterUpload?: boolean } = {},
+): Promise<string> {
 	const record = await readPendingImage(token, memberId);
 	if (!record) throw new Error('pending-image-missing');
 	const sigRes = await fetch('/api/upload/sign', {
@@ -151,6 +161,6 @@ export async function uploadPendingImageToken(token: string, memberId: string): 
 		headers: { ...sig.uploadHeaders, 'Content-Type': record.type },
 	});
 	if (!uploadRes.ok) throw new Error(`upload-failed:${uploadRes.status}`);
-	await removePendingImage(token, memberId);
+	if (options.removeAfterUpload !== false) await removePendingImage(token, memberId);
 	return sig.publicUrl;
 }

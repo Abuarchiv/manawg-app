@@ -269,14 +269,19 @@ export function reconcileChatMessages<T extends { id: string }>(
 ): T[] {
 	const latestIds = new Set(latestPage.map((message) => message.id));
 	const refreshedById = new Map(refreshedLoaded.map((message) => [message.id, message]));
+	const rebasing =
+		existing.length > 0 &&
+		latestPage.length > 0 &&
+		!existing.some((message) => latestIds.has(message.id));
+	// With no shared row, the old cursor cannot reach the missing interval.
+	const retainedMessages = rebasing
+		? []
+		: existing
+				.filter((message) => !latestIds.has(message.id))
+				.map((message) => refreshedById.get(message.id) ?? message);
 	// Both history and the latest page already have the database's exact order.
 	// JS timestamps lose microseconds, so they cannot safely reconstruct it.
-	return [
-		...existing
-			.filter((message) => !latestIds.has(message.id))
-			.map((message) => refreshedById.get(message.id) ?? message),
-		...latestPage,
-	];
+	return [...retainedMessages, ...latestPage];
 }
 
 export function mergePagedMessagesById<T extends { id: string }>(

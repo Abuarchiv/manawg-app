@@ -1,7 +1,13 @@
-import { CENTS_PER_EURO } from '@/core/utils/money';
-import type { ParsedExpense } from './import-parsers';
+import { type ParsedExpense, parseAmountToCents } from './import-parsers';
 
 const OCR_LANGS = 'deu+eng';
+const supportedCurrencyCodes = new Set(
+	(
+		Intl as typeof Intl & {
+			supportedValuesOf?: (key: 'currency') => string[];
+		}
+	).supportedValuesOf?.('currency') ?? ['USD', 'CHF', 'GBP', 'JPY', 'CAD', 'AUD'],
+);
 
 export interface OcrRunner {
 	recognize(input: Blob | File): Promise<string>;
@@ -34,16 +40,10 @@ export async function runOcrOnImage(file: Blob | File, runner?: OcrRunner): Prom
 	}
 }
 
-const AMOUNT_PATTERN = /(\d{1,4}[.,]\d{2})\s*(?:€|EUR)?/g;
+const AMOUNT_PATTERN =
+	/(?<![\p{L}\d.,])(?<!\d\s)([+\-−]?\s*)?(?:€\s*|EUR\s*)?([+\-−]?\s*(?:\d{1,3}(?:[.,]\d{3}|[ \u00a0\u202f]\d{3})+|\d+)[.,]\d{1,2})\s*(?:€|EUR)?(?![\p{L}\d.,]|\s*%)/giu;
 const DATE_PATTERN = /(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/;
 const PAYER_PATTERN = /(?:bezahlt von|paid by|von:)\s*([A-Za-zÄÖÜäöüß][A-Za-zÄÖÜäöüß\s-]{1,40})/i;
-
-function parseGermanAmount(raw: string): number | null {
-	const normalized = raw.replace(/\./g, '').replace(',', '.');
-	const num = Number(normalized);
-	if (!Number.isFinite(num)) return null;
-	return Math.round(num * CENTS_PER_EURO);
-}
 
 function parseDate(raw: string): string | null {
 	const match = raw.match(DATE_PATTERN);
@@ -102,11 +102,20 @@ export function parseOcrText(rawText: string, contextDateIso?: string): OcrParse
 		const maybeDate = parseDate(line);
 		if (maybeDate) currentDate = maybeDate;
 
-		const amounts = Array.from(line.matchAll(AMOUNT_PATTERN));
+		const amounts = Array.from(line.matchAll(AMOUNT_PATTERN)).filter((match) => {
+			const start = match.index ?? 0;
+			const before = line.slice(0, start);
+			const after = line.slice(start + match[0].length);
+			const prefixCurrency = /(?:^|\s)([a-z]{3})\s*$/i.exec(before)?.[1]?.toUpperCase();
+			const suffixCurrency = /^\s*([a-z]{3})\b/i.exec(after)?.[1]?.toUpperCase();
+			return ![prefixCurrency, suffixCurrency].some(
+				(code) => code !== undefined && code !== 'EUR' && supportedCurrencyCodes.has(code),
+			);
+		});
 		if (amounts.length === 0) continue;
 		const last = amounts[amounts.length - 1];
-		if (!last || typeof last[1] !== 'string') continue;
-		const amountCents = parseGermanAmount(last[1]);
+		if (!last || typeof last[2] !== 'string') continue;
+		const amountCents = parseAmountToCents(`${last[1] ?? ''}${last[2]}`);
 		if (amountCents === null || amountCents <= 0) continue;
 
 		const description = cleanDescription(line);

@@ -18,6 +18,5 @@ assert.match(scriptSource, /'nonce-security-boundary-test-nonce'/);
 assert.doesNotMatch(scriptSource, /'unsafe-inline'/);
 assert.doesNotMatch(styleSource, /'unsafe-inline'/);
 assert.match(layoutSource, /export const dynamic = 'force-dynamic'/);
-assert.match(middlewareSource, /if \(!originAllowed\(req\)\)/);
-assert.doesNotMatch(middlewareSource, /if \(!isRead && !originAllowed\(req\)\)/);
+assert.match(middlewareSource, /if \(!isRead && !originAllowed\(req\)\)/);
 assert.match(rateLimitSource, /failMode: 'open' \| 'closed' = rateLimitFailMode\(\)/);

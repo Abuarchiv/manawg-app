@@ -99,6 +99,7 @@ interface QueuedAnnouncementInput extends QueuedIdentityInput {
 interface QueuedChoreCompletionInput extends QueuedIdentityInput {
 	idempotencyKey?: string;
 	choreId: string;
+	expectedNextDueAt: string;
 	now?: number;
 }
 
@@ -254,7 +255,7 @@ export function createQueuedChoreCompletion(input: QueuedChoreCompletionInput): 
 		input.wgId,
 		input.shareCode,
 		input.memberId,
-		{ choreId: input.choreId },
+		{ choreId: input.choreId, expectedNextDueAt: input.expectedNextDueAt },
 		now,
 		input.idempotencyKey,
 	);
@@ -472,7 +473,7 @@ const offlineActionHandlers: Record<OfflineActionType, OfflineActionHandler> = {
 		buildRequest: (action) => ({
 			path: `/api/wg/${pathSegment(action.shareCode)}/chores/${pathSegment(action.payload.choreId)}/complete`,
 			method: 'POST',
-			body: {},
+			body: { expectedNextDueAt: action.payload.expectedNextDueAt },
 		}),
 		summary: () => ({
 			title: 'Putzplan',

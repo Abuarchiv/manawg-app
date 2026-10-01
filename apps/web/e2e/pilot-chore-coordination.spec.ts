@@ -69,6 +69,7 @@ test('completing a chore resolves only its linked swap post and shows the next d
 
 		const completeResponse = await request.post(
 			`/api/wg/${shareCode}/chores/${encodeURIComponent(choreId)}/complete`,
+			{ data: { expectedNextDueAt: choreBody.chore.nextDueAt } },
 		);
 		expect(completeResponse.ok()).toBe(true);
 

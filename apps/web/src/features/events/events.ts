@@ -143,6 +143,20 @@ function addToDate(date: Date, freq: RecurrenceFreq, interval: number): Date {
 	return next;
 }
 
+function berlinCalendarDate(date: Date): Date {
+	return new Date(`${berlinDayKey(date)}T00:00:00.000Z`);
+}
+
+export function recurrenceStartAtBerlinWallTime(anchor: Date, dayKey: string): Date | null {
+	if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) return null;
+	const wallMinutes = berlinWallMinutes(anchor);
+	// A wall time inside the spring-forward gap moves forward by the one-hour gap.
+	return (
+		instantAtBerlinWallTime(dayKey, wallMinutes) ??
+		instantAtBerlinWallTime(dayKey, wallMinutes + 60)
+	);
+}
+
 interface ExpansionWindow {
 	from: number;
 	to: number;
@@ -324,17 +338,19 @@ export function expandRecurrence(
 		rule.until !== undefined ? (parseTimestamp(rule.until) ?? Number.POSITIVE_INFINITY) : null;
 	const occurrences: EventOccurrence[] = [];
 	const anchor = new Date(startMs);
+	const calendarAnchor = event.allDay ? anchor : berlinCalendarDate(anchor);
 	const weeklyByDay = rule.freq === 'WEEKLY' && !!rule.byDay && rule.byDay.length > 0;
 	const weeklyAllowedDays = weeklyByDay ? new Set(rule.byDay?.map((d) => BYDAY_TO_INDEX[d])) : null;
-	const anchorWeekStartMs = startMs - anchor.getUTCDay() * MS_PER_DAY;
-	// Wall time (Berlin minutes since midnight) the anchor starts at; every
-	// occurrence is re-aligned to it so DST transitions keep 20:00 at 20:00.
-	const anchorWallMinutes = berlinWallMinutes(anchor);
+	const anchorWeekStartMs = calendarAnchor.getTime() - calendarAnchor.getUTCDay() * MS_PER_DAY;
+	const recurrenceWindowFrom = window.from - baseDuration;
+	const calendarWindowFrom = event.allDay
+		? recurrenceWindowFrom
+		: berlinCalendarDate(new Date(recurrenceWindowFrom)).getTime();
 	const skip = computeForwardSkip(
 		rule,
-		startMs,
+		calendarAnchor.getTime(),
 		anchorWeekStartMs,
-		window.from - baseDuration,
+		calendarWindowFrom,
 		weeklyByDay,
 		weeklyAllowedDays,
 	);
@@ -348,18 +364,19 @@ export function expandRecurrence(
 
 	while (iterations < MAX_EXPAND_ITERATIONS) {
 		iterations += 1;
-		const occMs = current.getTime();
-		// Check the displayed wall time: it can move earlier than raw UTC at DST.
+		const calendarMs = current.getTime();
 		const occurrenceMs = event.allDay
-			? occMs
-			: (instantAtBerlinWallTime(berlinDayKey(current), anchorWallMinutes) ?? current).getTime();
+			? calendarMs
+			: (
+					recurrenceStartAtBerlinWallTime(anchor, current.toISOString().slice(0, 10)) ?? current
+				).getTime();
 		if (occurrenceMs > window.to) break;
-		if (untilMs !== null && occMs > untilMs) break;
+		if (untilMs !== null && occurrenceMs > untilMs) break;
 		if (rule.count !== undefined && index >= rule.count) break;
 
 		let emit = true;
 		if (weeklyAllowedDays) {
-			const weekOffset = Math.floor((occMs - anchorWeekStartMs) / (7 * MS_PER_DAY));
+			const weekOffset = Math.floor((current.getTime() - anchorWeekStartMs) / (7 * MS_PER_DAY));
 			emit = weeklyAllowedDays.has(current.getUTCDay()) && weekOffset % rule.interval === 0;
 		}
 
@@ -375,7 +392,7 @@ export function expandRecurrence(
 			current = new Date(current.getTime() + MS_PER_DAY);
 		} else if (rule.freq === 'MONTHLY' || rule.freq === 'YEARLY') {
 			stepIndex += 1;
-			current = addFromAnchor(anchor, rule.freq, rule.interval * stepIndex);
+			current = addFromAnchor(calendarAnchor, rule.freq, rule.interval * stepIndex);
 		} else {
 			current = addToDate(current, rule.freq, rule.interval);
 		}

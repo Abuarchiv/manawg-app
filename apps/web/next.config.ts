@@ -29,14 +29,6 @@ const nextConfig: NextConfig = {
 	eslint: {
 		ignoreDuringBuilds: false,
 	},
-	images: {
-		remotePatterns: [
-			{
-				protocol: 'https',
-				hostname: '*.amazonaws.com',
-			},
-		],
-	},
 	async headers() {
 		return [{ source: '/:path*', headers: securityHeaders }];
 	},

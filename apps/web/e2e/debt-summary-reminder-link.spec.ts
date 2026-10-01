@@ -114,6 +114,9 @@ test('keeps finance actions and expense summary keyboard-operable at phone sizes
 	await expect
 		.poll(() => reminderLink.evaluate((node) => node.matches(':focus-visible')))
 		.toBe(true);
+	await page.evaluate(async () => {
+		await document.fonts.ready;
+	});
 	for (const theme of ['light', 'dark'] as const) {
 		await page.emulateMedia({ colorScheme: theme });
 		for (const textScale of ['100%', '200%'] as const) {
@@ -122,30 +125,36 @@ test('keeps finance actions and expense summary keyboard-operable at phone sizes
 			}, textScale);
 			for (const width of [390, 360, 320]) {
 				await page.setViewportSize({ width, height: 844 });
-				const metrics = await Promise.all(
-					[settleButton, remindButton].map((button) =>
-						button.evaluate((element) => {
-							const buttonRect = element.getBoundingClientRect();
-							const textRange = document.createRange();
-							textRange.selectNodeContents(element);
-							const textRect = textRange.getBoundingClientRect();
-							const hitTarget = getComputedStyle(element, '::after');
-							return {
-								button: {
-									left: buttonRect.left,
-									right: buttonRect.right,
-									top: buttonRect.top,
-									bottom: buttonRect.bottom,
-								},
-								textFits:
-									textRect.left >= buttonRect.left - 1 && textRect.right <= buttonRect.right + 1,
-								touchWidth: Number.parseFloat(hitTarget.minWidth),
-								touchHeight: Number.parseFloat(hitTarget.height),
-							};
-						}),
-					),
-				);
-				const [settle, remind] = metrics;
+				const [settle, remind] = await secondaryDebt.evaluate((container) => {
+					const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('button'));
+					const settleElement = buttons.find(
+						(button) => button.textContent?.trim() === 'Ausgleichen',
+					);
+					const remindElement = buttons.find((button) => button.textContent?.trim() === 'Erinnern');
+					if (!settleElement || !remindElement) {
+						throw new Error('Both debt action buttons must be present');
+					}
+					const measure = (element: HTMLButtonElement) => {
+						const buttonRect = element.getBoundingClientRect();
+						const textRange = document.createRange();
+						textRange.selectNodeContents(element);
+						const textRect = textRange.getBoundingClientRect();
+						const hitTarget = getComputedStyle(element, '::after');
+						return {
+							button: {
+								left: buttonRect.left,
+								right: buttonRect.right,
+								top: buttonRect.top,
+								bottom: buttonRect.bottom,
+							},
+							textFits:
+								textRect.left >= buttonRect.left - 1 && textRect.right <= buttonRect.right + 1,
+							touchWidth: Number.parseFloat(hitTarget.minWidth),
+							touchHeight: Number.parseFloat(hitTarget.height),
+						};
+					};
+					return [measure(settleElement), measure(remindElement)] as const;
+				});
 				const buttonsOverlap =
 					settle.button.left < remind.button.right &&
 					remind.button.left < settle.button.right &&

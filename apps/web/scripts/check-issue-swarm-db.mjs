@@ -73,7 +73,7 @@ mustNotMatch(config, /console\.warn\(/, 'drizzle config must not duplicate missi
 mustMatch(config, /dbCredentials:/, 'drizzle config keeps optional database credentials');
 mustMatch(
 	connection,
-	/validateDatabaseUrl\(url, 'transaction database connection'\)/,
+	/secureRuntimeConnectionString\(url, 'transaction database connection'\)/,
 	'transaction URL label',
 );
 mustNotMatch(

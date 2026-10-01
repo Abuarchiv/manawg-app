@@ -3,7 +3,9 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { inspect } from 'node:util';
 import { expect, test } from '@playwright/test';
+import { hasRemoteMatch } from 'next/dist/shared/lib/match-remote-pattern';
 import { ModuleKind, ScriptTarget, transpileModule } from 'typescript';
+import nextConfig from '../next.config';
 import { readJsonBody } from '../src/core/http/read-json';
 import { captureException, logApiError } from '../src/core/infra/observability';
 
@@ -27,6 +29,22 @@ function loadTs<T>(filePath: string, overrides: Record<string, unknown>): T {
 	new Function('require', 'module', 'exports', compiled)(localRequire, module, module.exports);
 	return module.exports as T;
 }
+
+test('image optimizer rejects arbitrary remote hosts before fetching redirects', () => {
+	for (const url of [
+		'https://attacker.execute-api.eu-central-1.amazonaws.com/proxy',
+		'https://unrelated-bucket.s3.eu-central-1.amazonaws.com/image.png',
+		'http://127.0.0.1/private',
+	]) {
+		expect(
+			hasRemoteMatch(
+				nextConfig.images?.domains ?? [],
+				nextConfig.images?.remotePatterns ?? [],
+				new URL(url),
+			),
+		).toBe(false);
+	}
+});
 
 test('central error reporting redacts thrown messages and arbitrary context while keeping route labels', () => {
 	const calls: unknown[][] = [];

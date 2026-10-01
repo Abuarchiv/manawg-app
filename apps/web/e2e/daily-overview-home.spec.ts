@@ -118,15 +118,15 @@ test('shows personal actions and a separate Berlin week agenda', async ({ page }
 	const fixtureNow = Date.parse('2026-09-27T10:00:00.000Z');
 	await page.clock.install({ time: new Date(fixtureNow) });
 	await setupMember(page);
-	const window = getBerlinWeekWindow(fixtureNow);
-	const agendaDay = nextAgendaDay(window.todayKey);
+	const weekWindow = getBerlinWeekWindow(fixtureNow);
+	const agendaDay = nextAgendaDay(weekWindow.todayKey);
 	const previousWeek = dayKeyOffset(agendaDay, -7);
-	const yesterday = dayKeyOffset(window.todayKey, -1);
+	const yesterday = dayKeyOffset(weekWindow.todayKey, -1);
 	const chores = [
 		{
 			id: 'mine',
 			title: 'Bad putzen',
-			nextDueAt: atBerlin(window.todayKey, 23 * 60),
+			nextDueAt: atBerlin(weekWindow.todayKey, 23 * 60),
 			overdue: false,
 			assignedMemberId: FIXTURE_WG.memberId,
 			assignedMemberName: FIXTURE_WG.memberName,
@@ -392,9 +392,14 @@ test('keeps one completion key across 5xx, 429, and offline retries', async ({ p
 	);
 	const attempts: Array<number | 'offline'> = [503, 429, 'offline', 200];
 	const idempotencyKeys: string[] = [];
+	const expectedDueSnapshots: string[] = [];
 	await page.route(/\/api\/wg\/MTE8PZAT\/chores\/mine\/complete$/, async (route) => {
 		const response = attempts[idempotencyKeys.length];
 		idempotencyKeys.push(route.request().headers()['idempotency-key'] ?? '');
+		const requestBody = route.request().postDataJSON() as { expectedNextDueAt?: unknown };
+		expectedDueSnapshots.push(
+			typeof requestBody.expectedNextDueAt === 'string' ? requestBody.expectedNextDueAt : '',
+		);
 		if (response === 'offline') return route.abort('failed');
 		return route.fulfill({
 			status: response ?? 500,
@@ -425,6 +430,7 @@ test('keeps one completion key across 5xx, 429, and offline retries', async ({ p
 	await expect(page.getByText('Bad putzen erledigt.')).toBeVisible();
 	await expect.poll(() => idempotencyKeys.length).toBe(4);
 	expect(new Set(idempotencyKeys).size).toBe(1);
+	expect(expectedDueSnapshots).toEqual(Array(4).fill(chore.nextDueAt));
 	await expect(page.getByText('Bad putzen', { exact: true })).toHaveCount(0);
 });
 

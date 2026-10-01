@@ -20,6 +20,7 @@ const { buildChoreFairness, chooseNextAvailableMember } = await import(
 );
 const { formatAbsenceRange, isMemberAbsent } = await import('../src/features/chores/absence.ts');
 const { buildChorePatchUpdate } = await import('../src/features/chores/chore-patch.ts');
+const { computeNextDueAt } = await import('../src/features/chores/chore-recurrence.ts');
 
 const now = Date.parse('2026-09-23T12:00:00.000Z');
 
@@ -184,4 +185,34 @@ test('absence dates use Berlin days across daylight saving and travel', () => {
 	assert.equal(isMemberAbsent(absence, 'alice', Date.parse('2026-03-29T00:00:00+01:00')), true);
 	assert.equal(isMemberAbsent(absence, 'alice', Date.parse('2026-03-30T00:00:00+02:00')), false);
 	assert.equal(formatAbsenceRange(startDate, endDate), '29.03. bis 29.03.');
+});
+
+test('monthly chore recurrence preserves Berlin month-end and seconds across time zones', () => {
+	const monthly = computeNextDueAt(
+		new Date('2026-01-31T00:30:12.345+01:00'),
+		1,
+		new Date('2026-01-31T00:30:12.345+01:00'),
+		'months',
+		new Date('2026-01-31T00:30:12.345+01:00'),
+	);
+	assert.equal(monthly.toISOString(), '2026-02-27T23:30:12.345Z');
+});
+
+test('daily chore recurrence advances the Berlin date across fall-back DST', () => {
+	const daily = computeNextDueAt(
+		new Date('2026-10-25T00:30:00+02:00'),
+		1,
+		new Date('2026-10-25T00:30:00+02:00'),
+	);
+	assert.equal(daily.toISOString(), '2026-10-25T23:30:00.000Z');
+});
+
+test('monthly recurrence shifts a missing Berlin spring wall time through the DST gap', () => {
+	const next = computeNextDueAt(
+		new Date('2026-03-28T02:30:12.345+01:00'),
+		1,
+		new Date('2026-03-28T02:30:12.345+01:00'),
+		'days',
+	);
+	assert.equal(next.toISOString(), '2026-03-29T01:30:12.345Z');
 });

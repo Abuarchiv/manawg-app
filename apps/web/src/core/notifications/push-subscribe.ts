@@ -109,15 +109,6 @@ function isPushSupported(): boolean {
 	);
 }
 
-export async function persistExistingWebPushSubscription(
-	code: string,
-	memberId: string,
-	subscription: PushSubscription,
-	memberToken?: string,
-): Promise<void> {
-	await saveServerPushOptIn(code, memberId, subscription, false, memberToken);
-}
-
 export async function subscribeWebPush(
 	code: string,
 	memberId: string,

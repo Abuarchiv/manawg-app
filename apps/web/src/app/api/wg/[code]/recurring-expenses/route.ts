@@ -480,6 +480,9 @@ export const PATCH = withWgRoute('recurring-expenses PATCH', async (req, { code 
 		if (hasFinancialChange && !checkPaidByGuard(paidByMemberId, auth.member.memberId, splits).ok) {
 			return apiError('paid_by_must_include_caller', 403, 'paid_by_must_include_caller');
 		}
+		const nextDueAt = parsed.data.nextDueAt ? new Date(parsed.data.nextDueAt) : template.nextDueAt;
+		const dueDateWasChanged =
+			parsed.data.nextDueAt !== undefined && nextDueAt.getTime() !== template.nextDueAt.getTime();
 
 		const [updated] = await db
 			.update(recurringExpenses)
@@ -488,11 +491,9 @@ export const PATCH = withWgRoute('recurring-expenses PATCH', async (req, { code 
 				amountCents,
 				paidByMemberId,
 				intervalMonths: parsed.data.intervalMonths ?? template.intervalMonths,
-				nextDueAt: parsed.data.nextDueAt ? new Date(parsed.data.nextDueAt) : template.nextDueAt,
+				nextDueAt,
 				// An explicit due-date edit re-anchors the cadence.
-				anchorAt: parsed.data.nextDueAt
-					? new Date(parsed.data.nextDueAt)
-					: (template.anchorAt ?? template.nextDueAt),
+				anchorAt: dueDateWasChanged ? nextDueAt : (template.anchorAt ?? template.nextDueAt),
 				splitsJson: JSON.stringify(splits),
 				updatedAt: new Date(),
 			})

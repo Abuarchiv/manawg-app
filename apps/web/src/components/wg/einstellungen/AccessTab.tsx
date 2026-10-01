@@ -339,68 +339,73 @@ export function AccessTab({ wg, members, identity }: AccessTabProps) {
 									: joiningEnabled
 										? 'Mit Code können neue Personen beitreten.'
 										: 'Der Code ist für neue Beitritte gesperrt.'}
+								{!isAdmin && ' Nur die erstellende Person kann den WG-Zugang ändern.'}
 							</FieldDescription>
 						</FieldContent>
-						<Switch
-							checked={joiningEnabled}
-							disabled={accessPending !== null}
-							aria-busy={accessPending === 'join'}
-							aria-label={joiningEnabled ? 'Neue Beitritte sperren' : 'Neue Beitritte erlauben'}
-							onCheckedChange={() => void toggleJoining()}
-						/>
+						{isAdmin && (
+							<Switch
+								checked={joiningEnabled}
+								disabled={accessPending !== null}
+								aria-busy={accessPending === 'join'}
+								aria-label={joiningEnabled ? 'Neue Beitritte sperren' : 'Neue Beitritte erlauben'}
+								onCheckedChange={() => void toggleJoining()}
+							/>
+						)}
 					</Field>
-					<div className="border-border border-t pt-2">
-						<div className="flex min-h-[44px] flex-wrap items-center justify-between gap-3">
-							<div className="min-w-0 flex-1 basis-40">
-								<div className="text-foreground text-sm font-medium">WG-Code erneuern</div>
-								<div className="text-muted-foreground mt-0.5 text-xs">
-									Alte Links funktionieren danach nicht mehr.
+					{isAdmin && (
+						<div className="border-border border-t pt-2">
+							<div className="flex min-h-[44px] flex-wrap items-center justify-between gap-3">
+								<div className="min-w-0 flex-1 basis-40">
+									<div className="text-foreground text-sm font-medium">WG-Code erneuern</div>
+									<div className="text-muted-foreground mt-0.5 text-xs">
+										Alte Links funktionieren danach nicht mehr.
+									</div>
 								</div>
-							</div>
-							{rotateConfirm ? (
-								<div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+								{rotateConfirm ? (
+									<div className="flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2">
+										<Button
+											type="button"
+											variant="ghost"
+											onClick={cancelRotateConfirm}
+											disabled={accessPending !== null}
+											aria-label="Abbrechen: WG-Code-Erneuerung"
+											className="shrink-0 px-2.5"
+										>
+											Abbrechen
+										</Button>
+										<Button
+											type="button"
+											variant="destructive"
+											onClick={() => void rotateShareCode()}
+											disabled={accessPending !== null}
+											aria-label="Bestätigen: WG-Code-Erneuerung"
+											className="shrink-0 px-2.5"
+										>
+											{accessPending === 'rotate' ? (
+												<>
+													<Spinner aria-hidden />
+													Speichert…
+												</>
+											) : (
+												'Bestätigen'
+											)}
+										</Button>
+									</div>
+								) : (
 									<Button
 										type="button"
-										variant="ghost"
-										onClick={cancelRotateConfirm}
-										disabled={accessPending !== null}
-										aria-label="Abbrechen: WG-Code-Erneuerung"
-										className="shrink-0 px-2.5"
-									>
-										Abbrechen
-									</Button>
-									<Button
-										type="button"
-										variant="destructive"
+										variant="outline"
 										onClick={() => void rotateShareCode()}
 										disabled={accessPending !== null}
-										aria-label="Bestätigen: WG-Code-Erneuerung"
-										className="shrink-0 px-2.5"
+										aria-label="Erneuern: WG-Code"
+										className="shrink-0"
 									>
-										{accessPending === 'rotate' ? (
-											<>
-												<Spinner aria-hidden />
-												Speichert…
-											</>
-										) : (
-											'Bestätigen'
-										)}
+										Erneuern
 									</Button>
-								</div>
-							) : (
-								<Button
-									type="button"
-									variant="outline"
-									onClick={() => void rotateShareCode()}
-									disabled={accessPending !== null}
-									aria-label="Erneuern: WG-Code"
-									className="shrink-0"
-								>
-									Erneuern
-								</Button>
-							)}
+								)}
+							</div>
 						</div>
-					</div>
+					)}
 					{accessMessage && (
 						<Alert>
 							<AlertDescription>{accessMessage}</AlertDescription>
@@ -573,17 +578,23 @@ export function AccessTab({ wg, members, identity }: AccessTabProps) {
 					title="WG dauerhaft löschen"
 					hint="Entfernt die gesamte WG und alle Daten (Ausgaben, Listen, Pinnwand) unwiderruflich für alle Mitglieder."
 				>
-					<div className="p-3">
-						<Button
-							type="button"
-							variant="destructive"
-							onClick={openDeleteConfirm}
-							className="w-full"
-						>
-							<Trash2 aria-hidden />
-							Komplette WG für alle löschen
-						</Button>
-					</div>
+					{isAdmin ? (
+						<div className="p-3">
+							<Button
+								type="button"
+								variant="destructive"
+								onClick={openDeleteConfirm}
+								className="w-full"
+							>
+								<Trash2 aria-hidden />
+								Komplette WG für alle löschen
+							</Button>
+						</div>
+					) : (
+						<p className="text-muted-foreground p-3 text-[13px]">
+							Nur die erstellende Person kann die WG löschen.
+						</p>
+					)}
 				</Section>
 
 				<AccountDeleteSection />

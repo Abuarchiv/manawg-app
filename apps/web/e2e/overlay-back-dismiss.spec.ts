@@ -1,4 +1,5 @@
 import { type Page, expect, test } from '@playwright/test';
+import { E2E_CREATED_WG } from '../src/core/infra/e2e-db-down';
 import { FIXTURE_WG, dismissOnboarding, navigateToFeature, setupMember } from './_helpers';
 
 test.skip(process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true', 'requires local fixture server');
@@ -32,6 +33,36 @@ async function pressSystemBack(page: Page): Promise<void> {
 	});
 }
 
+async function setupCreatedWgOwner(page: Page): Promise<void> {
+	await page.addInitScript(
+		({ wgId, memberId, memberName }) => {
+			try {
+				localStorage.setItem(
+					`manawg_identity:${wgId}`,
+					JSON.stringify({ memberId, name: memberName, memberToken: 'fixture-member-token' }),
+				);
+				localStorage.removeItem('manawg:offline-actions');
+			} catch {
+				window.__manawgStorageBlocked = true;
+				document.documentElement?.setAttribute('data-manawg-storage-blocked', 'true');
+			}
+		},
+		{
+			wgId: E2E_CREATED_WG.id,
+			memberId: E2E_CREATED_WG.member.id,
+			memberName: 'Smoke Tester',
+		},
+	);
+	await page.route(`**/api/wg/${E2E_CREATED_WG.shareCode}/members`, async (route) => {
+		const response = await route.fetch();
+		const body = await response.json();
+		if (!body.members?.some((member: { id: string }) => member.id === E2E_CREATED_WG.member.id)) {
+			throw new Error('Expected the created-WG owner in the member fixture');
+		}
+		await route.fulfill({ response, json: { ...body, viewerIsAdmin: true } });
+	});
+}
+
 // Material 3: the Android back gesture closes an open overlay instead of
 // leaving the page.
 test('system back closes an open drawer instead of leaving the page', async ({ page }) => {
@@ -58,9 +89,9 @@ test('system back closes an open drawer instead of leaving the page', async ({ p
 
 test('system back closes an open alert dialog instead of leaving the page', async ({ page }) => {
 	await trackCloseWatchers(page);
-	await setupMember(page);
+	await setupCreatedWgOwner(page);
 	await page.setViewportSize({ width: 320, height: 640 });
-	await navigateToFeature(page, `/wg/${shareCode}/einstellungen#zugang`);
+	await navigateToFeature(page, `/wg/${E2E_CREATED_WG.shareCode}/einstellungen#zugang`);
 	await dismissOnboarding(page);
 
 	const trigger = page.getByRole('button', { name: 'Komplette WG für alle löschen' });
@@ -70,7 +101,7 @@ test('system back closes an open alert dialog instead of leaving the page', asyn
 
 	await pressSystemBack(page);
 
-	expect(new URL(page.url()).pathname).toBe(`/wg/${shareCode}/einstellungen`);
+	expect(new URL(page.url()).pathname).toBe(`/wg/${E2E_CREATED_WG.shareCode}/einstellungen`);
 	await expect(alertDialog).toBeHidden();
 	await expect(trigger).toBeFocused();
 });

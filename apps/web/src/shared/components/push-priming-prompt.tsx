@@ -5,7 +5,6 @@ import { Spinner } from '@/components/ui/spinner';
 import {
 	PUSH_PRIMING_DISMISS_KEY,
 	isPushPrimingDismissed,
-	shouldAutoResubscribePush,
 	shouldShowPushPriming,
 } from '@/core/notifications/push-priming';
 import { subscribeWebPush } from '@/core/notifications/push-subscribe';
@@ -98,48 +97,6 @@ export function PushPrimingPrompt({
 			window.removeEventListener('focusin', onFocusIn);
 		};
 	}, []);
-
-	// Silent background resubscribe: if permission was already granted at some
-	// earlier point (a previous session, or a standing OS/browser grant) but
-	// this device has no live subscription (fresh profile, cleared/expired
-	// subscription), re-create it without any card or gesture — permission was
-	// already cleared, so no dark pattern here. Never requests permission
-	// itself (see shouldAutoResubscribePush); the first-ever grant still goes
-	// through the tap above or Einstellungen. Runs independently of the
-	// priming-card visibility/dismissal state above.
-	useEffect(() => {
-		if (typeof window === 'undefined') return;
-		let cancelled = false;
-		async function autoResubscribe(): Promise<void> {
-			const supported = isPushSupported();
-			const configured = !!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-			const permission = supported ? Notification.permission : null;
-			if (permission !== 'granted' || !configured) return;
-			let hasSubscription = true;
-			try {
-				const registration = await navigator.serviceWorker.getRegistration();
-				if (cancelled) return;
-				const existing = await registration?.pushManager.getSubscription();
-				if (cancelled) return;
-				hasSubscription = !!existing;
-			} catch {
-				return;
-			}
-			if (!shouldAutoResubscribePush({ supported, configured, permission, hasSubscription })) {
-				return;
-			}
-			try {
-				await subscribeWebPush(code, memberId, memberToken);
-			} catch {
-				// Silent: VAPID misconfig, network hiccup, etc. Einstellungen still
-				// offers a manual retry with a real error message.
-			}
-		}
-		void autoResubscribe();
-		return () => {
-			cancelled = true;
-		};
-	}, [code, memberId, memberToken]);
 
 	function dismiss(): void {
 		rememberDismissed();

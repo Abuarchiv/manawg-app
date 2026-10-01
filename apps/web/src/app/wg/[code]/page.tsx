@@ -126,7 +126,13 @@ export default function WgHomePage() {
 	// zweiter bestätigt – wie im Putzplan, damit ein versehentlicher Tipp nichts bucht.
 	async function completeChore(item: TodayImportantItem): Promise<void> {
 		const choreId = item.entityId;
+		const expectedNextDueAt = item.nextDueAt;
 		if (!choreId || pendingChoreId) return;
+		if (!expectedNextDueAt) {
+			setCompleteNotice('Der angezeigte Termin fehlt. Lade den Plan neu und prüfe die Aufgabe.');
+			void load();
+			return;
+		}
 		if (armedChoreId !== choreId) {
 			setArmedChoreId(choreId);
 			setCompleteNotice(null);
@@ -147,7 +153,10 @@ export default function WgHomePage() {
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
 				headers: { 'Idempotency-Key': idempotencyKey },
-				body: JSON.stringify({ completedByMemberId: identity.memberId }),
+				body: JSON.stringify({
+					completedByMemberId: identity.memberId,
+					expectedNextDueAt,
+				}),
 			},
 		);
 		setPendingChoreId(null);
@@ -155,6 +164,14 @@ export default function WgHomePage() {
 		if (result.ok || result.error === 'chore_already_completed') {
 			completionRequestKeysRef.current.delete(choreId);
 			setCompleteNotice(`${item.title} erledigt.`);
+			void load();
+			return;
+		}
+		if (result.status === 409 && result.error === 'chore_state_changed') {
+			completionRequestKeysRef.current.delete(choreId);
+			setCompleteNotice(
+				`${item.title} wurde inzwischen geändert. Diese Erledigung wurde nicht übernommen; prüfe den aktualisierten Plan.`,
+			);
 			void load();
 			return;
 		}

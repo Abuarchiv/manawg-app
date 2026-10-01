@@ -142,6 +142,8 @@ export const PATCH = withWgRoute<{ id: string }>(
 		const nextPaidByMemberId = parsed.data.paidByMemberId ?? template.paidByMemberId;
 		const nextIntervalMonths = parsed.data.intervalMonths ?? template.intervalMonths;
 		const nextDueAt = parsed.data.nextDueAt ? new Date(parsed.data.nextDueAt) : template.nextDueAt;
+		const dueDateWasChanged =
+			parsed.data.nextDueAt !== undefined && nextDueAt.getTime() !== template.nextDueAt.getTime();
 		const templateSplits = parseRecurringSplits(template.splitsJson);
 		const nextSplits = parsed.data.splits ?? templateSplits;
 		if (hasDuplicateSplitDebtors(nextSplits)) {
@@ -232,6 +234,8 @@ export const PATCH = withWgRoute<{ id: string }>(
 			paidByMemberId: nextPaidByMemberId,
 			intervalMonths: nextIntervalMonths,
 			nextDueAt,
+			// An explicit due-date edit re-anchors the cadence.
+			anchorAt: dueDateWasChanged ? nextDueAt : (template.anchorAt ?? template.nextDueAt),
 			splitsJson: JSON.stringify(nextSplits),
 			updatedAt: new Date(),
 			...(pauseTransition !== null ? { pausedAt: nextPausedAt } : {}),

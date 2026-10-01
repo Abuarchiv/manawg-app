@@ -1,5 +1,5 @@
 /**
- * Pure helpers for recurring-chore due-date math.
+ * Recurring chore dates follow the Berlin calendar and wall clock.
  *
  * Bug history #1: an earlier implementation computed `nextDueAt` from
  * `Date.now()` only. For a monthly chore completed 5 days early, the next due
@@ -23,8 +23,34 @@
  */
 
 import type { ChoreRecurrenceType } from '@/core/db/schema';
+import { berlinDayKey, berlinWallMinutes, instantAtBerlinWallTime } from '@/core/utils/berlin-day';
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+function berlinDateParts(date: Date): { year: number; month: number; day: number } {
+	const dayKey = berlinDayKey(date);
+	return {
+		year: Number(dayKey.slice(0, 4)),
+		month: Number(dayKey.slice(5, 7)),
+		day: Number(dayKey.slice(8, 10)),
+	};
+}
+
+function addBerlinCalendarDays(date: Date, days: number): string {
+	const { year, month, day } = berlinDateParts(date);
+	return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
+function atBerlinWallTime(dayKey: string, reference: Date): Date {
+	const minutes = berlinWallMinutes(reference);
+	let instant = instantAtBerlinWallTime(dayKey, minutes);
+	if (!instant) {
+		// ponytail: Berlin's spring DST gap is one hour; use transition-aware resolution if that rule changes.
+		instant = instantAtBerlinWallTime(dayKey, minutes + 60);
+	}
+	if (!instant) throw new Error(`Cannot resolve chore due time on Berlin day ${dayKey}`);
+	return new Date(
+		instant.getTime() + reference.getUTCSeconds() * 1000 + reference.getUTCMilliseconds(),
+	);
+}
 
 /**
  * Compute the next due date for a recurring chore after completion.
@@ -33,8 +59,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * @param interval       cadence in days OR months (see `recurrenceType`);
  *                       `0` keeps the previous due (one-shot)
  * @param completedAt    timestamp at which the chore was completed
- * @param recurrenceType `'days'` (ms arithmetic, legacy default) or
- *                       `'months'` (calendar-accurate via `setMonth`)
+ * @param recurrenceType `'days'` (Berlin calendar days, legacy default) or
+ *                       `'months'` (Berlin calendar months)
  * @param anchorAt       original cadence anchor; keeps the month-end
  *                       day-of-month stable across clamps (31.01 → 28.02 →
  *                       31.03). Null on legacy rows — adopted from prevDueAt.
@@ -52,22 +78,26 @@ export function computeNextDueAt(
 		// date unchanged (acts as a no-op for the cadence stamp).
 		return new Date(prevDueAt.getTime());
 	}
-	const anchorMs = Math.max(prevDueAt.getTime(), completedAt.getTime());
+	const base = new Date(Math.max(prevDueAt.getTime(), completedAt.getTime()));
 	if (recurrenceType === 'months') {
 		// A LATE completion re-anchors the cycle on completedAt (documented
 		// behavior). Otherwise keep the stored anchor so a month-end clamp
 		// (31.01 → 28.02) does not chain into a permanent day-of-month drift.
 		const late = completedAt.getTime() > prevDueAt.getTime();
 		const anchor = late ? completedAt : (anchorAt ?? prevDueAt);
-		const anchorDay = anchor.getUTCDate();
-		const next = addCalendarMonths(new Date(anchorMs), interval);
+		const anchorDay = berlinDateParts(anchor).day;
+		const baseDate = berlinDateParts(base);
+		const next = addCalendarMonths(
+			new Date(Date.UTC(baseDate.year, baseDate.month - 1, 1)),
+			interval,
+		);
 		const lastDay = new Date(
 			Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
 		).getUTCDate();
 		next.setUTCDate(Math.min(anchorDay, lastDay));
-		return next;
+		return atBerlinWallTime(next.toISOString().slice(0, 10), base);
 	}
-	return new Date(anchorMs + interval * MS_PER_DAY);
+	return atBerlinWallTime(addBerlinCalendarDays(base, interval), base);
 }
 
 /**
@@ -84,8 +114,7 @@ export function computeNextDueAt(
  *   addCalendarMonths(2024-01-31, 1)  → 2024-02-29 (leap year)
  *   addCalendarMonths(2026-01-15, 12) → 2027-01-15 (exact, no ms drift)
  *
- * All math is done in UTC to match how chore due dates are stored
- * (`timestamp with time zone`, server-anchored).
+ * It shifts the calendar month; callers resolve Berlin wall time afterward.
  */
 function addCalendarMonths(anchor: Date, months: number): Date {
 	const result = new Date(anchor.getTime());

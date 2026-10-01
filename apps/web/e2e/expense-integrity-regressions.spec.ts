@@ -737,7 +737,7 @@ test('expense PATCH preserves split integrity with fractional timestamps and con
 	]);
 });
 
-test('both recurring expense PATCH routes guard financial edits without blocking ordinary changes', async () => {
+test('both recurring expense PATCH routes guard financial edits and preserve cadence', async () => {
 	const OTHER_MEMBER_ID = 'd35ea6ee-e297-4a90-b6df-3e78ce47b395';
 	const recurringExpenses = {
 		id: { table: 'recurringExpenses', name: 'id' },
@@ -1042,6 +1042,30 @@ test('both recurring expense PATCH routes guard financial edits without blocking
 	expect(ordinaryChanges.map((result) => result.status)).toEqual([
 		200, 200, 200, 200, 200, 200, 200,
 	]);
+	for (const endpoint of endpoints) {
+		Object.assign(template, {
+			nextDueAt: new Date('2026-10-01T00:00:00.000Z'),
+			anchorAt: new Date('2026-01-31T00:00:00.000Z'),
+		});
+		const unchangedDueDate = await send(endpoint, {
+			id: EXPENSE_ID,
+			description: 'Miete angepasst',
+			nextDueAt: '2026-10-01T00:00:00.000Z',
+		});
+		expect(unchangedDueDate.status).toBe(200);
+		expect(template.anchorAt.toISOString()).toBe('2026-01-31T00:00:00.000Z');
+
+		Object.assign(template, {
+			nextDueAt: new Date('2026-10-01T00:00:00.000Z'),
+			anchorAt: new Date('2026-01-31T00:00:00.000Z'),
+		});
+		const changedDueDate = await send(endpoint, {
+			id: EXPENSE_ID,
+			nextDueAt: '2026-11-15T00:00:00.000Z',
+		});
+		expect(changedDueDate.status).toBe(200);
+		expect(template.anchorAt.toISOString()).toBe('2026-11-15T00:00:00.000Z');
+	}
 });
 
 test('recurring expense PATCH rejects an inactive payer', async () => {

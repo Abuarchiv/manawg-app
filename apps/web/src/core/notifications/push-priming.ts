@@ -35,31 +35,3 @@ export function shouldShowPushPriming(state: PushPrimingState): boolean {
 	if (state.editingTarget) return false;
 	return true;
 }
-
-export interface AutoResubscribeState {
-	/** `Notification`, `serviceWorker` and `PushManager` all exist in this browser. */
-	supported: boolean;
-	/** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is set — without it, subscribing always fails. */
-	configured: boolean;
-	/** `Notification.permission`, or `null` when Notification isn't supported at all. */
-	permission: NotificationPermission | null;
-	/** This device already has a live `PushSubscription` for our service worker. */
-	hasSubscription: boolean;
-}
-
-/**
- * Decides whether to silently (re)create a push subscription in the
- * background, with no card and no tap involved. Never requests permission —
- * only fires once permission was already granted at some earlier point (a
- * previous session, or a browser/OS that carried a standing grant for this
- * origin), closing the gap where a granted permission never actually
- * produced an active subscription (fresh browser profile, cleared
- * subscription, etc). The first-ever grant still goes through the
- * tap-triggered priming card or Einstellungen — this never bypasses that.
- */
-export function shouldAutoResubscribePush(state: AutoResubscribeState): boolean {
-	if (!state.supported || !state.configured) return false;
-	if (state.permission !== 'granted') return false;
-	if (state.hasSubscription) return false;
-	return true;
-}

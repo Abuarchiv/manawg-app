@@ -40,6 +40,11 @@ async function fulfillMembership(route: Route, status = 200): Promise<void> {
 	});
 }
 
+async function expectQueueStored(page: Page): Promise<void> {
+	const storedActions = await page.evaluate(() => localStorage.getItem('manawg:offline-actions'));
+	expect(storedActions).toBe(JSON.stringify([queuedAction]));
+}
+
 test.describe('Offline fallback page', () => {
 	test.setTimeout(300_000);
 
@@ -65,44 +70,78 @@ test.describe('Offline fallback page', () => {
 		await expect(page.getByRole('heading', { name: 'Du bist wieder verbunden.' })).toBeVisible();
 	});
 
-	test('keeps queued actions visible when the browser is offline', async ({ page, context }) => {
-		await page.route('**/api/wg/mine', (route) => fulfillMembership(route));
+	test('hides queued details while offline and recovers them after membership is verified', async ({
+		page,
+		context,
+	}) => {
+		let authenticated = true;
+		await page.route('**/api/wg/mine', (route) =>
+			authenticated ? fulfillMembership(route) : route.abort(),
+		);
 		await seedOfflineState(page);
 		await navigateToFeature(page, '/offline');
 
 		await expect(page.getByText('Einkauf', { exact: true })).toBeVisible();
-		await page.unroute('**/api/wg/mine');
+		authenticated = false;
 		await context.setOffline(true);
 		await page.evaluate(() => window.dispatchEvent(new Event('offline')));
 
 		await expect(page.getByRole('heading', { name: 'Du bist gerade offline.' })).toBeVisible();
-		await expect(page.getByText('Einkauf', { exact: true })).toBeVisible();
+		await expect(page.getByText('Einkauf', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('Milch')).toHaveCount(0);
+		await expect(page.getByText('Fixture WG')).toHaveCount(0);
+		await expectQueueStored(page);
+
+		authenticated = true;
+		await context.setOffline(false);
+		await page.evaluate(() => window.dispatchEvent(new Event('online')));
 		await expect(page.getByText('Milch')).toBeVisible();
 	});
 
-	test('keeps queued actions visible when the server is unreachable', async ({ page }) => {
-		await page.route('**/api/wg/mine', (route) => route.abort());
+	test('hides queued details during an outage and recovers them after verification', async ({
+		page,
+	}) => {
+		let serverAvailable = false;
+		await page.route('**/api/wg/mine', (route) =>
+			serverAvailable ? fulfillMembership(route) : route.abort(),
+		);
 		await seedOfflineState(page);
 		await navigateToFeature(page, '/offline');
 
 		await expect(
 			page.getByRole('heading', { name: 'Server gerade nicht erreichbar.' }),
 		).toBeVisible();
-		await expect(page.getByText('Einkauf', { exact: true })).toBeVisible();
+		await expect(page.getByText('Einkauf', { exact: true })).toHaveCount(0);
+		await expect(page.getByText('Milch')).toHaveCount(0);
+		await expectQueueStored(page);
+
+		serverAvailable = true;
+		await page.getByRole('button', { name: 'Offline-Status erneut prüfen' }).click();
 		await expect(page.getByText('Milch')).toBeVisible();
 	});
 
-	test('hides local actions when the account is unauthenticated', async ({ page }) => {
-		await page.route('**/api/wg/mine', (route) => fulfillMembership(route, 401));
+	test('hides queued details while unauthenticated and recovers them after sign-in', async ({
+		page,
+	}) => {
+		let authenticated = false;
+		await page.route('**/api/wg/mine', (route) =>
+			fulfillMembership(route, authenticated ? 200 : 401),
+		);
 		await seedOfflineState(page);
 		await navigateToFeature(page, '/offline');
 
 		await expect(
 			page.getByRole('heading', { name: 'Melde dich an, um Offline-Aktionen zu sehen.' }),
 		).toBeVisible();
-		await expect(page.getByText('Keine wartenden Aktionen.')).toBeVisible();
+		await expect(page.getByText('Melde dich an, um Offline-Aktionen zu prüfen.')).toBeVisible();
+		await expect(page.getByText('Einkauf', { exact: true })).toHaveCount(0);
 		await expect(page.getByText('Milch')).toHaveCount(0);
 		await expect(page.getByText('Fixture WG')).toHaveCount(0);
+		await expectQueueStored(page);
+
+		authenticated = true;
+		await page.getByRole('button', { name: 'Offline-Status erneut prüfen' }).click();
+		await expect(page.getByText('Milch')).toBeVisible();
 	});
 
 	test('confirms a successful synchronization and clears the action', async ({ page }) => {

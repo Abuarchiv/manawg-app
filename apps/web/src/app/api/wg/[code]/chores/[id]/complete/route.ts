@@ -1,5 +1,13 @@
 import { recordAuditEvent } from '@/core/audit';
-import { announcements, choreCompletions, chores, db, memberAbsences, wgMembers } from '@/core/db';
+import {
+	announcements,
+	choreCompletions,
+	chores,
+	db,
+	idempotencyResponses,
+	memberAbsences,
+	wgMembers,
+} from '@/core/db';
 import { TransactionAbort, withTransaction } from '@/core/db/transaction';
 import { badRequest, conflict, notFound, serverError, tooMany } from '@/core/errors';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
@@ -11,7 +19,11 @@ import {
 } from '@/core/guards/idempotency';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
-import { getCachedResponse, readIdempotencyKey, setCachedResponse } from '@/core/idempotency';
+import {
+	RESPONSE_REPLAY_TTL_SECONDS,
+	getCachedResponse,
+	readIdempotencyKey,
+} from '@/core/idempotency';
 import { logApiError } from '@/core/infra/observability';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { getAbsentMemberIds } from '@/features/chores/absence';
@@ -20,7 +32,7 @@ import {
 	computeOpenGapsByMember,
 } from '@/features/chores/chore-fairness';
 import { computeNextDueAt } from '@/features/chores/chore-recurrence';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gt, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
@@ -28,6 +40,27 @@ const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
 type ChoreCompleteResponseBody = { chore: unknown };
 
 const choreCompleteReplay = new ReplayCache<ChoreCompleteResponseBody>(IDEMPOTENCY_TTL_MS);
+
+async function releaseChoreCompleteClaim(
+	scope: string,
+	key: string,
+	expiresAt: Date,
+): Promise<void> {
+	try {
+		await db
+			.delete(idempotencyResponses)
+			.where(
+				and(
+					eq(idempotencyResponses.scope, scope),
+					eq(idempotencyResponses.key, key),
+					eq(idempotencyResponses.expiresAt, expiresAt),
+					sql`${idempotencyResponses.responseBody} = '{"_claimed":true}'::jsonb`,
+				),
+			);
+	} catch (err) {
+		logApiError('[chore complete POST] claim release failed', err);
+	}
+}
 
 function choreCompleteIdempotencyScope(wgId: string, memberId: string, choreId: string): string {
 	return `chores-complete:${wgId}:${memberId}:${choreId}`;
@@ -40,6 +73,7 @@ export const POST = withWgRoute<{ id: string }>(
 			ReplayReservation<ChoreCompleteResponseBody>,
 			{ owned: true }
 		> | null = null;
+		let claimedLeaseExpiresAt: Date | null = null;
 		if (!UUID_PATTERN.test(id)) return badRequest('id_invalid');
 		const auth = await requireWgMember(req, code);
 		if (!auth.ok) return auth.response;
@@ -72,6 +106,25 @@ export const POST = withWgRoute<{ id: string }>(
 				choreCompleteReplay.remember(idemReplayKey, cached);
 				return NextResponse.json(cached);
 			}
+		}
+		let requestBody: unknown;
+		try {
+			requestBody = await req.json();
+		} catch {
+			return conflict('chore_state_changed');
+		}
+		const expectedNextDueAt =
+			requestBody && typeof requestBody === 'object' && !Array.isArray(requestBody)
+				? (requestBody as Record<string, unknown>).expectedNextDueAt
+				: null;
+		if (typeof expectedNextDueAt !== 'string') return conflict('chore_state_changed');
+		const expectedDue = new Date(expectedNextDueAt);
+		if (
+			!Number.isFinite(expectedDue.getTime()) ||
+			expectedDue.toISOString() !== expectedNextDueAt ||
+			expectedDue.getTime() !== c.nextDueAt.getTime()
+		) {
+			return conflict('chore_state_changed');
 		}
 		const limited = await checkRateLimit(wgWriteLimiter, `chore:${c.wgId}:${auth.member.memberId}`);
 		if (!limited.success) return tooMany();
@@ -191,9 +244,49 @@ export const POST = withWgRoute<{ id: string }>(
 			// double-firing reminders within the same day.
 			const reminderReset = nextAssigned !== c.assignedMemberId ? { lastReminderAt: null } : {};
 
-			let txResult: { raced: true } | { raced: false; chore: typeof chores.$inferSelect };
+			let txResult:
+				| { replayed: true; body: ChoreCompleteResponseBody }
+				| { replayed: false; raced: true }
+				| { replayed: false; raced: false; body: ChoreCompleteResponseBody };
 			try {
 				txResult = await withTransaction(async (tx) => {
+					if (idemScope && idemKey) {
+						const [slot] = await tx
+							.select({
+								body: idempotencyResponses.responseBody,
+								expiresAt: idempotencyResponses.expiresAt,
+							})
+							.from(idempotencyResponses)
+							.where(
+								and(
+									eq(idempotencyResponses.scope, idemScope),
+									eq(idempotencyResponses.key, idemKey),
+								),
+							)
+							.limit(1)
+							.for('update');
+						if (!slot) throw new TransactionAbort('idempotency_claim_missing');
+						if (
+							slot.body &&
+							typeof slot.body === 'object' &&
+							!Array.isArray(slot.body) &&
+							'chore' in slot.body
+						) {
+							return { replayed: true as const, body: slot.body as ChoreCompleteResponseBody };
+						}
+						if (
+							slot.expiresAt <= new Date() ||
+							!slot.body ||
+							typeof slot.body !== 'object' ||
+							Array.isArray(slot.body) ||
+							Object.keys(slot.body).length !== 1 ||
+							(slot.body as Record<string, unknown>)._claimed !== true
+						) {
+							throw new TransactionAbort('idempotency_claim_invalid');
+						}
+						claimedLeaseExpiresAt = slot.expiresAt;
+					}
+
 					const updatedRows = await tx
 						.update(chores)
 						.set({
@@ -206,9 +299,8 @@ export const POST = withWgRoute<{ id: string }>(
 						.returning();
 					const updated = updatedRows[0];
 					if (!updated) {
-						// Another concurrent completion already advanced the assignee.
-						// Normal outcome — commit as a no-op rather than rotating again.
-						return { raced: true as const };
+						// The observed cycle or assignee changed after the request began.
+						return { replayed: false as const, raced: true as const };
 					}
 
 					const [completion] = await tx
@@ -237,26 +329,64 @@ export const POST = withWgRoute<{ id: string }>(
 							),
 						);
 
-					return { raced: false as const, chore: updated };
+					const body: ChoreCompleteResponseBody = { chore: updated };
+					if (idemScope && idemKey) {
+						let rows: Array<{ scope: string }>;
+						try {
+							rows = await tx
+								.update(idempotencyResponses)
+								.set({
+									responseBody: body,
+									expiresAt: new Date(Date.now() + RESPONSE_REPLAY_TTL_SECONDS * 1000),
+								})
+								.where(
+									and(
+										eq(idempotencyResponses.scope, idemScope),
+										eq(idempotencyResponses.key, idemKey),
+										gt(idempotencyResponses.expiresAt, new Date()),
+										sql`${idempotencyResponses.responseBody} = '{"_claimed":true}'::jsonb`,
+									),
+								)
+								.returning({ scope: idempotencyResponses.scope });
+						} catch (err) {
+							logApiError('[chore complete POST] replay write failed', err);
+							throw new TransactionAbort('idempotency_response_write_failed');
+						}
+						if (rows.length !== 1) throw new TransactionAbort('idempotency_response_write_failed');
+					}
+
+					return { replayed: false as const, raced: false as const, body };
 				});
 			} catch (err) {
 				if (err instanceof TransactionAbort) {
 					replayReservation?.reject(err);
+					if (idemScope && idemKey && claimedLeaseExpiresAt) {
+						await releaseChoreCompleteClaim(idemScope, idemKey, claimedLeaseExpiresAt);
+					}
 					logApiError('[chore complete POST] completion insert failed', err);
 					return serverError(err.code);
 				}
 				replayReservation?.reject(err);
+				if (idemScope && idemKey && claimedLeaseExpiresAt) {
+					await releaseChoreCompleteClaim(idemScope, idemKey, claimedLeaseExpiresAt);
+				}
 				logApiError('[chore complete POST] transaction failed', err);
 				return serverError('completion_insert_failed');
 			}
 
-			if (txResult.raced) {
-				const err = new Error('chore_already_completed');
-				replayReservation?.reject(err);
-				return conflict('chore_already_completed');
+			if (txResult.replayed) {
+				replayReservation?.resolve(txResult.body);
+				return NextResponse.json(txResult.body);
 			}
-			const updated = txResult.chore;
 
+			if (txResult.raced) {
+				if (idemScope && idemKey && claimedLeaseExpiresAt) {
+					await releaseChoreCompleteClaim(idemScope, idemKey, claimedLeaseExpiresAt);
+				}
+				const err = new Error('chore_state_changed');
+				replayReservation?.reject(err);
+				return conflict('chore_state_changed');
+			}
 			await recordAuditEvent({
 				wgId: c.wgId,
 				memberId: completedBy,
@@ -267,12 +397,8 @@ export const POST = withWgRoute<{ id: string }>(
 				metadata: { nextAssignedMemberId: nextAssigned },
 			});
 
-			const responseBody = { chore: updated };
-			if (idemScope && idemKey && replayReservation?.owned) {
-				await setCachedResponse(idemScope, idemKey, responseBody);
-				replayReservation.resolve(responseBody);
-			}
-			return NextResponse.json(responseBody);
+			replayReservation?.resolve(txResult.body);
+			return NextResponse.json(txResult.body);
 		} catch (err) {
 			replayReservation?.reject(err);
 			throw err;
