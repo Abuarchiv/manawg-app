@@ -199,6 +199,10 @@ export function ExpenseFormSection({
 
 	const isDirty = initialFormStateRef.current.formStateKey !== formStateKey;
 	const splitErrorId = 'expense-splits-error';
+	const hasLockedHistoricalShare =
+		isEditingExpense && splitCandidates.some((member) => !member.active);
+	const historicalShareHintId = `${splitErrorId}-inactive-share`;
+	const remainderMembers = isEditingExpense ? members.filter((member) => member.active) : members;
 	const firstSplitMemberId = splitCandidates[0]?.id;
 	const splitErrorTargetsMode =
 		Boolean(fieldErrors.splits) && (splitMode !== 'manual' || firstSplitMemberId === undefined);
@@ -309,7 +313,7 @@ export function ExpenseFormSection({
 										id="paid-by"
 										value={paidByMemberId}
 										onChange={(event) => setPaidByMemberId(event.target.value)}
-										disabled={formSaving}
+										disabled={formSaving || isEditingExpense}
 										className="w-full [&_select]:h-11 [&_select]:text-base"
 									>
 										{payerOptions.map((member) => (
@@ -319,6 +323,11 @@ export function ExpenseFormSection({
 											</NativeSelectOption>
 										))}
 									</NativeSelect>
+									{isEditingExpense && (
+										<FieldDescription>
+											Die zahlende Person kann bei einer bestehenden Ausgabe nicht geändert werden.
+										</FieldDescription>
+									)}
 								</Field>
 								<FieldSet disabled={formSaving} data-invalid={Boolean(fieldErrors.splits)}>
 									<FieldLegend>Beteiligte & Aufteilung</FieldLegend>
@@ -338,7 +347,11 @@ export function ExpenseFormSection({
 										<ToggleGroupItem
 											value="equal"
 											className="min-h-11 flex-1"
+											disabled={hasLockedHistoricalShare}
 											aria-label="Aufteilung: Gleichmäßig"
+											aria-describedby={
+												hasLockedHistoricalShare ? historicalShareHintId : undefined
+											}
 										>
 											Gleichmäßig
 										</ToggleGroupItem>
@@ -350,6 +363,12 @@ export function ExpenseFormSection({
 											Manuell
 										</ToggleGroupItem>
 									</ToggleGroup>
+									{hasLockedHistoricalShare && (
+										<FieldDescription id={historicalShareHintId}>
+											Ausgezogene Anteile bleiben unverändert; nur aktive Personen übernehmen den
+											Rest.
+										</FieldDescription>
+									)}
 									{fieldErrors.splits && (
 										<FieldError id={splitErrorId}>{fieldErrors.splits}</FieldError>
 									)}
@@ -359,7 +378,7 @@ export function ExpenseFormSection({
 												<Field
 													key={member.id}
 													orientation="horizontal"
-													data-disabled={formSaving}
+													data-disabled={formSaving || (isEditingExpense && !member.active)}
 													data-invalid={
 														Boolean(fieldErrors.splits) && member.id === firstSplitMemberId
 													}
@@ -369,6 +388,11 @@ export function ExpenseFormSection({
 														className="min-w-0 flex-1 break-words"
 													>
 														{member.name}
+														{isEditingExpense && !member.active && (
+															<span className="ml-1 text-xs font-normal text-muted-foreground">
+																(ausgezogen)
+															</span>
+														)}
 													</FieldLabel>
 													<InputGroup className="w-32 shrink-0">
 														<InputGroupInput
@@ -384,8 +408,8 @@ export function ExpenseFormSection({
 																onClearFieldError('splits');
 															}}
 															placeholder="0,00"
-															disabled={formSaving}
-															aria-label={`Anteil ${member.name} in Euro`}
+															disabled={formSaving || (isEditingExpense && !member.active)}
+															aria-label={`Anteil ${member.name} in Euro${isEditingExpense && !member.active ? ', ausgezogen. Anteil bleibt unverändert.' : ''}`}
 															aria-invalid={
 																Boolean(fieldErrors.splits) && member.id === firstSplitMemberId
 																	? true
@@ -407,7 +431,7 @@ export function ExpenseFormSection({
 											<ManualSplitSummary
 												amountStr={amountStr}
 												manualSplits={manualSplits}
-												members={members}
+												members={remainderMembers}
 												setManualSplits={setManualSplits}
 												disabled={formSaving}
 											/>

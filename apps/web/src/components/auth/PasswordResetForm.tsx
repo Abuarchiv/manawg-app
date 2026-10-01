@@ -6,6 +6,7 @@ import { Button, buttonVariants } from '@/components/ui/button';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { WEAK_PASSWORD_MESSAGE, isWeakPasswordError } from '@/core/auth/password-errors';
 import { cn } from '@/shared/lib/cn';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -55,9 +56,11 @@ export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps)
 				// The marker expires quickly; a successful password update must still finish.
 			}
 			router.replace('/neu');
-		} catch {
+		} catch (error) {
 			setError(
-				'Das Passwort konnte gerade nicht geändert werden. Bitte fordere einen neuen Link an.',
+				isWeakPasswordError(error)
+					? WEAK_PASSWORD_MESSAGE
+					: 'Das Passwort konnte gerade nicht geändert werden. Bitte fordere einen neuen Link an.',
 			);
 			setState('ready');
 		}

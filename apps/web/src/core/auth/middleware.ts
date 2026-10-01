@@ -1,7 +1,15 @@
 import { isE2EDbDownMode } from '@/core/infra/e2e-db-down';
 import { createServerClient } from '@supabase/ssr';
+import { isAuthRetryableFetchError } from '@supabase/supabase-js';
 import { type NextRequest, NextResponse } from 'next/server';
 import { getSupabaseEnv, hasSupabaseEnv } from './env';
+
+function isTransientAuthError(error: unknown): boolean {
+	return (
+		isAuthRetryableFetchError(error) ||
+		(typeof error === 'object' && error !== null && 'status' in error && error.status === 429)
+	);
+}
 
 function signInRedirect(request: NextRequest, response: NextResponse): NextResponse {
 	const url = request.nextUrl.clone();
@@ -71,9 +79,10 @@ export async function refreshSupabaseSession(
 
 	try {
 		const { data, error } = await supabase.auth.getUser();
+		if (requiresSignIn && isTransientAuthError(error)) return refreshedResponse;
 		if (requiresSignIn && (error || !data.user)) return signInRedirect(request, refreshedResponse);
 	} catch {
-		if (requiresSignIn) return signInRedirect(request, refreshedResponse);
+		if (requiresSignIn) return refreshedResponse;
 		// Public entry pages remain available when Auth cannot be reached.
 	}
 	return refreshedResponse;

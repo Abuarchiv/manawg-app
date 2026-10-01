@@ -1,6 +1,10 @@
 import { parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
-import { type DebtorShare, buildEqualSplits } from '@/features/expenses/split-math';
+import {
+	type DebtorShare,
+	buildEqualSplits,
+	distributeCentsEqually,
+} from '@/features/expenses/split-math';
 
 /**
  * Turns the expense form's state into the splits array the API expects.
@@ -36,6 +40,24 @@ interface BuildSplitsInput {
 	 * The page passes its current expense count.
 	 */
 	rotationOffset: number;
+}
+
+export function isEqualExpenseSplit(
+	amountCents: number,
+	splits: readonly DebtorShare[],
+	members: readonly SplitMemberLike[],
+): boolean {
+	if (splits.length === 0) return true;
+	const inactiveIds = new Set(
+		members.filter((member) => member.active === false).map((member) => member.id),
+	);
+	if (splits.some((split) => inactiveIds.has(split.debtorMemberId))) return false;
+
+	const activeIds = members.filter((member) => member.active !== false).map((member) => member.id);
+	if (splits.length !== activeIds.length) return false;
+	const expected = distributeCentsEqually(amountCents, activeIds);
+	const byId = new Map(splits.map((split) => [split.debtorMemberId, split.amountCents]));
+	return activeIds.every((id, index) => byId.get(id) === expected[index]);
 }
 
 export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {

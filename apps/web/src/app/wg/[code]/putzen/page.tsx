@@ -88,7 +88,7 @@ const ConfirmDialog = dynamic(() =>
 
 // craftsman-ignore: TS002 — Next.js App Router requires default export from page.tsx
 export default function PutzenPage() {
-	const { wg, members, identity } = useWg();
+	const { wg, members, identity, isAdmin } = useWg();
 	const toast = useToast();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const {
@@ -935,7 +935,7 @@ export default function PutzenPage() {
 		if (!result.ok) {
 			const msg =
 				result.status === 403
-					? 'Nur der/die Ersteller:in kann diese Aufgabe entfernen.'
+					? 'Nur WG-Admins können diese Aufgabe endgültig entfernen.'
 					: result.status === 404 && result.error === 'chore_not_found'
 						? 'Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.'
 						: result.status === 0 ||
@@ -1189,6 +1189,7 @@ export default function PutzenPage() {
 									<ChoreRow
 										key={chore.id}
 										chore={chore}
+										isAdmin={isAdmin}
 										assignee={memberLookup(chore.assignedMemberId)}
 										isPending={isPending(chore.id)}
 										isSwapPending={isPending(`${chore.id}:swap`)}

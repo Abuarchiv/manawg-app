@@ -118,7 +118,10 @@ export function WgContextProvider({ wg, members: initialMembers, children }: Pro
 			const res = await apiFetch<{
 				members: Array<Member & { active?: boolean }>;
 				viewerIsAdmin?: boolean;
-			}>(`/api/wg/${encodedShareCode}/members`, { memberId: identity.memberId });
+			}>(`/api/wg/${encodedShareCode}/members`, {
+				memberId: identity.memberId,
+				memberToken: identity.memberToken,
+			});
 			// Normalize defensively: an omitted flag (e.g. E2E fixtures) means active.
 			if (res.ok) {
 				setMembers(res.data.members.map((m) => ({ ...m, active: m.active !== false })));
