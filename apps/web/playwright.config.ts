@@ -109,6 +109,6 @@ export default defineConfig({
 				cwd: APP_DIR,
 				url: BASE_URL,
 				reuseExistingServer: false,
-				timeout: 180_000,
+				timeout: 900_000,
 			},
 });
