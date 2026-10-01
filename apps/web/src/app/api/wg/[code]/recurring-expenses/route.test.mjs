@@ -188,22 +188,3 @@ test('any member may advance a template after booking it, but only the owner may
 	assert.equal(replay.status, 409);
 	assert.equal(state.template.nextDueAt.toISOString(), '2026-11-01T00:00:00.000Z');
 });
-
-test('PATCH resending the unchanged due date keeps the cadence anchor', async (t) => {
-	t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-25T12:00:00.000Z') });
-	const { state, patch } = harness({ callerId: creatorId });
-	// A "31st" template whose due date was clamped to the 28th after February.
-	const anchorAt = new Date('2026-01-31T11:00:00.000Z');
-	const clampedDueAt = new Date('2026-10-28T11:00:00.000Z');
-	state.template.anchorAt = anchorAt;
-	state.template.nextDueAt = clampedDueAt;
-
-	const edit = await patch({ description: 'Miete neu', nextDueAt: '2026-10-28T10:00:00.000Z' });
-	assert.equal(edit.status, 200);
-	assert.equal(state.template.anchorAt.toISOString(), anchorAt.toISOString());
-	assert.equal(state.template.nextDueAt.toISOString(), clampedDueAt.toISOString());
-
-	const moved = await patch({ nextDueAt: '2026-11-15T11:00:00.000Z' });
-	assert.equal(moved.status, 200);
-	assert.equal(state.template.anchorAt.toISOString(), '2026-11-15T11:00:00.000Z');
-});

@@ -2,7 +2,6 @@ import { recordAuditEvent } from '@/core/audit';
 import { db, expensePayments, wgMembers } from '@/core/db';
 import { logApiError } from '@/core/infra/observability';
 import { getPayPalOrder } from '@/core/infra/paypal';
-import { formatEuroCents } from '@/core/utils/money';
 import { and, eq, lt } from 'drizzle-orm';
 import { withExpensePaymentLock } from './expense-payments';
 import { parsePayPalAmountCents, terminalPayPalCaptureOutcome } from './paypal-settlement';
@@ -104,7 +103,7 @@ export async function reconcileStaleCapturingPayments(
 				eventType: 'expense.debt.paid.paypal',
 				entityType: 'expense_payment',
 				entityId: payment.id,
-				summary: `${payer?.name ?? 'Jemand'} hat ${formatEuroCents(payment.amountCents, payment.currency)} per PayPal beglichen.`,
+				summary: `${payer?.name ?? 'Jemand'} hat ${payment.amountCents / 100} ${payment.currency} per PayPal beglichen.`,
 				metadata: {
 					fromMemberId: payment.fromMemberId,
 					toMemberId: payment.toMemberId,

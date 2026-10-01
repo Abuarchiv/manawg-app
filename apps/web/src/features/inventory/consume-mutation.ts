@@ -19,7 +19,9 @@ export interface ConsumeInventoryTransaction {
 	select(): {
 		from(table: typeof wgInventoryItems): {
 			where(condition: unknown): {
-				limit(count: number): PromiseLike<WgInventoryItem[]>;
+				limit(count: number): {
+					for(strength: 'update'): PromiseLike<WgInventoryItem[]>;
+				};
 			};
 		};
 	};
@@ -55,11 +57,15 @@ export async function consumeInventoryMutation(
 	tx: ConsumeInventoryTransaction,
 	input: ConsumeInventoryMutationInput,
 ) {
+	// Lock the row: a relative -N has no stale state to conflict on, so
+	// concurrent taps must apply one after another instead of failing the
+	// quantity check below with a spurious 409 (same as the PATCH delta path).
 	const existingRows = await tx
 		.select()
 		.from(wgInventoryItems)
 		.where(and(eq(wgInventoryItems.id, input.itemId), eq(wgInventoryItems.wgId, input.wgId)))
-		.limit(1);
+		.limit(1)
+		.for('update');
 	const existing = existingRows[0];
 	if (!existing) return { kind: 'not_found' as const };
 

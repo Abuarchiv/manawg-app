@@ -428,7 +428,13 @@ export const POST = withWgRoute<{ id: string }>(
 				if (idemScope && idemKey && claimedLeaseExpiresAt) {
 					await releaseChoreCompleteClaim(idemScope, idemKey, claimedLeaseExpiresAt);
 				}
-				return conflict('chore_already_completed');
+				// A concurrent DELETE also loses the CAS: report it as gone, not as "already done".
+				const [stillThere] = await db
+					.select({ id: chores.id })
+					.from(chores)
+					.where(eq(chores.id, c.id))
+					.limit(1);
+				return stillThere ? conflict('chore_already_completed') : notFound('chore_not_found');
 			}
 			const updated = txResult.chore;
 

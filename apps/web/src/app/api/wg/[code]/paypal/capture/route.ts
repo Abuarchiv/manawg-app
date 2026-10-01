@@ -20,7 +20,6 @@ import {
 	isPayPalConfigured,
 } from '@/core/infra/paypal';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
-import { formatEuroCents } from '@/core/utils/money';
 import { computeNetBalances, simplifyDebts } from '@/features/expenses/debt-reduction';
 import { computeBalances } from '@/features/expenses/debts';
 import {
@@ -380,7 +379,7 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 				eventType: 'expense.debt.paid.paypal',
 				entityType: 'expense_payment',
 				entityId: capturePayment.id,
-				summary: `${auth.member.name} hat ${formatEuroCents(capturePayment.amountCents, capturePayment.currency)} per PayPal beglichen.`,
+				summary: `${auth.member.name} hat ${capturePayment.amountCents / 100} ${capturePayment.currency} per PayPal beglichen.`,
 				metadata: {
 					fromMemberId: capturePayment.fromMemberId,
 					toMemberId: capturePayment.toMemberId,

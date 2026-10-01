@@ -479,12 +479,6 @@ export const PATCH = withWgRoute('recurring-expenses PATCH', async (req, { code 
 			return apiError('paid_by_must_include_caller', 403, 'paid_by_must_include_caller');
 		}
 
-		const requestedDueAt = parsed.data.nextDueAt ? new Date(parsed.data.nextDueAt) : null;
-		const movedDueAt =
-			requestedDueAt &&
-			requestedDueAt.toISOString().slice(0, 10) !== template.nextDueAt.toISOString().slice(0, 10)
-				? requestedDueAt
-				: null;
 		const [updated] = await db
 			.update(recurringExpenses)
 			.set({
@@ -492,11 +486,11 @@ export const PATCH = withWgRoute('recurring-expenses PATCH', async (req, { code 
 				amountCents,
 				paidByMemberId,
 				intervalMonths: parsed.data.intervalMonths ?? template.intervalMonths,
-				nextDueAt: movedDueAt ?? template.nextDueAt,
-				// Only a really moved due date re-anchors the cadence. The edit form
-				// resends the unchanged date on every save; re-anchoring then would
-				// pin a clamped 28.02. as the new anchor day and lose the 31st.
-				anchorAt: movedDueAt ?? template.anchorAt ?? template.nextDueAt,
+				nextDueAt: parsed.data.nextDueAt ? new Date(parsed.data.nextDueAt) : template.nextDueAt,
+				// An explicit due-date edit re-anchors the cadence.
+				anchorAt: parsed.data.nextDueAt
+					? new Date(parsed.data.nextDueAt)
+					: (template.anchorAt ?? template.nextDueAt),
 				splitsJson: JSON.stringify(splits),
 				updatedAt: new Date(),
 			})

@@ -1,17 +1,10 @@
 export function parseEuroAmount(value: string): number | null {
-	// Pasted amounts carry "€" / "EUR" and space-grouped thousands: "12,50 €", "1 234,50".
-	const trimmed = value
-		.replace(/€|EUR/gi, '')
-		.trim()
-		.replace(
-			/^(\d{1,3})((?:[\s  ]\d{3})+)(?=,|$)/,
-			(_, head: string, rest: string) => head + rest.replace(/\s/g, '').replace(/[  ]/g, ''),
-		);
+	const trimmed = value.trim();
 	// German thousands dots ("1.234,56", "1.200") — only in the strict 3-digit-group form.
 	const normalized = /^\d{1,3}(?:\.\d{3})+(?:,\d{0,2})?$/.test(trimmed)
 		? trimmed.replace(/\./g, '').replace(',', '.')
 		: trimmed.replace(',', '.');
-	if (!/^(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(normalized)) return null;
+	if (!/^\d+(?:\.\d{0,2})?$/.test(normalized)) return null;
 	const amount = Number(normalized);
 	return Number.isFinite(amount) ? amount : null;
 }

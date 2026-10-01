@@ -193,37 +193,6 @@ async function removeCurrentBrowserPushSubscription(
 	return 'unsubscribed';
 }
 
-/**
- * Remove everything this browser stored for the signed-out account: identities,
- * drafts, offline queue, pending images, shell caches. Theme stays (device preference).
- */
-export async function clearLocalAccountData(): Promise<void> {
-	try {
-		for (const key of Object.keys(localStorage)) {
-			if (key.startsWith('manawg:') || key.startsWith('manawg_')) localStorage.removeItem(key);
-		}
-	} catch {
-		// Blocked storage has nothing to leak.
-	}
-	await Promise.allSettled([
-		typeof indexedDB === 'undefined'
-			? undefined
-			: new Promise<void>((resolve) => {
-					const request = indexedDB.deleteDatabase('manawg-offline-images');
-					request.onsuccess = request.onerror = request.onblocked = () => resolve();
-				}),
-		typeof caches === 'undefined'
-			? undefined
-			: caches
-					.keys()
-					.then((keys) =>
-						Promise.all(
-							keys.filter((key) => key.startsWith('manawg-app-')).map((key) => caches.delete(key)),
-						),
-					),
-	]);
-}
-
 export async function signOutSocialAccount(
 	pushTargets: readonly LogoutPushTarget[] = [],
 ): Promise<{ pushCleanup: LogoutPushCleanup }> {
@@ -232,6 +201,5 @@ export async function signOutSocialAccount(
 	);
 	const { error } = await createSupabaseBrowserClient().auth.signOut({ scope: 'local' });
 	if (error) throw error;
-	await clearLocalAccountData();
 	return { pushCleanup };
 }

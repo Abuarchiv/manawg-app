@@ -102,7 +102,10 @@ export const POST = withWgRoute<{ id: string }>(
 				.select({ id: announcements.id, authorMemberId: announcements.authorMemberId })
 				.from(announcements)
 				.where(and(eq(announcements.id, id), eq(announcements.wgId, wg.id)))
-				.limit(1);
+				.limit(1)
+				// Held until commit: a concurrent DELETE would otherwise slip in between
+				// this check and the insert and turn the FK violation into a 500.
+				.for('share');
 			if (!announcement) {
 				return {
 					response: { status: 404, body: { error: 'announcement_not_found' } },

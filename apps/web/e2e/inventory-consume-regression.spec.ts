@@ -55,7 +55,8 @@ function createFakeTransaction(state: InventoryState): ConsumeInventoryTransacti
 				return query;
 			},
 			limit() {
-				return Promise.resolve(table === wgInventoryItems ? [state.item] : []);
+				const rows = Promise.resolve(table === wgInventoryItems ? [state.item] : []);
+				return Object.assign(rows, { for: () => rows });
 			},
 			// biome-ignore lint/suspicious/noThenProperty: Drizzle queries are thenable; this fake mirrors that contract.
 			then<TResult1 = { id: string; name: string }[], TResult2 = never>(

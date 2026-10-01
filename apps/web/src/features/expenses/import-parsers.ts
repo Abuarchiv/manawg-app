@@ -214,22 +214,15 @@ function parseAmountToCents(raw: string): number | null {
 	const lastComma = normalized.lastIndexOf(',');
 	const lastDot = normalized.lastIndexOf('.');
 	if (lastComma > -1 && lastDot > -1) {
-		// Whichever separator comes last is the decimal mark.
-		normalized =
-			lastComma > lastDot
-				? normalized.replace(/\./g, '').replace(',', '.')
-				: normalized.replace(/,/g, '');
+		if (lastComma > lastDot) {
+			normalized = normalized.replace(/\./g, '').replace(',', '.');
+		} else {
+			normalized = normalized.replace(/,/g, '');
+		}
 	} else if (lastComma > -1) {
-		// A lone comma is a decimal mark ("12,5" = 12,50 €) unless it only
-		// ever separates 3-digit groups ("1,234" / "1,234,567").
-		normalized = /^-?\d{1,3}(?:,\d{3})+$/.test(normalized)
-			? normalized.replace(/,/g, '')
-			: normalized.replace(',', '.');
-	} else if (/^-?[1-9]\d{0,2}(?:\.\d{3})+$/.test(normalized)) {
-		normalized = normalized.replace(/\./g, '');
+		const decimals = normalized.length - lastComma - 1;
+		normalized = decimals === 2 ? normalized.replace(',', '.') : normalized.replace(/,/g, '');
 	}
-	// Never round away sub-cent digits ("1.234" would silently become 1,23 €).
-	if (!/^-?\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
 	const num = Number(normalized);
 	if (!Number.isFinite(num)) return null;
 	const cents = Math.round(num * CENTS_PER_EURO);

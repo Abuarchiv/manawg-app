@@ -109,29 +109,7 @@ function getJoinCodeFromSearch(search: string): string {
 	return getNeuIntentFromSearch(search).joinCode;
 }
 
-// Only a fresh sign-in skips the WG picker; a deliberate visit to /neu (second WG) keeps it.
-const JUST_SIGNED_IN_KEY = 'manawg:just-signed-in';
-
-function markJustSignedIn(): void {
-	try {
-		sessionStorage.setItem(JUST_SIGNED_IN_KEY, '1');
-	} catch {
-		// Without storage the user simply sees the picker.
-	}
-}
-
-function consumeJustSignedIn(): boolean {
-	try {
-		const value = sessionStorage.getItem(JUST_SIGNED_IN_KEY);
-		sessionStorage.removeItem(JUST_SIGNED_IN_KEY);
-		return value === '1';
-	} catch {
-		return false;
-	}
-}
-
 async function startSocialLogin(provider: SocialProvider, next: string): Promise<void> {
-	markJustSignedIn();
 	const { startSocialLogin } = await import('@/core/auth/client');
 	await startSocialLogin(provider, next);
 }
@@ -332,18 +310,11 @@ export function NeuClient() {
 		const intent = getNeuIntentFromSearch(searchParams.toString());
 		if (intent.joinCode || intent.create) return;
 		const next = safeNextPath(searchParams.get('next'));
-		const [onlyWg] = accountWgs;
-		// One WG: skip the picker, like the public start page does.
-		if (next === '/' || isNeuPath(next)) {
-			if (consumeJustSignedIn() && accountWgs.length === 1 && onlyWg && step === 'choose') {
-				router.replace(`/wg/${encodeURIComponent(onlyWg.code)}`);
-			}
-			return;
-		}
+		if (next === '/' || isNeuPath(next)) return;
 		const nextWgCode = getWgCodeFromPath(next);
 		if (nextWgCode && !accountWgs.some((accountWg) => accountWg.code === nextWgCode)) return;
 		router.replace(next);
-	}, [accountWgs, authState, router, searchParams, step]);
+	}, [accountWgs, authState, router, searchParams]);
 
 	useEffect(() => {
 		if (!interactive) return;
@@ -625,13 +596,8 @@ export function NeuClient() {
 	}
 
 	const callbackError = searchParams.get('error') === 'auth_callback';
-	const deniedWgCode = (() => {
-		const code = getWgCodeFromPath(safeNextPath(searchParams.get('next')));
-		return code && !accountWgs.some((accountWg) => accountWg.code === code) ? code : null;
-	})();
 
 	function handleAuthenticated(): void {
-		markJustSignedIn();
 		setAuthState('loading');
 		setAuthRetryNonce((value) => value + 1);
 	}
@@ -731,12 +697,6 @@ export function NeuClient() {
 				</ErrorBox>
 			)}
 			{accountSwitchError && <ErrorBox>{accountSwitchError}</ErrorBox>}
-			{deniedWgCode && step === 'choose' && (
-				<ErrorBox>
-					Auf die WG {deniedWgCode} hast du mit diesem Konto keinen Zugriff. Wähle eine deiner WGs
-					oder tritt mit dem Einladungscode bei.
-				</ErrorBox>
-			)}
 
 			{step === 'choose' && (
 				<div className="flex flex-col gap-4">
