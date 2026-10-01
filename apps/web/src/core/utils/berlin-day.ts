@@ -90,6 +90,38 @@ export function instantAtBerlinWallTime(dayKey: string, minutes: number): Date |
 	return null;
 }
 
+/**
+ * Add `days` calendar days in Berlin time, preserving the wall clock.
+ *
+ * `date.getTime() + days * MS_PER_DAY` is an absolute duration: when Berlin
+ * switches between CET and CEST the UTC offset moves by one hour, so the
+ * result is an hour off and — for wall times near midnight — lands on the
+ * wrong Berlin day (Berlin 25.10 00:00 + 1 raw day = 25.10 23:00, the day
+ * before the intended one). Stepping the calendar day and re-resolving the
+ * wall time keeps 00:00 at 00:00 through both transitions: this is the same
+ * re-alignment `features/events/events.ts` applies to recurrence occurrences.
+ *
+ * A wall time inside the spring-forward gap (02:00–02:59 on the transition
+ * day, which never occurs) cannot be resolved; it is shifted forward by the
+ * missing hour so a 02:30 chore fires at 03:30 instead of disappearing.
+ */
+export function addBerlinDays(date: Date, days: number): Date {
+	const targetKey = shiftDayKey(berlinDayKey(date), days);
+	const minutes = berlinWallMinutes(date);
+	const resolved = instantAtBerlinWallTime(targetKey, minutes);
+	if (resolved) return resolved;
+	return (
+		instantAtBerlinWallTime(targetKey, minutes + 60) ??
+		new Date(date.getTime() + days * 24 * 60 * 60 * 1000)
+	);
+}
+
+/** Shift a `YYYY-MM-DD` key by whole days, letting `Date` handle rollover. */
+function shiftDayKey(dayKey: string, days: number): string {
+	const [year, month, day] = dayKey.split('-').map(Number);
+	return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
+}
+
 /** Berlin midnight following the given Berlin-day start (DST-safe stepping). */
 export function nextBerlinDayStart(dayStart: Date): Date {
 	return startOfBerlinDay(new Date(dayStart.getTime() + NEXT_DAY_PROBE_MS));

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { WEAK_PASSWORD_MESSAGE } from '../src/core/auth/password-errors';
 
 test.describe('live public dashboard entry', () => {
 	test.skip(
@@ -63,16 +64,18 @@ test.describe('live public dashboard entry', () => {
 		).toBeVisible();
 		await expect(page.getByRole('button', { name: 'WG erstellen', exact: true })).toHaveCount(0);
 
-		// New accounts need 8 characters; rejected before any sign-up request.
+		// New accounts need 8 characters; the rule is stated by the field hint up
+		// front, and the rejection still surfaces the shared weak-password message.
+		await expect(page.getByTestId('auth-password-hint')).toContainText('mindestens 8 Zeichen');
 		await page.getByLabel('E-Mail-Adresse').fill('kurz@example.invalid');
 		await page.getByLabel('Passwort', { exact: true }).fill('12345');
 		await page.getByRole('button', { name: 'Konto erstellen', exact: true }).click();
-		await expect(page.getByText('mindestens 8 Zeichen', { exact: false })).toBeVisible();
+		await expect(page.getByText(WEAK_PASSWORD_MESSAGE, { exact: false })).toBeVisible();
 		await page.reload();
 		await page.getByLabel('E-Mail-Adresse').fill('kurz@example.invalid');
 		await page.getByLabel('Passwort', { exact: true }).fill('1234567');
 		await page.getByRole('button', { name: 'Konto erstellen', exact: true }).click();
-		await expect(page.getByText('mindestens 8 Zeichen', { exact: false })).toBeVisible();
+		await expect(page.getByText(WEAK_PASSWORD_MESSAGE, { exact: false })).toBeVisible();
 	});
 
 	test('an invitation survives public navigation and enters join only after selection', async ({

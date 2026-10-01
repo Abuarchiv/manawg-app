@@ -27,6 +27,35 @@ export function buildQueueEditHref(
 	return `/wg/${encodedShareCode}/putzen`;
 }
 
+/**
+ * The page that owns the form for a queued action, or null when no page can
+ * apply the draft (`chore.complete`, `recurring.advance`). The section must
+ * not guess a page for those: a draft written to a key nobody reads would be
+ * cleared by an unrelated form without ever being applied.
+ */
+export function buildQueueEditActionHref(
+	shareCode: string,
+	type: OfflineActionType,
+): string | null {
+	switch (type) {
+		case 'shopping.create':
+		case 'shopping.update':
+			return buildQueueEditHref(shareCode, 'shopping');
+		case 'announcement.create':
+			return buildQueueEditHref(shareCode, 'announcement');
+		case 'expense.create':
+		case 'expense.update':
+		case 'recurring.create':
+			return buildQueueEditHref(shareCode, 'expense');
+		case 'absence.create':
+			return buildQueueEditHref(shareCode, 'chore', { openAbsencesPanel: true });
+		case 'chore.create':
+			return buildQueueEditHref(shareCode, 'chore');
+		default:
+			return null;
+	}
+}
+
 export function parseDraft<T extends Record<string, unknown>>(raw: string | null): T | null {
 	if (!raw) return null;
 	try {
@@ -108,6 +137,7 @@ export function isEmptyModuleDraft(
 			recurrenceType: 'days',
 			assignedMemberId: '',
 			queueEditId: null,
+			queueEditType: null,
 		},
 		absence: {
 			absenceMemberId: memberId,
@@ -180,8 +210,12 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 				},
 			};
 		case 'absence.create':
+			// The Putzplan owns both forms and reads a single `chore` key
+			// (see isEmptyModuleDraft) — the queue-edit draft must use that
+			// same module or the page would hydrate an empty form and keep
+			// the queued action alive, creating the absence twice.
 			return {
-				module: 'absence',
+				module: 'chore',
 				draft: {
 					queueEditId: action.id,
 					queueEditType: action.type,
@@ -191,7 +225,6 @@ export function buildQueueEditDraft(action: OfflineAction): QueueEditDraft | nul
 						typeof action.payload.startDate === 'string' ? action.payload.startDate : '',
 					absenceEndDate: typeof action.payload.endDate === 'string' ? action.payload.endDate : '',
 					absenceReason: typeof action.payload.reason === 'string' ? action.payload.reason : '',
-					openAbsencesPanel: true,
 				},
 			};
 		case 'chore.create':

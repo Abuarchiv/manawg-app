@@ -125,6 +125,18 @@ test('keeps account membership out of the share-code rate-limit bucket', () => {
 	expect(isShareCodeLookup('/api/wg/ABCDEFGH', 'GET')).toBe(true);
 	expect(isShareCodeLookup('/api/wg/INVALID', 'GET')).toBe(true);
 	expect(isShareCodeLookup('/api/wg/ABCDEFGH', 'POST')).toBe(false);
+	// The create-WG root is a write, never a code probe.
+	expect(isShareCodeLookup('/api/wg', 'GET')).toBe(false);
+	// Nested reads answer existence through the same guards as the bare lookup,
+	// so they belong in the tight bucket too.
+	expect(isShareCodeLookup('/api/wg/ABCDEFGH/members', 'GET')).toBe(true);
+	expect(isShareCodeLookup('/api/wg/ABCDEFGH/dashboard', 'GET')).toBe(true);
+	expect(isShareCodeLookup('/api/wg/INVALID/members', 'GET')).toBe(true);
+	expect(isShareCodeLookup('/api/wg/ABCDEFGH/members/some-member-id', 'GET')).toBe(true);
+	// ...while account-membership and writes stay out of it.
+	expect(isShareCodeLookup('/api/wg/mine/calendar', 'GET')).toBe(false);
+	expect(isShareCodeLookup('/api/wg/ABCDEFGH/members', 'POST')).toBe(false);
+	expect(isShareCodeLookup('/api/wg/ABCDEFGH/dashboard', 'PUT')).toBe(false);
 });
 
 test('filters trusted Preview statuses before protected environments and keeps push rehearsal', () => {

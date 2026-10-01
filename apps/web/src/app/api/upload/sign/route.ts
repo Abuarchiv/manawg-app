@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from '@/core/auth/server';
 import { db } from '@/core/db';
 import {
 	apiError,
+	authUnavailable,
 	badRequest,
 	notFound,
 	payloadTooLarge,
@@ -11,6 +12,7 @@ import {
 } from '@/core/errors';
 import { requireMember } from '@/core/guards/api-auth';
 import { readJsonBody } from '@/core/http/read-json';
+import { logApiError } from '@/core/infra/observability';
 import { PRIVATE_IMAGE_MIME_TYPES } from '@/core/infra/private-image-policy';
 import {
 	S3ConfigurationError,
@@ -77,7 +79,15 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 	if (!isValidShareCode(code)) return noStore(badRequest('invalid_share_code'));
 	if (!isAllowedMimeType(mimeType)) return noStore(badRequest('invalid_mime_type'));
 
-	const authenticatedUser = await getAuthenticatedUser(req);
+	// A transient Auth failure must not escape the handler as a bare 500: map it
+	// to the structured 503 the WG guards return for the same condition.
+	let authenticatedUser: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+	try {
+		authenticatedUser = await getAuthenticatedUser(req);
+	} catch (err) {
+		logApiError('[api/upload/sign] auth lookup failed', err);
+		return noStore(authUnavailable());
+	}
 	if (!authenticatedUser) return noStore(apiError('auth_required', 401, 'auth_required'));
 
 	const wg = await db.query.wgs.findFirst({

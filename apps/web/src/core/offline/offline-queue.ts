@@ -152,7 +152,39 @@ const OFFLINE_IDEMPOTENCY_KEY_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isOfflineIdempotencyKey(value: unknown): value is string {
-	return typeof value === 'string' && OFFLINE_IDEMPOTENCY_KEY_PATTERN.test(value);
+	return typeof value === 'string' && isServerRowId(value);
+}
+
+/**
+ * Server-issued row ids are UUIDs. Rows created while offline only exist
+ * locally and carry a synthetic id (`shopping:{code}:{ts}:{slug}`), so any
+ * request addressed to one can only ever be rejected with `400 id_invalid`.
+ */
+export function isServerRowId(id: string): boolean {
+	return OFFLINE_IDEMPOTENCY_KEY_PATTERN.test(id);
+}
+
+export interface LocalRowRemoval {
+	/** The queue without the local row's action. */
+	queue: OfflineAction[];
+	/** Whether an entry was actually dropped — only then does it need writing back. */
+	dropped: boolean;
+}
+
+/**
+ * Decide whether a remove() can be answered locally instead of by the API:
+ * a synthetic id never reached the server, so the row is dropped from the
+ * list and its queued action is discarded without issuing a doomed DELETE.
+ * Returns null for server-issued ids — those must go through the API.
+ */
+export function resolveLocalRowRemoval(
+	queue: OfflineAction[],
+	shareCode: string,
+	id: string,
+): LocalRowRemoval | null {
+	if (isServerRowId(id)) return null;
+	const next = queue.filter((action) => !(action.id === id && action.shareCode === shareCode));
+	return { queue: next, dropped: next.length !== queue.length };
 }
 
 export function createOfflineIdempotencyKey(): string | null {

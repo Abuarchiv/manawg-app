@@ -33,6 +33,7 @@ import { type ReactElement, memo, useState } from 'react';
 interface ChoreRowProps {
 	chore: Chore;
 	assignee: MemberInfo;
+	isAdmin: boolean;
 	isPending: boolean;
 	isSwapPending: boolean;
 	isTakePending: boolean;
@@ -65,6 +66,7 @@ function formatChoreCadence(interval: number, type: RecurrenceType): string {
 export const ChoreRow = memo(function ChoreRow({
 	chore,
 	assignee,
+	isAdmin,
 	isPending,
 	isSwapPending,
 	isTakePending,
@@ -200,27 +202,33 @@ export const ChoreRow = memo(function ChoreRow({
 								<MessageSquareMore data-icon="inline-start" aria-hidden />
 								Tausch auf der Pinnwand anfragen
 							</Button>
-							{removeConfirm.confirmId === chore.id && (
-								<Alert>
-									<AlertDescription>
-										Diese Aufgabe endgültig entfernen? Das lässt sich nicht rückgängig machen.
-									</AlertDescription>
-								</Alert>
+							{isAdmin && (
+								<>
+									{removeConfirm.confirmId === chore.id && (
+										<Alert>
+											<AlertDescription>
+												Diese Aufgabe endgültig entfernen? Das lässt sich nicht rückgängig machen.
+											</AlertDescription>
+										</Alert>
+									)}
+									<Button
+										variant="destructive"
+										disabled={busy}
+										aria-label={`${removeConfirm.confirmId === chore.id ? 'Aufgabe entfernen bestätigen' : 'Aufgabe entfernen'}: ${chore.title}`}
+										onClick={() => {
+											if (removeConfirm.request(chore.id)) {
+												setActionsOpen(false);
+												onRemove(chore.id);
+											}
+										}}
+									>
+										<Trash2 data-icon="inline-start" aria-hidden />
+										{removeConfirm.confirmId === chore.id
+											? 'Endgültig entfernen'
+											: 'Aufgabe entfernen'}
+									</Button>
+								</>
 							)}
-							<Button
-								variant="destructive"
-								disabled={busy}
-								aria-label={`${removeConfirm.confirmId === chore.id ? 'Aufgabe entfernen bestätigen' : 'Aufgabe entfernen'}: ${chore.title}`}
-								onClick={() => {
-									if (removeConfirm.request(chore.id)) {
-										setActionsOpen(false);
-										onRemove(chore.id);
-									}
-								}}
-							>
-								<Trash2 data-icon="inline-start" aria-hidden />
-								{removeConfirm.confirmId === chore.id ? 'Endgültig entfernen' : 'Aufgabe entfernen'}
-							</Button>
 						</div>
 						<DrawerFooter className="pb-[max(1rem,env(safe-area-inset-bottom))]">
 							<DrawerClose render={<Button variant="outline" />}>Schließen</DrawerClose>

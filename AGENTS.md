@@ -1,7 +1,5 @@
 # ManaWG agent workflow
 
-OpenClaw is the project orchestrator. Keep product intent and implementation
-artifacts in the repository so work survives a chat session.
 
 ## Required workflow
 
@@ -13,15 +11,20 @@ artifacts in the repository so work survives a chat session.
 ## Safety
 
 - Preserve existing working-tree changes; never reset or discard user work.
-- Do not deploy, change production data, send public messages, or spend money without explicit approval.
 - Treat secrets and environment files as local-only; never print or request their values.
 
-## Current development and environment separation
+## Direct delivery on main (user instruction, 2026-09-27)
 
-- Current development (2026-09-22) is tracked in `fix/audit-158` / PR #300 (`fix: resolve 14 critical/high bugs from manawg-app audit`). Keep unfinished agent work in its own branch or worktree; the existence of a branch is not merge approval. Do not merge all agent branches together.
-- Parallel local work currently includes `fix/audit-20260922-app` (layout/attachment/chat WIP), `fix/b-db-20260922` (cron WIP), and clean agent branch scaffolds `fix/a-auth-20260922`, `fix/b-frontend-20260922`, `fix/b-infra-20260922`, and `fix/b-types-20260922`. Older `codex/issue-swarm-*` and `codex/release-*` worktrees remain independent; inspect each committed and uncommitted diff before integration.
-- Preview and Production are separate environments and must remain separate. Branches separate development work; credentials, deployment checks, and explicit workflow gates separate environments. Preview is for exact-SHA validation with Preview-only credentials and data. Production changes only through `.github/workflows/migrate-production.yml` on `main`, using the exact `candidate_sha`, a matching successful `preview_run_id`, and `MIGRATE_PRODUCTION`.
-- Never treat local, fixture, or Preview success as Production proof. Never use Production credentials or data in Preview. If Preview/Auth/RLS or migration gates fail, keep the PR open and report the external blocker; do not bypass required checks.
+- Deliver completed, verified changes directly to `main` and push to `origin/main`. Do not create pull requests or wait for PR approval. This supersedes older branch/PR handoff rules in plans and workflow guidance.
+- Use isolated worktrees when needed to protect ongoing work; integrate each verified change into current `main` before pushing. Inspect existing diffs, preserve unfinished or unrelated changes, and never force-push shared history.
+- Every delivered app change must reach Vercel Production immediately after the push. Use the existing Git deployment integration; if it does not trigger, deploy the exact pushed commit through the authorized Vercel workflow. Routine pushes and Production app deployments are authorized without another confirmation.
+- Wait for the deployment to finish, verify its commit SHA matches the pushed commit, and smoke-test the affected flow on Production. Report the commit, deployment URL, and actual check results; a successful push alone is not completion. Resolve failures autonomously and report unavoidable external blockers accurately.
+- Target completion of the agreed app scope by **1 October 2026 (Europe/Berlin)**. Prioritize small, tested deliveries and remaining release blockers; avoid speculative features and unnecessary refactoring. Keep required checks and independent review for substantial changes, without a PR requirement.
+
+## Environment separation
+
+- Preview and Production remain separate. Never use Production credentials or data in Preview. Never treat local, fixture, or Preview success as Production proof.
+- Database migrations retain their separate safety gates: Production migrations run through `.github/workflows/migrate-production.yml` on `main`, using the exact `candidate_sha`, a matching successful `preview_run_id`, and `MIGRATE_PRODUCTION`. Direct app deployment authorization does not bypass Preview/Auth/RLS or migration checks.
 
 ## Test account (Production)
 
@@ -46,4 +49,4 @@ For UI, typography, icons, motion, or product wording, read
 [the design contract](docs/brand/design-language.md) and the relevant chapter of
 [Brandbook v1.0](docs/brand/brandbook.html) before editing. This source supersedes
 older visual-design documents. Verify the changed view in light/dark and at a
-320px viewport; retain the header accessibility rules above.
+iphone 17 viewport; retain the header accessibility rules above.

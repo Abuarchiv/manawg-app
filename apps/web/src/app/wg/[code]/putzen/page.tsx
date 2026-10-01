@@ -45,6 +45,7 @@ import {
 	createQueuedAbsence,
 	createQueuedChore,
 	createQueuedChoreCompletion,
+	resolveLocalRowRemoval,
 } from '@/core/offline/offline-queue';
 import { useOfflineQueueSync } from '@/core/offline/useOfflineQueueSync';
 import { endOfBerlinDay, instantAtBerlinWallTime } from '@/core/utils/berlin-day';
@@ -88,7 +89,7 @@ const ConfirmDialog = dynamic(() =>
 
 // craftsman-ignore: TS002 — Next.js App Router requires default export from page.tsx
 export default function PutzenPage() {
-	const { wg, members, identity } = useWg();
+	const { wg, members, identity, isAdmin } = useWg();
 	const toast = useToast();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const {
@@ -265,14 +266,17 @@ export default function PutzenPage() {
 			absenceStartDate?: string;
 			absenceEndDate?: string;
 			absenceReason?: string;
-			openAbsencesPanel?: boolean;
 			queueEditId?: string;
+			queueEditType?: OfflineActionType;
 		}>(draftKey);
 		if (!draft) {
 			setDraftHydrated(true);
 			return;
 		}
-		if (!isEmptyModuleDraft('chore', draft, identity.memberId)) {
+		// A queued absence edit belongs to the absences panel (the queue link
+		// opens it via ?panel=absences) — it must not pop the chore form.
+		const editingQueuedAbsence = draft.queueEditType === 'absence.create';
+		if (!editingQueuedAbsence && !isEmptyModuleDraft('chore', draft, identity.memberId)) {
 			assigneeTouchedRef.current = true;
 			setShowForm(true);
 		}
@@ -337,8 +341,12 @@ export default function PutzenPage() {
 
 	useEffect(() => {
 		if (!draftHydrated) return;
+		// Queue-edit bookkeeping (queueEditType, panel hints) must not outlive
+		// the edit: it would keep isEmptyModuleDraft false forever, re-open the
+		// chore form on every visit and trip the queue conflict guard.
+		const stored = readDraft<Record<string, unknown>>(draftKey) ?? {};
 		writeDraft(draftKey, {
-			...readDraft<Record<string, unknown>>(draftKey),
+			...(queueEditId ? stored : {}),
 			title: newTitle,
 			recurrenceType: newRecurrenceType,
 			intervalDays: newInterval,
@@ -649,6 +657,22 @@ export default function PutzenPage() {
 		if (isPending(pendingKey)) return;
 		startPending(pendingKey);
 		try {
+			// Offline angelegte Abwesenheiten tragen eine synthetische ID, die der
+			// Server nie vergeben hat — lokal entfernen statt mit 400 id_invalid.
+			const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
+			if (localRemoval) {
+				if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
+					setActionError(
+						'Offline-Speicher ist blockiert. Die Abwesenheit konnte nicht entfernt werden.',
+					);
+					return;
+				}
+				setQueueEditId((current) => (current === id ? null : current));
+				updateAbsences((current) => current.filter((absence) => absence.id !== id));
+				refreshCount();
+				setActionNotice('Die offline angelegte Abwesenheit wurde aus dem Plan entfernt.');
+				return;
+			}
 			const result = await apiFetch<Record<string, never>>(
 				`/api/wg/${encodedShareCode}/absences/${encodeURIComponent(id)}`,
 				{
@@ -833,31 +857,29 @@ export default function PutzenPage() {
 		setActionError(null);
 		setActionNotice(null);
 
-		const status = getChoreStatus(chore.nextDueAt);
-		const result = await apiFetch<Record<string, never>>(
-			`/api/wg/${encodedShareCode}/announcements`,
+		// Provenance (`source: 'chore_swap'` + the highlight deep link) is
+		// server-generated: the public announcements POST forces every member
+		// post to `manual` (#517), so swap requests go through the chore route.
+		const result = await apiFetch<{ announcement?: { id?: string } }>(
+			`/api/wg/${encodedShareCode}/chores/${encodeURIComponent(chore.id)}/swap-request`,
 			{
 				method: 'POST',
 				memberId: identity.memberId,
 				memberToken: identity.memberToken,
-				body: JSON.stringify({
-					kind: 'request',
-					source: 'chore_swap',
-					sourcePath: `/putzen?highlight=${encodeURIComponent(chore.id)}`,
-					content: `${identity.name} bittet um Tausch: "${chore.title}" ist ${status.label}. Nachholen, übernehmen oder kurz absprechen.`,
-				}),
 			},
 		);
 
 		if (!result.ok) {
 			setActionError(
-				result.error === 'unexpected_error' || result.error === 'server_error'
-					? 'Tauschanfrage konnte nicht gepostet werden: Versuche es gleich erneut.'
-					: result.status === 0 ||
-							result.error === 'Netzwerkfehler' ||
-							result.error === 'Failed to fetch'
-						? 'Tauschanfrage konnte nicht gepostet werden: Prüfe deine Verbindung und versuche es erneut.'
-						: 'Tauschanfrage konnte nicht gepostet werden.',
+				result.error === 'chore_not_found'
+					? 'Diese Putzaufgabe existiert nicht mehr. Lade den Plan neu.'
+					: result.error === 'unexpected_error' || result.error === 'server_error'
+						? 'Tauschanfrage konnte nicht gepostet werden: Versuche es gleich erneut.'
+						: result.status === 0 ||
+								result.error === 'Netzwerkfehler' ||
+								result.error === 'Failed to fetch'
+							? 'Tauschanfrage konnte nicht gepostet werden: Prüfe deine Verbindung und versuche es erneut.'
+							: 'Tauschanfrage konnte nicht gepostet werden.',
 			);
 		} else {
 			setActionNotice('Tauschanfrage wurde auf der Pinnwand gepostet.');
@@ -923,6 +945,23 @@ export default function PutzenPage() {
 		setActionError(null);
 		setActionNotice(null);
 
+		// Offline angelegte Aufgaben tragen eine synthetische ID: der Server
+		// würde mit 400 id_invalid antworten, deshalb lokal entfernen.
+		const localRemoval = resolveLocalRowRemoval(readOfflineQueue(), wg.shareCode, id);
+		if (localRemoval) {
+			if (localRemoval.dropped && !writeOfflineQueue(localRemoval.queue)) {
+				setActionError('Offline-Speicher ist blockiert. Die Aufgabe konnte nicht entfernt werden.');
+				endPending(id);
+				return;
+			}
+			setQueueEditId((current) => (current === id ? null : current));
+			setItems((current) => current.filter((item) => item.id !== id));
+			refreshCount();
+			setActionNotice('Die offline angelegte Aufgabe wurde aus dem Plan entfernt.');
+			endPending(id);
+			return;
+		}
+
 		const result = await apiFetch<Record<string, never>>(
 			`/api/wg/${encodedShareCode}/chores/${encodeURIComponent(id)}`,
 			{
@@ -935,7 +974,7 @@ export default function PutzenPage() {
 		if (!result.ok) {
 			const msg =
 				result.status === 403
-					? 'Nur der/die Ersteller:in kann diese Aufgabe entfernen.'
+					? 'Nur WG-Admins können diese Aufgabe endgültig entfernen.'
 					: result.status === 404 && result.error === 'chore_not_found'
 						? 'Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.'
 						: result.status === 0 ||
@@ -1189,6 +1228,7 @@ export default function PutzenPage() {
 									<ChoreRow
 										key={chore.id}
 										chore={chore}
+										isAdmin={isAdmin}
 										assignee={memberLookup(chore.assignedMemberId)}
 										isPending={isPending(chore.id)}
 										isSwapPending={isPending(`${chore.id}:swap`)}

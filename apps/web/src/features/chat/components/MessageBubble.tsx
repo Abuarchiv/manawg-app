@@ -44,7 +44,7 @@ import { formatRelativeTime, formatTimeFull } from '@/core/utils/time';
 import { haptic } from '@/shared/lib/haptics';
 import { MoreVertical, Pencil, Reply, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { canDeleteMessage, canEditMessage } from '../chat-pure';
+import { canDeleteMessage, canEditMessage, resolveStoredEditDraft } from '../chat-pure';
 import { ReactionPicker } from './ReactionPicker';
 
 export interface BubbleMessage {
@@ -116,18 +116,43 @@ export function MessageBubble({
 	});
 	const senderName = sender?.name ?? 'Unbekannt';
 	const align = isOwn ? 'end' : 'start';
+	const messageBody = message.body ?? '';
 
 	useEffect(() => {
-		const saved = readDraft<{ body?: string }>(draftKey);
-		if (typeof saved?.body === 'string') {
-			setDraft(saved.body);
+		// Skip while editing: the textarea keeps what the user is typing, and a
+		// message arriving mid-edit must not rewrite it.
+		if (editing) return;
+		const stored = readDraft<{ body?: string; base?: string }>(draftKey);
+		const resolved = resolveStoredEditDraft(stored, messageBody);
+		if (resolved.discard) removeDraft(draftKey);
+		if (resolved.text !== null) {
+			// Adopt drafts persisted before `base` existed so later message
+			// changes are detected from now on.
+			if (typeof stored?.base !== 'string')
+				writeDraft(draftKey, { body: resolved.text, base: messageBody });
+			setDraft(resolved.text);
 			setHasDraft(true);
+			return;
 		}
-	}, [draftKey]);
+		setDraft(messageBody);
+		setHasDraft(false);
+	}, [draftKey, editing, messageBody]);
 	function changeDraft(value: string) {
 		setDraft(value);
 		setHasDraft(true);
-		writeDraft(draftKey, { body: value });
+		// `base` records the body this edit started from; a message that changes
+		// underneath it invalidates the draft instead of silently overwriting.
+		writeDraft(draftKey, { body: value, base: messageBody });
+	}
+	function cancelEdit() {
+		if (pendingRef.current) return;
+		// Abbrechen/Escape verwirft den Entwurf: sonst bietet das Menü „Entwurf
+		// weiterbearbeiten" mit veraltetem Text an, auch nach einem Reload.
+		removeDraft(draftKey);
+		setHasDraft(false);
+		setDraft(messageBody);
+		setError(null);
+		setEditing(false);
 	}
 	async function saveEdit() {
 		const text = draft.trim();
@@ -216,7 +241,7 @@ export function MessageBubble({
 										event.preventDefault();
 										void saveEdit();
 									}
-									if (event.key === 'Escape' && !pendingRef.current) setEditing(false);
+									if (event.key === 'Escape' && !pendingRef.current) cancelEdit();
 								}}
 								rows={3}
 								disabled={pending}
@@ -228,7 +253,7 @@ export function MessageBubble({
 							/>
 						</Field>
 						<div className="flex flex-wrap justify-end gap-2">
-							<Button variant="outline" disabled={pending} onClick={() => setEditing(false)}>
+							<Button variant="outline" disabled={pending} onClick={cancelEdit}>
 								Abbrechen
 							</Button>
 							<Button disabled={pending || !draft.trim()} onClick={() => void saveEdit()}>

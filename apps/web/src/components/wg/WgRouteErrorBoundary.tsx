@@ -1,7 +1,7 @@
 // craftsman-ignore: TS002 — wrapper consumed by Next.js App Router error.tsx default exports
 'use client';
 
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
 	Empty,
@@ -91,6 +91,16 @@ export function WgRouteErrorBoundary({
 								>
 									Zur Übersicht
 								</Button>
+								<a
+									href="mailto:info@manawg.com?subject=Fehler%20in%20ManaWG"
+									className={buttonVariants({
+										variant: 'outline',
+										size: 'lg',
+										className: 'w-full',
+									})}
+								>
+									Fehler per E-Mail melden
+								</a>
 							</div>
 						</EmptyContent>
 					</Empty>

@@ -21,7 +21,6 @@ import {
 } from '@/features/pinnwand/announcement-replay';
 import {
 	ANNOUNCEMENT_KINDS,
-	ANNOUNCEMENT_SOURCES,
 	summarizeAnnouncementReactions,
 } from '@/features/pinnwand/announcement-workflow';
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
@@ -57,18 +56,16 @@ function legacyCreateReplay(value: unknown): AnnouncementReplayResponse | null {
 	return { status: 200, body: value, entityId: id };
 }
 
+// SECURITY (#517): `source`/`sourcePath` are provenance and are never
+// client-controlled. The schema drops them (zod strips unknown keys) and the
+// insert forces `manual`/null; server-generated posts set them through
+// internal paths instead — postSystemNotice (core/activity-feed.ts) writes
+// them directly, and chore swap requests go through
+// POST /chores/[id]/swap-request.
 const createAnnouncementSchema = z.object({
 	content: z.string().trim().min(CONTENT_MIN).max(CONTENT_MAX),
 	imageUrl: imageUrlSchema,
 	kind: announcementKindSchema.optional().default('info'),
-	source: z.enum(ANNOUNCEMENT_SOURCES).optional().default('manual'),
-	sourcePath: z
-		.string()
-		.trim()
-		.max(160)
-		.refine((value) => value.length === 0 || value.startsWith('/'))
-		.optional()
-		.nullable(),
 });
 
 export const GET = withWgRoute(
@@ -162,19 +159,17 @@ export const POST = withWgRoute('announcements POST', async (req, { code }) => {
 	const parsed = createAnnouncementSchema.safeParse(raw);
 	if (!parsed.success) {
 		const { fieldErrors } = parsed.error.flatten();
-		if (fieldErrors.kind || fieldErrors.source) return badRequest('kind_invalid');
-		if (fieldErrors.sourcePath) return badRequest('source_path_invalid');
+		if (fieldErrors.kind) return badRequest('kind_invalid');
 		if (fieldErrors.imageUrl) return badRequest('image_invalid');
 		return badRequest('content_invalid');
 	}
 
-	const { content, imageUrl = null, kind, source, sourcePath = null } = parsed.data;
+	const { content, imageUrl = null, kind } = parsed.data;
 	const safeImageUrl = typeof imageUrl === 'string' && imageUrl.length > 0 ? imageUrl : null;
-	const safeSource = source === 'system' ? 'manual' : source;
-	const safeSourcePath =
-		safeSource !== 'manual' && typeof sourcePath === 'string' && sourcePath.startsWith('/')
-			? sourcePath
-			: null;
+	// Client-supplied provenance is ignored entirely: a member post is always
+	// `manual` and never carries an internal deep link (#517).
+	const safeSource = 'manual';
+	const safeSourcePath = null;
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
 	const wg = auth.wg;

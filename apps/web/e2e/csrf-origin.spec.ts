@@ -1,12 +1,39 @@
 import { expect, test } from '@playwright/test';
 import { NextRequest } from 'next/server';
-import { originAllowed } from '../src/middleware';
+import { config, isRateLimitedApiPath, isShareCodeLookup, originAllowed } from '../src/middleware';
 
 const WRITE_URL = 'https://app.example.com/api/wg/ABCDEFGH/expenses';
 
 function request(headers: Record<string, string>, method = 'POST'): NextRequest {
 	return new NextRequest(WRITE_URL, { method, headers });
 }
+
+test('covers the password-recovery endpoint with the shared write controls', () => {
+	const matcher = config.matcher;
+	expect(matcher).toContain('/api/auth/:path*');
+
+	// Without this the path fell through before the Origin/CSRF check and had no
+	// limiter at all: DELETE is a state-changing API handler like any other.
+	expect(isRateLimitedApiPath('/api/auth/recovery')).toBe(true);
+	expect(
+		originAllowed(
+			new NextRequest('https://app.example.com/api/auth/recovery', {
+				method: 'DELETE',
+				headers: { host: 'app.example.com', origin: 'https://evil.example.com' },
+			}),
+		),
+	).toBe(false);
+	// Same-origin DELETE stays possible, and the path is not a share-code probe.
+	expect(
+		originAllowed(
+			new NextRequest('https://app.example.com/api/auth/recovery', {
+				method: 'DELETE',
+				headers: { host: 'app.example.com', origin: 'https://app.example.com' },
+			}),
+		),
+	).toBe(true);
+	expect(isShareCodeLookup('/api/auth/recovery', 'DELETE')).toBe(false);
+});
 
 test('allows same-origin writes and browser-less reads', () => {
 	expect(

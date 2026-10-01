@@ -25,11 +25,18 @@ export function ImportMemberMapping({
 }: Props) {
 	if (names.length === 0)
 		return <p className="text-sm text-muted-foreground">Keine Namen erkannt.</p>;
+	const memberIds = new Set(members.map((m) => m.id));
 	return (
 		<FieldGroup>
 			{names.map((name, index) => {
-				const value = mapping[name] ?? '';
-				const invalid = showErrors && !value;
+				const selectedId = mapping[name] ?? '';
+				// A mapping target that is not among the offered members (moved-out
+				// member) is as invalid as no mapping at all — without this check the
+				// field looked valid while the commit rejected it with
+				// `member_not_in_wg`.
+				const unknownMember = selectedId !== '' && !memberIds.has(selectedId);
+				const invalid = showErrors && (selectedId === '' || unknownMember);
+				const value = unknownMember ? '' : selectedId;
 				return (
 					<Field key={name} data-invalid={invalid || undefined}>
 						<FieldLabel htmlFor={`import-map-${index}`}>{name}</FieldLabel>
@@ -50,7 +57,11 @@ export function ImportMemberMapping({
 							))}
 						</NativeSelect>
 						{invalid && (
-							<FieldError id={`import-map-error-${index}`}>Bitte WG-Mitglied auswählen.</FieldError>
+							<FieldError id={`import-map-error-${index}`}>
+								{unknownMember
+									? 'Dieses Mitglied gehört nicht (mehr) zu dieser WG. Bitte ein aktuelles Mitglied wählen.'
+									: 'Bitte WG-Mitglied auswählen.'}
+							</FieldError>
 						)}
 					</Field>
 				);

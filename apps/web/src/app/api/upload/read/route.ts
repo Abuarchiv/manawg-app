@@ -1,6 +1,7 @@
 import { getAuthenticatedUser } from '@/core/auth/server';
-import { apiError, badRequest, notFound, serverError } from '@/core/errors';
+import { apiError, authUnavailable, badRequest, notFound, serverError } from '@/core/errors';
 import { requireMember } from '@/core/guards/api-auth';
+import { logApiError } from '@/core/infra/observability';
 import {
 	ImageStorageConfigurationError,
 	ImageStorageObjectNotFoundError,
@@ -19,7 +20,15 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 	const privateImage = key ? parsePrivateImageKey(key) : null;
 	if (!key || !privateImage) return noStore(badRequest('invalid_image_key'));
 
-	const authenticatedUser = await getAuthenticatedUser(req);
+	// A transient Auth failure must not escape the handler as a bare 500: map it
+	// to the structured 503 the WG guards return for the same condition.
+	let authenticatedUser: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+	try {
+		authenticatedUser = await getAuthenticatedUser(req);
+	} catch (err) {
+		logApiError('[api/upload/read] auth lookup failed', err);
+		return noStore(authUnavailable());
+	}
 	if (!authenticatedUser) return noStore(apiError('auth_required', 401, 'auth_required'));
 
 	const auth = await requireMember(req, privateImage.wgId, authenticatedUser);

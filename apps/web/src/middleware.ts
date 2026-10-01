@@ -12,19 +12,38 @@ import { type NextRequest, NextResponse } from 'next/server';
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
-function isRateLimitedApiPath(path: string): boolean {
+export function isRateLimitedApiPath(path: string): boolean {
 	return (
 		path === '/api/account' ||
 		path === '/api/wg' ||
 		path.startsWith('/api/wg/') ||
 		path.startsWith('/api/calendar/') ||
 		path.startsWith('/api/upload/') ||
-		path.startsWith('/api/cron/')
+		path.startsWith('/api/cron/') ||
+		// Auth API handlers are state-changing (recovery cookie, session cleanup)
+		// and must not sit outside the Origin/CSRF check the rest of the API
+		// enforces. Prefix match keeps future /api/auth/* handlers inside it.
+		path.startsWith('/api/auth/')
 	);
 }
 
+/**
+ * Share-code lookups get the tight 20/min bucket because every answer that
+ * differs by code existence (`404 wg_not_found` vs `403`/`401`) is an
+ * enumeration oracle.
+ *
+ * The bare `/api/wg/<code>` GET was never the whole surface: nested reads
+ * (`/api/wg/<code>/members`, `/dashboard`, `/expenses`, …) answer through the
+ * same guards and used to fall through to the 120/min read bucket. Match the
+ * code segment generically instead, excluding the two paths that are not share
+ * codes: the create-WG root and the account's own membership list.
+ */
 export function isShareCodeLookup(path: string, method: string): boolean {
-	return method === 'GET' && path !== '/api/wg/mine' && /^\/api\/wg\/[^/]+$/.test(path);
+	if (method !== 'GET') return false;
+	if (path === '/api/wg' || path === '/api/wg/mine' || path.startsWith('/api/wg/mine/')) {
+		return false;
+	}
+	return /^\/api\/wg\/[^/]+(\/|$)/.test(path);
 }
 
 async function withPageSecurityHeaders(req: NextRequest): Promise<NextResponse> {
@@ -70,6 +89,14 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 	const isRead = READ_METHODS.has(req.method);
 	const path = req.nextUrl.pathname;
 
+	// `/wg/*` is deliberately NOT redirected to /neu here. `refreshSupabaseSession`
+	// serves the page when Auth is transiently unavailable (so the layout's error
+	// boundary can offer a retry instead of a dead redirect), which means the
+	// middleware is no longer an independent sign-in barrier for `/wg/*`.
+	// The invariant is enforced structurally instead: `/wg/[code]/layout.tsx`
+	// calls `getAuthenticatedUserFromCookies()` and redirects on `null`, and
+	// `scripts/check-wg-guards.mjs` (part of `pnpm lint`) fails when a `route.ts`
+	// or server action is added under `src/app/wg/**` without that guard.
 	if (!path.startsWith('/api/')) {
 		return withPageSecurityHeaders(req);
 	}
@@ -155,5 +182,8 @@ export const config = {
 		'/api/calendar/:path*',
 		'/api/upload/:path*',
 		'/api/cron/:path*',
+		// State-changing auth handlers: without this entry the path never reaches
+		// the Origin/CSRF check or a limiter above.
+		'/api/auth/:path*',
 	],
 };

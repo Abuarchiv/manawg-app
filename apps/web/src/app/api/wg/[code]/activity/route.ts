@@ -13,7 +13,7 @@ import {
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { buildActivityTimeline, getActivityReminders } from '@/core/reads/activity';
-import { desc, eq } from 'drizzle-orm';
+import { asc, desc, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
 export const GET = withWgRoute(
@@ -85,7 +85,10 @@ export const GET = withWgRoute(
 				})
 				.from(chores)
 				.where(eq(chores.wgId, wg.id))
-				.orderBy(desc(chores.nextDueAt))
+				// These rows feed `dueChores`, which only escalates overdue chores —
+				// a descending sort plus the cap would drop exactly the rows the
+				// "hängt seit N Tagen" reminder needs.
+				.orderBy(asc(chores.nextDueAt))
 				.limit(120),
 			db
 				.select({

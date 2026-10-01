@@ -2,6 +2,7 @@ import { postSystemNotice } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, shoppingItems } from '@/core/db';
 import { badRequest, forbidden, notFound, tooMany } from '@/core/errors';
+import { isWgAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
@@ -92,7 +93,13 @@ export const DELETE = withWgRoute<{ id: string }>('shopping DELETE', async (req,
 	);
 	if (!limited.success) return tooMany();
 
-	// Only the member who added the item may delete it.
+	// The member who added the item may delete it; the WG admin gets the same
+	// override every sibling route has (chores, announcements, events,
+	// absences, recurring-expenses), so an item added by a member who has
+	// since moved out can still be moderated away. `isWgAdmin` — like the bulk
+	// clear in shopping/route.ts — is the admin proof here.
+	// Self-ownership and the override both still require a verified HMAC
+	// token: the bare member-id header is spoofable.
 	const existing = await db
 		.select({ addedByMemberId: shoppingItems.addedByMemberId, name: shoppingItems.name })
 		.from(shoppingItems)
@@ -100,9 +107,8 @@ export const DELETE = withWgRoute<{ id: string }>('shopping DELETE', async (req,
 		.limit(1);
 	const row = existing[0];
 	if (!row) return notFound('item_not_found');
-	// Self-ownership requires a verified HMAC token — the bare member-id
-	// header is spoofable.
-	if (!auth.member.verified || row.addedByMemberId !== auth.member.memberId) {
+	const isOwner = row.addedByMemberId === auth.member.memberId;
+	if (!auth.member.verified || (!isOwner && !(await isWgAdmin(wgId, auth.member.memberId)))) {
 		return forbidden('not_owner', 'not_owner');
 	}
 

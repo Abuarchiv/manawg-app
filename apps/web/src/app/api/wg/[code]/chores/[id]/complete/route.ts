@@ -19,7 +19,7 @@ import {
 	chooseNextAvailableMember,
 	computeOpenGapsByMember,
 } from '@/features/chores/chore-fairness';
-import { computeNextDueAt } from '@/features/chores/chore-recurrence';
+import { computeNextDueAt, isLateCompletion } from '@/features/chores/chore-recurrence';
 import { and, eq, isNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
@@ -103,9 +103,12 @@ export const POST = withWgRoute<{ id: string }>(
 				c.recurrenceType,
 				c.anchorAt,
 			);
-			// A late completion re-anchors the monthly cycle on completedAt;
-			// otherwise keep the stored anchor (adopting nextDueAt for legacy rows).
-			const late = completedAt.getTime() > c.nextDueAt.getTime();
+			// A late completion (after the due *day* in Berlin) re-anchors the
+			// monthly cycle on completedAt; otherwise keep the stored anchor
+			// (adopting nextDueAt for legacy rows). Same predicate
+			// computeNextDueAt uses, so the persisted anchor and the computed
+			// next due never disagree.
+			const late = isLateCompletion(c.nextDueAt, completedAt);
 			const effectiveAnchor = late ? completedAt : (c.anchorAt ?? c.nextDueAt);
 			// Only active members join the rotation. A moved-out ("deactivated")
 			// member is skipped, so the next chore never lands on someone who left.

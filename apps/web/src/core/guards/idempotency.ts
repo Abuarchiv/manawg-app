@@ -7,6 +7,7 @@ import {
 	claimResponseSlot,
 	getCachedResponse,
 	readIdempotencyKey,
+	releaseResponseSlot,
 	setCachedResponse,
 } from '@/core/idempotency';
 import { NextResponse } from 'next/server';
@@ -144,6 +145,32 @@ interface CachedJsonResponse {
 	body: unknown;
 }
 
+/**
+ * Client-error answers that mean "try again later" rather than "this request
+ * is wrong". Replaying them from the seven-day response cache would turn a
+ * transient throttle into a permanent one for the caller's key.
+ */
+const TRANSIENT_CLIENT_STATUSES = new Set([408, 425, 429]);
+
+/**
+ * Whether a handler response may be persisted under the caller's
+ * Idempotency-Key and replayed to later retries.
+ *
+ * - **2xx** — the mutation completed; replaying the same body is exactly what
+ *   the key is for.
+ * - **4xx (deterministic)** — validation/authorization rejections such as
+ *   `member_not_in_wg` are produced before any mutation, so a retry would
+ *   arrive at the same answer anyway; replaying saves a redundant handler run.
+ * - **everything else (5xx, 408/425/429)** — NOT replayable. Offline queues
+ *   keep the key and retry on a later connection, so caching a transient
+ *   failure would make it permanent for `RESPONSE_REPLAY_TTL_SECONDS`.
+ */
+function isReplayableStatus(status: number): boolean {
+	if (status >= 200 && status < 300) return true;
+	if (status >= 400 && status < 500 && !TRANSIENT_CLIENT_STATUSES.has(status)) return true;
+	return false;
+}
+
 /** Replay a JSON mutation response after the caller has authenticated and
  * established a tenant/member-scoped replay scope. */
 export async function withIdempotentJsonResponse(
@@ -169,7 +196,24 @@ export async function withIdempotentJsonResponse(
 		return NextResponse.json(slot.cached.body, { status: slot.cached.status });
 	}
 
-	const response = await handler();
+	let response: NextResponse;
+	try {
+		response = await handler();
+	} catch (error) {
+		// The handler never produced a response: free the claim so the next
+		// retry re-runs it instead of waiting out the claim lease.
+		await releaseResponseSlot(scope, key);
+		throw error;
+	}
+
+	if (!isReplayableStatus(response.status)) {
+		// A failed response must not become the permanent answer for this key.
+		// The row still holds the claim placeholder, so releasing it lets the
+		// retry claim again and re-run the handler.
+		await releaseResponseSlot(scope, key);
+		return response;
+	}
+
 	let body: unknown = null;
 	try {
 		body = await response.clone().json();

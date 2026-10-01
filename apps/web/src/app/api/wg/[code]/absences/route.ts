@@ -112,7 +112,12 @@ export const POST = withWgRoute('absences POST', async (req, { code }) => {
 	}
 	const startDate = new Date(parsed.data.startDate);
 	const endDate = new Date(parsed.data.endDate);
-	if (berlinDayKey(endDate) < berlinDayKey(startDate)) return badRequest('date_range_invalid');
+	// The day-key check alone lets a reversed time range on the same Berlin day
+	// through (both keys compare equal), which stored an absence with a negative
+	// duration that can never satisfy `start <= now <= end` anywhere.
+	if (berlinDayKey(endDate) < berlinDayKey(startDate) || endDate.getTime() < startDate.getTime()) {
+		return badRequest('date_range_invalid');
+	}
 	const idemKey = readIdempotencyKey(req);
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;

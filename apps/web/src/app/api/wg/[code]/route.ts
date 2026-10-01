@@ -72,6 +72,7 @@ export async function GET(
 						currentMember: {
 							memberId: fixture.members[0].id,
 							name: fixture.members[0].name,
+							memberToken: 'fixture-member-token',
 						},
 					}
 				: {}),

@@ -145,25 +145,35 @@ interface ExportSplitRow {
  *
  * Both export paths — the expenses CSV section and the full JSON dump — read
  * the same rows the same way and built the same map, character for character.
+ *
+ * Postgres rejects a statement with more than 65,535 bind parameters, and both
+ * the default full dump (`NO_EXPORT_LIMIT`) and a large explicit page can hand
+ * more ids than that to a single `inArray`, so the ids are fetched in chunks —
+ * chunking is the only fix that also covers the "no cap" default path.
  */
+const SPLIT_ID_CHUNK = 10_000;
+
 async function loadSplitsByExpense(expenseIds: string[]): Promise<Map<string, ExportSplitRow[]>> {
 	const splitsByExpense = new Map<string, ExportSplitRow[]>();
 	if (expenseIds.length === 0) return splitsByExpense;
 
-	const splitRows = await db
-		.select({
-			expenseId: expenseSplits.expenseId,
-			debtorMemberId: expenseSplits.debtorMemberId,
-			amountCents: expenseSplits.amountCents,
-			settledAt: expenseSplits.settledAt,
-		})
-		.from(expenseSplits)
-		.where(inArray(expenseSplits.expenseId, expenseIds));
+	for (let start = 0; start < expenseIds.length; start += SPLIT_ID_CHUNK) {
+		const chunk = expenseIds.slice(start, start + SPLIT_ID_CHUNK);
+		const splitRows = await db
+			.select({
+				expenseId: expenseSplits.expenseId,
+				debtorMemberId: expenseSplits.debtorMemberId,
+				amountCents: expenseSplits.amountCents,
+				settledAt: expenseSplits.settledAt,
+			})
+			.from(expenseSplits)
+			.where(inArray(expenseSplits.expenseId, chunk));
 
-	for (const split of splitRows) {
-		const splits = splitsByExpense.get(split.expenseId) ?? [];
-		splits.push(split);
-		splitsByExpense.set(split.expenseId, splits);
+		for (const split of splitRows) {
+			const splits = splitsByExpense.get(split.expenseId) ?? [];
+			splits.push(split);
+			splitsByExpense.set(split.expenseId, splits);
+		}
 	}
 	return splitsByExpense;
 }

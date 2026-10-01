@@ -21,47 +21,54 @@ test('completing a chore resolves only its linked swap post and shows the next d
 	}
 	const request = page.request;
 	const title = `Pilot coordination ${Date.now()}`;
-	const unrelatedSourcePath = '/putzen?highlight=00000000-0000-4000-8000-000000000000';
 	const createdAnnouncementIds: string[] = [];
+	const createdChoreIds: string[] = [];
 	let choreId: string | undefined;
 
-	try {
-		const choreResponse = await request.post(`/api/wg/${shareCode}/chores`, {
+	const createChore = async (choreTitle: string) => {
+		const response = await request.post(`/api/wg/${shareCode}/chores`, {
 			data: {
-				title,
+				title: choreTitle,
 				intervalDays: 7,
 				recurrenceType: 'days',
 				assignedMemberId: null,
 			},
 		});
-		expect(choreResponse.ok()).toBe(true);
-		const choreBody = (await choreResponse.json()) as {
+		expect(response.ok()).toBe(true);
+		return (await response.json()) as {
 			chore: { id: string; nextDueAt: string; createdAt: string };
 		};
+	};
+
+	try {
+		const choreBody = await createChore(title);
 		choreId = choreBody.chore.id;
+		createdChoreIds.push(choreId);
 		expect(Date.parse(choreBody.chore.nextDueAt)).toBeGreaterThan(
 			Date.parse(choreBody.chore.createdAt),
 		);
 
+		// A second chore whose swap request must NOT be resolved by completing
+		// the first one. Swap posts go through the chore route because their
+		// provenance (`source: 'chore_swap'` + highlight link) is server-
+		// generated; the public announcements POST can only store `manual` (#517).
+		const otherChoreBody = await createChore(`${title} unrelated`);
+		const otherChoreId = otherChoreBody.chore.id;
+		createdChoreIds.push(otherChoreId);
+
 		const linkedSourcePath = `/putzen?highlight=${encodeURIComponent(choreId)}`;
-		for (const sourcePath of [linkedSourcePath, unrelatedSourcePath]) {
-			const announcementResponse = await request.post(`/api/wg/${shareCode}/announcements`, {
-				data: {
-					content: `${title} Tauschbitte ${sourcePath}`,
-					kind: 'request',
-					source: 'chore_swap',
-					sourcePath,
-				},
-			});
-			expect(announcementResponse.ok()).toBe(true);
-			const announcementBody = (await announcementResponse.json()) as {
-				announcement: { id: string };
-			};
-			createdAnnouncementIds.push(announcementBody.announcement.id);
+		const unrelatedSourcePath = `/putzen?highlight=${encodeURIComponent(otherChoreId)}`;
+		for (const swapChoreId of [choreId, otherChoreId]) {
+			const swapResponse = await request.post(
+				`/api/wg/${shareCode}/chores/${encodeURIComponent(swapChoreId)}/swap-request`,
+			);
+			expect(swapResponse.ok()).toBe(true);
+			const swapBody = (await swapResponse.json()) as { announcement: { id: string } };
+			createdAnnouncementIds.push(swapBody.announcement.id);
 		}
 
 		const manualResponse = await request.post(`/api/wg/${shareCode}/announcements`, {
-			data: { content: `${title} manueller Beitrag`, kind: 'info', source: 'manual' },
+			data: { content: `${title} manueller Beitrag`, kind: 'info' },
 		});
 		expect(manualResponse.ok()).toBe(true);
 		const manualBody = (await manualResponse.json()) as { announcement: { id: string } };
@@ -80,6 +87,7 @@ test('completing a chore resolves only its linked swap post and shows the next d
 				status: string;
 				resolvedAt: string | null;
 				resolvedByMemberId: string | null;
+				source: string;
 				sourcePath: string | null;
 			}>;
 		};
@@ -92,10 +100,25 @@ test('completing a chore resolves only its linked swap post and shows the next d
 		const manual = announcementsBody.announcements.find(
 			(announcement) => announcement.id === manualBody.announcement.id,
 		);
-		expect(linked).toMatchObject({ status: 'resolved', resolvedAt: expect.any(String) });
+		expect(linked).toMatchObject({
+			status: 'resolved',
+			resolvedAt: expect.any(String),
+			source: 'chore_swap',
+		});
 		expect(linked?.resolvedByMemberId).toBeTruthy();
-		expect(unrelated).toMatchObject({ status: 'open', resolvedAt: null, resolvedByMemberId: null });
-		expect(manual).toMatchObject({ status: 'open', resolvedAt: null, resolvedByMemberId: null });
+		expect(unrelated).toMatchObject({
+			status: 'open',
+			resolvedAt: null,
+			resolvedByMemberId: null,
+			source: 'chore_swap',
+		});
+		expect(manual).toMatchObject({
+			status: 'open',
+			resolvedAt: null,
+			resolvedByMemberId: null,
+			source: 'manual',
+			sourcePath: null,
+		});
 		if (!linked || !unrelated)
 			throw new Error('Pilot announcements were not returned after completion.');
 		const staleTakeResponse = await request.post(
@@ -131,8 +154,8 @@ test('completing a chore resolves only its linked swap post and shows the next d
 				.delete(`/api/wg/${shareCode}/announcements/${announcementId}`)
 				.catch(() => undefined);
 		}
-		if (choreId) {
-			await request.delete(`/api/wg/${shareCode}/chores/${choreId}`).catch(() => undefined);
+		for (const createdChoreId of createdChoreIds) {
+			await request.delete(`/api/wg/${shareCode}/chores/${createdChoreId}`).catch(() => undefined);
 		}
 	}
 });

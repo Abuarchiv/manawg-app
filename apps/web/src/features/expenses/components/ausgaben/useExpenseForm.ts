@@ -12,7 +12,7 @@ import { formatEuroInput } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { parseTimestamp } from '@/core/utils/time';
 import { buildExpensePrefillDraft } from '@/features/expenses/expense-prefill';
-import { distributeCentsEqually } from '@/features/expenses/split-math';
+import { isEqualExpenseSplit } from '@/features/expenses/expense-split-input';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DESCRIPTION_MAX, type QUICK_EXPENSE_TEMPLATES } from './constants';
 import type { Expense, RecurringExpense } from './expense-types';
@@ -34,6 +34,7 @@ type ExpenseSuggestion = Omit<
  */
 interface FormMember {
 	id: string;
+	active: boolean;
 }
 
 /**
@@ -346,16 +347,7 @@ export function useExpenseForm({
 		// (amount, member-order) pair. Previous heuristic ("each split is base
 		// or base+1") falsely treated [334,334,333] (3 cents remainder bug) and
 		// expenses missing a member as equal.
-		const isEqual = (() => {
-			if (expense.splits.length === 0) return true;
-			if (expense.splits.length !== members.length) return false;
-			const expected = distributeCentsEqually(
-				expense.amountCents,
-				members.map((m) => m.id),
-			);
-			const byId = new Map(expense.splits.map((s) => [s.debtorMemberId, s.amountCents]));
-			return members.every((m, idx) => byId.get(m.id) === expected[idx]);
-		})();
+		const isEqual = isEqualExpenseSplit(expense.amountCents, expense.splits, members);
 		if (isEqual) {
 			setSplitMode('equal');
 			setManualSplits({});

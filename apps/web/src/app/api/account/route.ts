@@ -8,7 +8,7 @@ import {
 } from '@/core/db/account-deletion';
 import { removeAccountFromWgs } from '@/core/db/delete-account';
 import { withTransaction } from '@/core/db/transaction';
-import { apiError, serverError } from '@/core/errors';
+import { apiError, authUnavailable, serverError } from '@/core/errors';
 import { logApiError } from '@/core/infra/observability';
 import { eq } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -41,7 +41,15 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 	if (!hasSupabaseEnv() || !serviceRoleKey) {
 		return apiError('account_deletion_unavailable', 503, 'account_deletion_unavailable');
 	}
-	const user = await getAuthenticatedUser(req);
+	// Deleting the account is exactly the operation that must survive an Auth
+	// blip as an explicit "retry later", not an unhandled throw → bare 500.
+	let user: Awaited<ReturnType<typeof getAuthenticatedUser>>;
+	try {
+		user = await getAuthenticatedUser(req);
+	} catch (err) {
+		logApiError('[api/account DELETE] auth lookup failed', err);
+		return authUnavailable();
+	}
 	if (!user) return apiError('unauthorized', 401, 'auth_required');
 
 	try {

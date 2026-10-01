@@ -1,7 +1,7 @@
 // craftsman-ignore: TS002 — Next.js App Router requires default export for error boundaries
 'use client';
 
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import {
 	Empty,
 	EmptyContent,
@@ -42,6 +42,12 @@ export default function GlobalError({
 							<Button type="button" size="lg" onClick={() => reset()}>
 								Erneut versuchen
 							</Button>
+							<a
+								href="mailto:info@manawg.com?subject=Fehler%20in%20ManaWG"
+								className={buttonVariants({ variant: 'outline', size: 'lg' })}
+							>
+								Fehler per E-Mail melden
+							</a>
 						</EmptyContent>
 					</Empty>
 				</main>
