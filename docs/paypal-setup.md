@@ -72,3 +72,11 @@ Ein neuer Entwickler-Dashboard-Tab führte zwar zur PayPal-Anmeldeseite; das wid
 - [Plattformkonto einrichten](https://developer.paypal.com/platforms/create-account)
 
 Dieser separate Abgleich ergänzt die oben belegte Händler-Readiness; er bestätigt keinen App-Callback oder Capture. Der aktuelle lokale Produktstand ist `a5733ba`; die PayPal-Backend-Module stimmen mit dem unveränderten Sandbox-Handlerstand überein.
+
+## Verifizierter lokaler App-Ablauf am 30.09.2026
+
+Die zweite öffentliche HTTPS-Freigabe wurde abgelehnt; der Testzugang bleibt geschlossen. Die aktuelle offizielle Multiparty-Anleitung unterstützt den Status-GET mit der Tracking-ID. Die echte Sandbox-Antwort ist ein einzelnes Objekt mit merchant_id, tracking_id und links; Tracking-ID und kanonische Händler-Readiness stimmen. Der geprüfte Produktstand 14995d0 ergänzt dafür die vorhandene Connect-POST-Route um die strikte Aktion complete. Sie akzeptiert keine frei wählbare Händlerkennung: aktuelles gültiges signiertes Cookie, angemeldeter Nutzer, WG/Mitglied, Umgebung, Ablaufzeit, aktuell abgeleitete Tracking-ID und bisherige Händlerbindung werden geprüft; die bestehenden Readiness-, Callback- und CAS-Prüfungen bleiben erhalten. Der normale Status-GET schreibt weiterhin nichts.
+
+Der echte Browser zeigte danach „PayPal verbunden“. Mit dem bestehenden synthetischen Zahler wurde eine neue 12,34-EUR-Testschuld über die normalen App-Routen angelegt; eine fremd bereits manuell beglichene alte Testausgabe blieb erhalten. Der echte SDK-Checkout-Abbruch änderte den Saldo nicht. Die anschließende Sandbox-Freigabe und der App-Capture hinterließen genau eine abgeschlossene Zahlung über 1234 Cent/EUR für den erwarteten Zahler, Empfänger und Sandbox-Händler; die App zeigt null Saldo. Ein geprüfter erneuter App-Capture derselben bereits abgeschlossenen Bestellung liefert 200/COMPLETED, ohne neue Provider-Anfrage oder zusätzliche Zeile und ohne Änderung von Abschlusszeit und Saldo. Keine Live-Zahlung, kein gefälschter Callback und keine manuelle Händler-Datenbankzuweisung wurden verwendet.
+
+Diese Prüfung verwendet tatsächliche PayPal-Sandbox-APIs und SDK sowie reale lokale App-Routen/SQL, aber ein erklärtes lokales Auth-Double. Der echte HTTPS-Callback, gehostete Auth-/Device-Strecken sowie die Live-Freigabe bleiben davon getrennt.
