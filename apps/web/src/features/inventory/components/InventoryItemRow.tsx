@@ -5,11 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Item, ItemActions, ItemContent, ItemDescription, ItemTitle } from '@/components/ui/item';
 import { Spinner } from '@/components/ui/spinner';
 import { apiFetch } from '@/core/infra/api-client';
-import {
-	type NotificationWarning,
-	notificationWarningMessage,
-} from '@/core/notifications/notification-warning';
-import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
+import { useInventoryQuantity } from '@/features/inventory/hooks/use-inventory-quantity';
 import {
 	type InventoryItemDto,
 	type InventoryMutationItemDto,
@@ -37,12 +33,7 @@ const BUSY_CLASS = 'aria-disabled:pointer-events-none aria-disabled:opacity-50';
 /** How long "Entfernen/Abbrechen" stays before the row falls back. */
 const DELETE_CONFIRM_MS = 6000;
 
-type PendingAction = 'decrement' | 'increment' | 'delete';
-type ConsumeResponse = {
-	item: InventoryMutationItemDto;
-	clamped: boolean;
-	warning: NotificationWarning;
-};
+type PendingAction = 'delete';
 
 export const InventoryItemRow = memo(function InventoryItemRow({
 	item,
@@ -62,14 +53,18 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 	const rowRef = useRef<HTMLDivElement>(null);
 	const trashRef = useRef<HTMLButtonElement>(null);
 	const cancelRef = useRef<HTMLButtonElement>(null);
-	const consumeIdempotencyKeyRef = useRef<string | null>(null);
-	const restockIdempotencyKeyRef = useRef<string | null>(null);
-	// Optimistic: stock changes immediately on tap; success replaces it with the server value,
-	// errors reset it in finally (null = show server state).
-	const [optimisticQuantity, setOptimisticQuantity] = useState<number | null>(null);
-	const quantity = optimisticQuantity ?? item.quantity;
+	const { quantity, action, tap } = useInventoryQuantity({
+		item,
+		shareCode,
+		memberId,
+		onChanged,
+		onGone: () => {
+			setRemoved(true);
+			onChanged(undefined, item.id);
+		},
+	});
 	const isDeleteArmed = deleteArmed;
-	const pending = pendingAction !== null;
+	const pending = action !== null || pendingAction === 'delete';
 	const armed = isDeleteArmed || pendingAction === 'delete';
 
 	// Another member deleted the item meanwhile: drop the row instead of offering a retry that can never succeed.
@@ -78,83 +73,6 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 		setRemoved(true);
 		onChanged(undefined, item.id);
 		return true;
-	}
-
-	async function changeQuantity(delta: number): Promise<void> {
-		if (pending) return;
-		setPendingAction(delta < 0 ? 'decrement' : 'increment');
-		setOptimisticQuantity(Math.max(0, item.quantity + delta));
-		try {
-			if (delta < 0) {
-				const idempotencyKey = consumeIdempotencyKeyRef.current ?? createOfflineIdempotencyKey();
-				if (!idempotencyKey) {
-					toast.error('Aktualisierung konnte nicht sicher gesendet werden. Versuche es erneut.');
-					return;
-				}
-				consumeIdempotencyKeyRef.current = idempotencyKey;
-				const res = await apiFetch<ConsumeResponse>(
-					`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(item.id)}/consume`,
-					{
-						method: 'POST',
-						memberId,
-						headers: { 'Idempotency-Key': idempotencyKey },
-						body: JSON.stringify({ delta }),
-					},
-				);
-				if (res.ok) {
-					consumeIdempotencyKeyRef.current = null;
-					const warningMessage = notificationWarningMessage(
-						res.data.warning,
-						'Bestand aktualisiert',
-					);
-					if (res.data.clamped && warningMessage) {
-						toast.info(`Bestand kann nicht unter 0 fallen. ${warningMessage}`);
-					} else if (res.data.clamped) {
-						toast.info('Bestand kann nicht unter 0 fallen.');
-					} else if (warningMessage) {
-						toast.info(warningMessage);
-					}
-					onChanged(res.data.item);
-				} else if (dropIfGone(res)) {
-					// row is gone
-				} else if (res.status === 429) {
-					toast.error('Zu viele Änderungen in kurzer Zeit. Bitte versuche es später erneut.');
-				} else {
-					if (res.status > 0 && res.status < 500) consumeIdempotencyKeyRef.current = null;
-					toast.error(`Aktualisierung fehlgeschlagen. „${item.name}“ ließ sich nicht verringern.`);
-				}
-			} else {
-				const idempotencyKey = restockIdempotencyKeyRef.current ?? createOfflineIdempotencyKey();
-				if (!idempotencyKey) {
-					toast.error('Aktualisierung konnte nicht sicher gesendet werden. Versuche es erneut.');
-					return;
-				}
-				restockIdempotencyKeyRef.current = idempotencyKey;
-				const res = await apiFetch<{ item: InventoryMutationItemDto }>(
-					`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(item.id)}`,
-					{
-						method: 'PATCH',
-						memberId,
-						headers: { 'Idempotency-Key': idempotencyKey },
-						body: JSON.stringify({ quantityDelta: delta }),
-					},
-				);
-				if (res.ok) {
-					restockIdempotencyKeyRef.current = null;
-					onChanged(res.data.item);
-				} else if (dropIfGone(res)) {
-					// row is gone
-				} else if (res.status === 429) {
-					toast.error('Zu viele Änderungen in kurzer Zeit. Bitte versuche es später erneut.');
-				} else {
-					if (res.status > 0 && res.status < 500) restockIdempotencyKeyRef.current = null;
-					toast.error(`Aktualisierung fehlgeschlagen. „${item.name}“ ließ sich nicht erhöhen.`);
-				}
-			}
-		} finally {
-			setPendingAction(null);
-			setOptimisticQuantity(null);
-		}
 	}
 
 	// The row disappears: focus moves to the neighboring row instead of BODY.
@@ -257,31 +175,28 @@ export const InventoryItemRow = memo(function InventoryItemRow({
 									type="button"
 									variant="outline"
 									size="icon"
-									onClick={() => void changeQuantity(-1)}
-									disabled={pending || quantity === 0}
+									onClick={() => tap(-1)}
+									disabled={quantity === 0}
 									focusableWhenDisabled
 									className={BUSY_CLASS}
-									aria-busy={pendingAction === 'decrement'}
+									aria-busy={action === 'decrement'}
 									aria-label={
 										quantity === 0
 											? `${item.name} um eins verringern (Bestand 0)`
 											: `${item.name} um eins verringern`
 									}
 								>
-									{pendingAction === 'decrement' ? <Spinner aria-hidden /> : <Minus aria-hidden />}
+									{action === 'decrement' ? <Spinner aria-hidden /> : <Minus aria-hidden />}
 								</Button>
 								<Button
 									type="button"
 									variant="outline"
 									size="icon"
-									onClick={() => void changeQuantity(1)}
-									disabled={pending}
-									focusableWhenDisabled
-									className={BUSY_CLASS}
-									aria-busy={pendingAction === 'increment'}
+									onClick={() => tap(1)}
+									aria-busy={action === 'increment'}
 									aria-label={`${item.name} um eins erhöhen`}
 								>
-									{pendingAction === 'increment' ? <Spinner aria-hidden /> : <Plus aria-hidden />}
+									{action === 'increment' ? <Spinner aria-hidden /> : <Plus aria-hidden />}
 								</Button>
 								<Button
 									type="button"

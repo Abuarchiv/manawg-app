@@ -104,7 +104,7 @@ export const POST = withWgRoute<{ id: string }>('inventory consume', async (req,
 	});
 
 	let warning: NotificationWarning = null;
-	if (justCrossedThreshold || autoPushedShoppingItemId !== null) {
+	if (justCrossedThreshold) {
 		({ warning } = await dispatchNotificationSafely({
 			wg,
 			event: 'inventory.low_stock',

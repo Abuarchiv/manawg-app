@@ -12,13 +12,14 @@ import { SubNav } from '@/components/wg/SubNav';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { useCachedFetch } from '@/core/hooks/useCachedFetch';
 import { formatQueuedOfflineEntries } from '@/core/offline/offline-copy';
+import { InventoryRestockPrompt } from '@/features/inventory/components/InventoryRestockPrompt';
 import {
 	type InventoryItemDto,
 	isBelowThreshold,
 	normalizeForMatch,
 } from '@/features/inventory/inventory';
 import { ClearBoughtDialog } from '@/features/shopping/components/ClearBoughtDialog';
-import { ListSkeleton } from '@/features/shopping/components/ListSkeleton';
+import { ListSkeleton, SuggestionsSkeleton } from '@/features/shopping/components/ListSkeleton';
 import { ShoppingAddBar } from '@/features/shopping/components/ShoppingAddBar';
 import { ShoppingList } from '@/features/shopping/components/ShoppingList';
 import { ShoppingReceiptPrompt } from '@/features/shopping/components/ShoppingReceiptPrompt';
@@ -32,6 +33,7 @@ import { useRef, useState } from 'react';
 
 const NO_INVENTORY: InventoryItemDto[] = [];
 const RECENTLY_BOUGHT_MS = 24 * 60 * 60 * 1000;
+const RESTOCK_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 export default function EinkaufPage() {
 	const { wg, members, identity, isAdmin } = useWg();
@@ -41,6 +43,7 @@ export default function EinkaufPage() {
 	const {
 		data: cachedInventory,
 		isLoading: inventoryLoading,
+		error: inventoryError,
 		refresh: refreshInventory,
 	} = useCachedFetch<{
 		items: InventoryItemDto[];
@@ -53,7 +56,7 @@ export default function EinkaufPage() {
 	const headingRef = useRef<HTMLHeadingElement>(null);
 	// Row or done block disappears together with its focus: keep it on the page instead of letting it fall to BODY.
 	const keepFocus = (ok: boolean): void => {
-		if (ok) requestAnimationFrame(() => headingRef.current?.focus());
+		if (ok) requestAnimationFrame(() => headingRef.current?.focus({ preventScroll: true }));
 	};
 
 	// Derived directly instead of mirrored via an effect: otherwise one frame
@@ -95,7 +98,10 @@ export default function EinkaufPage() {
 	// the groups swap after loading and push the list down (layout shift).
 	// Without a list (load error) the open items are unknown, so nothing is offered for adding.
 	const listUnknown = Boolean(loadError) && items.length === 0;
-	const suggestionsPending = initialLoading || inventoryLoading || listUnknown;
+	// Only the first load without an error holds the suggestions back; a slow or failing pantry
+	// request must never hide the list itself.
+	const inventoryPending = inventoryLoading && !inventoryError && cachedInventory === undefined;
+	const suggestionsPending = initialLoading || inventoryPending || listUnknown;
 	const suggestionGroups = [
 		{ label: 'Bald leer', names: lowStock.slice(0, 4) },
 		frequent.length > 0
@@ -126,6 +132,7 @@ export default function EinkaufPage() {
 				</p>
 			</header>
 
+			{inventoryPending && !initialLoading && !listUnknown && <SuggestionsSkeleton />}
 			{suggestionGroups.length > 0 && (
 				<ShoppingSuggestions
 					groups={suggestionGroups}
@@ -147,7 +154,7 @@ export default function EinkaufPage() {
 					retryLabel="Liste erneut laden"
 				/>
 			)}
-			{inventoryLoading || (initialLoading && items.length === 0) ? (
+			{initialLoading && items.length === 0 ? (
 				<ListSkeleton withSuggestions />
 			) : listUnknown ? null : items.length === 0 ? (
 				<Empty>
@@ -176,6 +183,7 @@ export default function EinkaufPage() {
 					isPending={shopping.isPending}
 					onToggle={shopping.toggleBought}
 					onRemove={(id, name) => shopping.remove(id, name).then(keepFocus)}
+					onEdit={shopping.edit}
 					removeError={shopping.removeError}
 					removeErrorId={shopping.removeErrorId}
 					isAdmin={isAdmin}
@@ -187,6 +195,20 @@ export default function EinkaufPage() {
 				doneItems={doneItems}
 				memberId={identity.memberId}
 				shareCode={wg.shareCode}
+			/>
+			<InventoryRestockPrompt
+				items={inventory}
+				boughtNames={done
+					.filter(
+						(item) =>
+							item.boughtByMemberId === identity.memberId &&
+							item.boughtAt !== null &&
+							Date.now() - Date.parse(item.boughtAt) < RESTOCK_WINDOW_MS,
+					)
+					.map((item) => item.name)}
+				shareCode={wg.shareCode}
+				memberId={identity.memberId}
+				onRestocked={refreshInventory}
 			/>
 			<ShoppingAddBar
 				value={add.newName}

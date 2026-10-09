@@ -1,11 +1,14 @@
 import { getWgLoadErrorMessage } from '@/core/guards/load-errors';
 import { usePendingSet } from '@/core/hooks/usePendingSet';
+import { readOfflineQueue } from '@/core/offline/offline-client';
 import { useSyncedCollection } from '@/core/sync/use-synced-collection';
 import type { ShoppingItem } from '@/features/shopping/components/shopping-types';
 import { useShoppingAdd } from '@/features/shopping/hooks/use-shopping-add';
+import { overlayQueuedShopping } from '@/features/shopping/shopping-toggle';
 import { isTempItemId } from '@/features/shopping/shopping-view';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ShoppingActionContext } from './shopping-action-context';
+import { useShoppingEdit } from './use-shopping-edit';
 import { useShoppingRemoval } from './use-shopping-removal';
 import { useShoppingToggle } from './use-shopping-toggle';
 
@@ -48,6 +51,12 @@ export function useShoppingPage({
 		select: (data) => data.items,
 		assemble: (items, current) => ({ ...current, items }),
 		getId: (item) => item.id,
+		// Queued offline actions are not on the server yet; show them on top of every fetch.
+		reconcile: (_shown, incoming) =>
+			overlayQueuedShopping(incoming, readOfflineQueue(), {
+				shareCode: wg.shareCode,
+				memberId: identity.memberId,
+			}),
 		describeError: (error) => getWgLoadErrorMessage('Einkaufsliste', error.status, error.error),
 		// A failed background refresh keeps the list on screen without a banner.
 		hideError: (_error, { silent, hasData }) => silent && hasData,
@@ -87,6 +96,7 @@ export function useShoppingPage({
 		setToggleNotice,
 	};
 	const toggleBought = useShoppingToggle(ctx);
+	const edit = useShoppingEdit(ctx);
 	const removal = useShoppingRemoval({ ...ctx, start, end });
 
 	const add = useShoppingAdd({
@@ -99,6 +109,13 @@ export function useShoppingPage({
 		refreshCount,
 		// A new add attempt also clears the previous toggle error.
 		onDuplicate: setDuplicateName,
+		// New rows sort to the end of the list: mark the row and bring it into view.
+		onAdded: (id) => {
+			setFlashId(id);
+			requestAnimationFrame(() =>
+				document.getElementById(`shopping-${id}`)?.scrollIntoView({ block: 'nearest' }),
+			);
+		},
 		setAddNotice: (notice) => {
 			setAddNotice(notice);
 			if (notice === null) setToggleError(null);
@@ -159,6 +176,7 @@ export function useShoppingPage({
 		isPending,
 		toggleBought,
 		remove: removal.remove,
+		edit,
 		clearBought: removal.clearBought,
 		add,
 	};

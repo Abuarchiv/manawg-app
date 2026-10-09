@@ -61,12 +61,16 @@ export function useInventoryPage(shareCode: string, memberId: string) {
 
 	const onChanged = useStableCallback(
 		(updated?: InventoryMutationItemDto, deletedId?: string): void => {
+			// Only the crossing changes the shopping counter; read before the commit overwrites it.
+			const before = updated
+				? inventory.itemsRef.current.find((item) => item.id === updated.id)
+				: undefined;
 			if (updated || deletedId) {
 				inventory.commit((current) => applyInventoryMutation(current, updated, deletedId));
 			}
 			// Below the threshold the server adds a shopping item; the dashboard cache behind the
 			// "Einkäufe" counter in the sub navigation would otherwise only learn of it on focus.
-			if (updated && isBelowThreshold(updated)) {
+			if (updated && isBelowThreshold(updated) && !(before && isBelowThreshold(before))) {
 				void refreshCachedFetch(`/api/wg/${encodedShareCode}/dashboard`, {
 					memberId,
 				});

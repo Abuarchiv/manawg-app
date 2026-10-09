@@ -93,6 +93,41 @@ export function buildShoppingPushPayload(
 	};
 }
 
+/** Units that bring a scarce item back above its threshold (same amount the shopping push asks for). */
+export function restockAmount(item: InventoryItemForThresholdCheck): number {
+	return isBelowThreshold(item) ? item.threshold - item.quantity + 1 : 1;
+}
+
+/** Scarce items whose name matches something just bought: the stock was not raised by the purchase. */
+export function boughtRestockMatches<T extends InventoryItemForThresholdCheck & { name: string }>(
+	items: T[],
+	boughtNames: string[],
+): T[] {
+	const bought = new Set(boughtNames.map(normalizeForMatch));
+	return items.filter((item) => isBelowThreshold(item) && bought.has(normalizeForMatch(item.name)));
+}
+
+const QUICK_RESTOCK_MIN_ROWS = 5;
+const QUICK_RESTOCK_MAX_LOW = 10;
+
+/** Scarce items first (largest shortfall), then the most consumed of the last 30 days up to a minimum row count. */
+export function quickRestockCandidates<
+	T extends InventoryItemForThresholdCheck & { name: string; decrementCount30d: number },
+>(items: T[]): T[] {
+	const low = items
+		.filter(isBelowThreshold)
+		.sort(
+			(a, b) =>
+				b.threshold - b.quantity - (a.threshold - a.quantity) || a.name.localeCompare(b.name, 'de'),
+		)
+		.slice(0, QUICK_RESTOCK_MAX_LOW);
+	const frequent = items
+		.filter((item) => !isBelowThreshold(item) && item.decrementCount30d > 0)
+		.sort((a, b) => b.decrementCount30d - a.decrementCount30d)
+		.slice(0, Math.max(0, QUICK_RESTOCK_MIN_ROWS - low.length));
+	return [...low, ...frequent];
+}
+
 export function clampQuantity(value: number): number {
 	if (!Number.isFinite(value)) return 0;
 	if (value < INVENTORY_LIMITS.QUANTITY_MIN) return INVENTORY_LIMITS.QUANTITY_MIN;

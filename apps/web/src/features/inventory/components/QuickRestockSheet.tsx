@@ -21,6 +21,8 @@ import {
 	type InventoryItemDto,
 	type InventoryMutationItemDto,
 	formatQuantity,
+	quickRestockCandidates,
+	restockAmount,
 } from '@/features/inventory/inventory';
 import { Plus } from 'lucide-react';
 import { useRef, useState } from 'react';
@@ -33,8 +35,6 @@ interface QuickRestockSheetProps {
 	onClose: () => void;
 	onChanged: (item?: InventoryMutationItemDto, deletedId?: string) => void;
 }
-
-const QUICK_RESTOCK_LIMIT = 5;
 
 export function QuickRestockSheet({
 	open,
@@ -49,42 +49,45 @@ export function QuickRestockSheet({
 	const [error, setError] = useState<string | null>(null);
 	const restockRequestKeysRef = useRef(new Map<string, string>());
 
-	const sorted = [...items]
-		.filter((item) => item.decrementCount30d > 0 || item.lastDecrementedAt !== null)
-		.sort((a, b) => b.decrementCount30d - a.decrementCount30d)
-		.slice(0, QUICK_RESTOCK_LIMIT);
+	// The row order is frozen while the sheet is open (quantities stay live), so rows do not jump after a tap.
+	const [order, setOrder] = useState<string[] | null>(null);
+	if (open && order === null) setOrder(quickRestockCandidates(items).map((item) => item.id));
+	else if (!open && order !== null) setOrder(null);
+	const sorted = (order ?? []).flatMap((id) => items.find((item) => item.id === id) ?? []);
 
 	async function quickRestock(item: InventoryItemDto): Promise<void> {
 		if (pendingId !== null) return;
+		const amount = restockAmount(item);
+		const requestKey = `${item.id}:${amount}`;
 		setPendingId(item.id);
 		setError(null);
 		const idempotencyKey =
-			restockRequestKeysRef.current.get(item.id) ?? createOfflineIdempotencyKey();
+			restockRequestKeysRef.current.get(requestKey) ?? createOfflineIdempotencyKey();
 		if (!idempotencyKey) {
 			setPendingId(null);
 			setError('Aktualisierung konnte nicht sicher gesendet werden. Versuche es erneut.');
 			return;
 		}
-		restockRequestKeysRef.current.set(item.id, idempotencyKey);
+		restockRequestKeysRef.current.set(requestKey, idempotencyKey);
 		const res = await apiFetch<{ item: InventoryMutationItemDto }>(
 			`/api/wg/${encodedShareCode}/inventory/${encodeURIComponent(item.id)}`,
 			{
 				method: 'PATCH',
 				memberId,
 				headers: { 'Idempotency-Key': idempotencyKey },
-				body: JSON.stringify({ quantityDelta: 1 }),
+				body: JSON.stringify({ quantityDelta: amount }),
 			},
 		);
 		setPendingId(null);
 		if (res.ok) {
-			restockRequestKeysRef.current.delete(item.id);
+			restockRequestKeysRef.current.delete(requestKey);
 			onChanged(res.data.item);
 		} else if (res.status === 404 && res.error === 'item_not_found') {
-			restockRequestKeysRef.current.delete(item.id);
+			restockRequestKeysRef.current.delete(requestKey);
 			onChanged(undefined, item.id);
 			setError(`${item.name} existiert nicht mehr und wurde aus der Liste entfernt.`);
 		} else {
-			if (res.status > 0 && res.status < 500) restockRequestKeysRef.current.delete(item.id);
+			if (res.status > 0 && res.status < 500) restockRequestKeysRef.current.delete(requestKey);
 			setError('Aktualisierung fehlgeschlagen. Versuche es erneut.');
 		}
 	}
@@ -103,7 +106,7 @@ export function QuickRestockSheet({
 				<DrawerHeader>
 					<DrawerTitle>Schnell nachfüllen</DrawerTitle>
 					<DrawerDescription>
-						Die fünf am häufigsten verbrauchten Vorräte der letzten 30 Tage.
+						Fast leere Vorräte zuerst, dann die am häufigsten verbrauchten der letzten 30 Tage.
 					</DrawerDescription>
 				</DrawerHeader>
 				<div
@@ -128,43 +131,55 @@ export function QuickRestockSheet({
 						<Card className="py-0">
 							<CardContent className="p-0">
 								<ItemGroup className="gap-0 divide-y divide-border">
-									{sorted.map((item) => (
-										<Item
-											key={item.id}
-											// biome-ignore lint/a11y/useSemanticElements: ItemGroup ist role=list über <div>, Kinder brauchen role=listitem.
-											role="listitem"
-											className="px-3 py-2.5 not-last:border-b-border"
-										>
-											{/* min-w instead of min-w-0: at large font sizes the button wraps below the text
+									{sorted.map((item) => {
+										const amount = restockAmount(item);
+										return (
+											<Item
+												key={item.id}
+												// biome-ignore lint/a11y/useSemanticElements: ItemGroup is a div[role=list], a bare <li> would be invalid HTML.
+												role="listitem"
+												className="px-3 py-2.5 not-last:border-b-border"
+											>
+												{/* min-w instead of min-w-0: at large font sizes the button wraps below the text
 											    instead of squeezing the name character by character. */}
-											<ItemContent className="min-w-[10ch] flex-1">
-												<ItemTitle className="w-full min-w-0 line-clamp-none [overflow-wrap:break-word]">
-													<span className="min-w-0 flex-1 break-words hyphens-auto text-sm font-medium">
-														{item.name}
-													</span>
-												</ItemTitle>
-												<ItemDescription className="line-clamp-none text-xs tabular-nums [overflow-wrap:break-word]">
-													{formatQuantity(item.quantity, item.unit)} · {item.decrementCount30d}× in
-													30 Tagen
-												</ItemDescription>
-											</ItemContent>
-											<ItemActions className="shrink-0">
-												<Button
-													type="button"
-													variant="outline"
-													size="icon"
-													onClick={() => void quickRestock(item)}
-													disabled={pendingId !== null}
-													focusableWhenDisabled
-													className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
-													aria-busy={pendingId === item.id}
-													aria-label={`${item.name} um eins erhöhen`}
-												>
-													{pendingId === item.id ? <Spinner aria-hidden /> : <Plus aria-hidden />}
-												</Button>
-											</ItemActions>
-										</Item>
-									))}
+												<ItemContent className="min-w-[10ch] flex-1">
+													<ItemTitle className="w-full min-w-0 line-clamp-none [overflow-wrap:break-word]">
+														<span className="min-w-0 flex-1 break-words hyphens-auto text-sm font-medium">
+															{item.name}
+														</span>
+													</ItemTitle>
+													<ItemDescription className="line-clamp-none text-xs tabular-nums [overflow-wrap:break-word]">
+														{formatQuantity(item.quantity, item.unit)} · {item.decrementCount30d}×
+														in 30 Tagen
+													</ItemDescription>
+												</ItemContent>
+												<ItemActions className="shrink-0">
+													<Button
+														type="button"
+														variant="outline"
+														size={amount === 1 ? 'icon' : 'sm'}
+														onClick={() => void quickRestock(item)}
+														disabled={pendingId !== null}
+														focusableWhenDisabled
+														className="aria-disabled:pointer-events-none aria-disabled:opacity-50"
+														aria-busy={pendingId === item.id}
+														aria-label={
+															amount === 1
+																? `${item.name} um eins erhöhen`
+																: `${item.name} um ${formatQuantity(amount, item.unit)} erhöhen`
+														}
+													>
+														{pendingId === item.id ? <Spinner aria-hidden /> : <Plus aria-hidden />}
+														{pendingId !== item.id && amount > 1 && (
+															<span className="tabular-nums">
+																{formatQuantity(amount, item.unit)}
+															</span>
+														)}
+													</Button>
+												</ItemActions>
+											</Item>
+										);
+									})}
 								</ItemGroup>
 							</CardContent>
 						</Card>

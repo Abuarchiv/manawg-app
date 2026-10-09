@@ -31,6 +31,8 @@ import {
 	type InventoryMutationItemDto,
 	type InventoryUnit,
 	clampQuantity,
+	formatQuantity,
+	normalizeForMatch,
 } from '@/features/inventory/inventory';
 import { useEffect, useRef, useState } from 'react';
 import { InventoryFormFields } from './InventoryFormFields';
@@ -49,6 +51,8 @@ interface InventoryAddModalProps {
 		category: string;
 		updatedAt: string;
 	} | null;
+	/** Existing items, for the duplicate-name hint (the server enforces it too). */
+	items: InventoryItemDto[];
 	onClose: () => void;
 	onSaved: (item?: InventoryMutationItemDto, deletedId?: string) => void;
 	onItemRefreshed: (item: InventoryItemDto) => void;
@@ -84,6 +88,7 @@ export function InventoryAddModal({
 	memberId,
 	mode,
 	initial,
+	items,
 	onClose,
 	onSaved,
 	onItemRefreshed,
@@ -151,17 +156,32 @@ export function InventoryAddModal({
 			setServerError(null);
 			return;
 		}
+		const current = baseline ?? initial;
+		// An edit that keeps its own name is never flagged, so old duplicates stay editable.
+		const key = normalizeForMatch(trimmedName);
+		const duplicate =
+			(mode === 'create' || key !== normalizeForMatch(current?.name ?? '')) &&
+			items.find((other) => other.id !== current?.id && normalizeForMatch(other.name) === key);
+		if (duplicate) {
+			setNameError(
+				`Gibt es schon: ${duplicate.name} (${formatQuantity(duplicate.quantity, duplicate.unit)})`,
+			);
+			setServerError(null);
+			return;
+		}
 		setSaving(true);
 		setNameError(null);
 		setServerError(null);
-		const current = baseline ?? initial;
+		// A name/threshold-only edit must not carry the version check: it would 409
+		// whenever a housemate tapped +/- since the form was opened.
+		const quantityChanged = mode === 'create' || !current || quantity !== current.quantity;
 		const body = {
 			name: trimmedName,
-			quantity,
 			unit,
 			threshold,
 			category,
-			...(mode === 'edit' && current
+			...(quantityChanged ? { quantity } : {}),
+			...(mode === 'edit' && current && quantityChanged
 				? { expectedQuantity: current.quantity, expectedUpdatedAt: current.updatedAt }
 				: {}),
 		};
@@ -205,6 +225,10 @@ export function InventoryAddModal({
 			onSaved(undefined, current.id);
 			setConflictNeedsReload(true);
 			setServerError('Dieser Vorrat wurde inzwischen entfernt. Schließe das Formular.');
+		} else if (res.error === 'inventory_item_duplicate') {
+			setSaving(false);
+			if (mode === 'create') createRequestRef.current = null;
+			setNameError('Diesen Vorrat gibt es schon.');
 		} else if (mode === 'edit' && current && res.error === 'version_conflict') {
 			const refreshed = await apiFetch<{ items: InventoryItemDto[] }>(
 				`/api/wg/${encodedShareCode}/inventory`,
@@ -224,11 +248,14 @@ export function InventoryAddModal({
 			}
 			onSaved(latest);
 			setBaseline(latest);
-			setName(latest.name);
+			// Keep what the user typed; only untouched fields follow the server state.
+			if (trimmedName === current.name) setName(latest.name);
 			setQuantityText(String(latest.quantity));
-			setUnit(coerceUnit(latest.unit));
-			setThresholdText(String(latest.threshold));
-			setCategory(coerceCategory(latest.category));
+			if (unit === coerceUnit(current.unit)) setUnit(coerceUnit(latest.unit));
+			if (threshold === current.threshold) setThresholdText(String(latest.threshold));
+			if (category === coerceCategory(current.category)) {
+				setCategory(coerceCategory(latest.category));
+			}
 			setConflictNeedsReload(false);
 			onItemRefreshed(latest);
 			setServerError(

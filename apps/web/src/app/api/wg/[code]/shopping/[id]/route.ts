@@ -1,4 +1,4 @@
-import { postSystemNotice, resolveShoppingRequest } from '@/core/activity-feed';
+import { resolveShoppingRequest } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, shoppingItems } from '@/core/db';
 import { requireOwnerOrAdmin } from '@/core/guards/admin';
@@ -10,16 +10,27 @@ import { parseBody } from '@/core/http/parse-body';
 import { readIdempotencyKey } from '@/core/idempotency-store';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { withAnnouncementReplay } from '@/features/pinnwand/server/announcement-replay';
+import { NAME_MAX, QUANTITY_MAX } from '@/features/shopping/components/constants';
 import { isOpenShoppingItemDuplicate } from '@/features/shopping/shopping-duplicate';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
-const patchShoppingItemSchema = z.object({
-	bought: z.boolean(),
-	expectedUpdatedAt: z.string().optional(),
-	expectedBoughtAt: z.string().nullable().optional(),
-});
+// `bought` toggles the item, `name`/`quantity` edit it; one request may carry any of them.
+const patchShoppingItemSchema = z
+	.object({
+		bought: z.boolean().optional(),
+		name: z.string().trim().min(1).max(NAME_MAX).optional(),
+		quantity: z.string().trim().max(QUANTITY_MAX).nullable().optional(),
+		expectedUpdatedAt: z.string().optional(),
+		expectedBoughtAt: z.string().nullable().optional(),
+	})
+	.refine(
+		(body) => body.bought !== undefined || body.name !== undefined || body.quantity !== undefined,
+		{
+			message: 'nothing_to_update',
+		},
+	);
 
 export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, { code, id }) => {
 	if (!UUID_PATTERN.test(id)) return badRequest('id_invalid');
@@ -27,11 +38,13 @@ export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, {
 	const parsed = await parseBody(req, patchShoppingItemSchema, {
 		fieldErrors: {
 			bought: 'bought_invalid',
+			name: 'name_invalid',
+			quantity: 'quantity_invalid',
 		},
 	});
 	if (!parsed.ok) return parsed.response;
 
-	const isBought = parsed.data.bought;
+	const { bought: isBought, name, quantity } = parsed.data;
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
 	const wgId = auth.wg.id;
@@ -59,6 +72,7 @@ export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, {
 	// SECURITY: bought-by is always the authenticated caller. Body-supplied
 	// ids are ignored to prevent attribution spoofing.
 	const boughtBy = isBought ? auth.member.memberId : null;
+	const edited = name !== undefined || quantity !== undefined;
 	const replay = await withAnnouncementReplay(
 		req,
 		`shopping-item:${wgId}:${auth.member.memberId}:${id}`,
@@ -66,8 +80,11 @@ export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, {
 			const [updated] = await tx
 				.update(shoppingItems)
 				.set({
-					boughtAt: isBought ? new Date() : null,
-					boughtByMemberId: boughtBy,
+					...(isBought === undefined
+						? {}
+						: { boughtAt: isBought ? new Date() : null, boughtByMemberId: boughtBy }),
+					...(name === undefined ? {} : { name }),
+					...(quantity === undefined ? {} : { quantity: quantity || null }),
 					updatedAt: sql`greatest(clock_timestamp(), ${shoppingItems.updatedAt} + interval '1 millisecond')`,
 				})
 				.where(
@@ -83,10 +100,15 @@ export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, {
 				.returning();
 			if (!updated) {
 				const [existing] = await tx
-					.select({ id: shoppingItems.id })
+					.select()
 					.from(shoppingItems)
 					.where(and(eq(shoppingItems.id, id), eq(shoppingItems.wgId, wgId)))
 					.limit(1);
+				// Someone else already moved the item to the requested state: nothing to apply, so a
+				// second tap on the same item is a no-op instead of a conflict.
+				if (existing && !edited && (existing.boughtAt !== null) === isBought) {
+					return { response: { status: 200, body: { item: existing } }, effect: null };
+				}
 				return {
 					response: existing
 						? { status: 409, body: { error: 'shopping_item_changed' } }
@@ -116,25 +138,25 @@ export const PATCH = withWgRoute<{ id: string }>('shopping PATCH', async (req, {
 		await recordAuditEvent({
 			wgId,
 			memberId: auth.member.memberId,
-			eventType: isBought ? 'shopping.bought' : 'shopping.reopened',
+			eventType:
+				isBought === undefined
+					? 'shopping.updated'
+					: isBought
+						? 'shopping.bought'
+						: 'shopping.reopened',
 			entityType: 'shopping_item',
 			entityId: item.id,
-			summary: isBought
-				? `${auth.member.name} hat ${item.name} gekauft.`
-				: `${auth.member.name} hat ${item.name} wieder geöffnet.`,
+			summary:
+				isBought === undefined
+					? `${auth.member.name} hat ${item.name} geändert.`
+					: isBought
+						? `${auth.member.name} hat ${item.name} gekauft.`
+						: `${auth.member.name} hat ${item.name} wieder geöffnet.`,
 			metadata: { name: item.name },
 		});
-		if (isBought) {
-			await resolveShoppingRequest(wgId, item.id, auth.member.memberId);
-			await postSystemNotice({
-				wgId,
-				authorMemberId: auth.member.memberId,
-				kind: 'info',
-				source: 'shopping',
-				sourcePath: `/einkauf?highlight=${encodeURIComponent(item.id)}`,
-				content: `${auth.member.name} hat ${item.name} gekauft.`,
-			});
-		}
+		// No pinnwand card per tick: purchases reach the activity feed from the items themselves,
+		// and a card per item flooded the board during a shop.
+		if (isBought) await resolveShoppingRequest(wgId, item.id, auth.member.memberId);
 	}
 	return NextResponse.json(replay.response.body, { status: replay.response.status });
 });

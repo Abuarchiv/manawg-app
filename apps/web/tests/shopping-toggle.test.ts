@@ -5,8 +5,10 @@ const {
 	dropShoppingItems,
 	planShoppingPatch,
 	replaceShoppingItem,
+	overlayQueuedShopping,
 	toggledShoppingItem,
 	withQueuedCreateBought,
+	withoutQueuedFollowUps,
 } = await import('../src/features/shopping/shopping-toggle.ts');
 
 const item = {
@@ -116,4 +118,89 @@ test('list edits keep the array identity when nothing changed', () => {
 		dropShoppingItems(items, (row) => row.id === 'item-1'),
 		[],
 	);
+});
+
+const me = { shareCode: 'ABC', memberId: 'member-a' };
+const queued = (
+	over: Partial<{
+		id: string;
+		type: string;
+		shareCode: string;
+		memberId: string;
+		payload: Record<string, unknown>;
+		lastError: string;
+	}>,
+) => ({
+	id: 'shopping:ABC:1:brot',
+	type: 'shopping.create',
+	shareCode: 'ABC',
+	memberId: 'member-a',
+	createdAt: '2026-10-02T09:00:00.000Z',
+	payload: { name: 'Brot', quantity: '2' },
+	...over,
+});
+
+test('a queued create stays on the list when the server answer lacks it', () => {
+	const rows = overlayQueuedShopping([item], [queued({})] as never, me);
+	assert.deepEqual(
+		rows.map((row) => row.id),
+		['shopping:ABC:1:brot', 'item-1'],
+	);
+	assert.equal(rows[0]?.quantity, '2');
+	assert.deepEqual(overlayQueuedShopping([item], [], me), [item]);
+});
+
+test('a queued create is not shown twice when its name is already open', () => {
+	const rows = overlayQueuedShopping(
+		[item],
+		[queued({ payload: { name: ' milch ', quantity: null } })] as never,
+		me,
+	);
+	assert.deepEqual(rows, [item]);
+});
+
+test('a queued check-off keeps the row bought', () => {
+	const update = queued({
+		id: 'shopping-update:ABC:1:item-1',
+		type: 'shopping.update',
+		payload: { itemId: 'item-1', bought: true },
+	});
+	const [row] = overlayQueuedShopping([item], [update] as never, me);
+	assert.equal(row?.boughtAt, '2026-10-02T09:00:00.000Z');
+	assert.equal(row?.boughtByMemberId, 'member-a');
+});
+
+test('a rejected queued check-off and other WGs or members are ignored', () => {
+	const update = queued({
+		id: 'shopping-update:ABC:1:item-1',
+		type: 'shopping.update',
+		payload: { itemId: 'item-1', bought: true },
+	});
+	const unchanged = (actions: unknown[]) =>
+		overlayQueuedShopping([item], actions as never, me).length === 1 &&
+		overlayQueuedShopping([item], actions as never, me)[0] === item;
+	assert.ok(unchanged([{ ...update, lastError: 'Einkaufsstatus geändert' }]));
+	assert.ok(
+		unchanged([
+			{ ...update, shareCode: 'XYZ' },
+			{ ...queued({}), memberId: 'member-b' },
+		]),
+	);
+	const offline = { ...update, lastError: 'Noch keine Verbindung: später' };
+	assert.notEqual(overlayQueuedShopping([item], [offline] as never, me)[0], item);
+});
+
+test('removing an item drops its queued follow-ups only', () => {
+	const update = queued({
+		id: 'shopping-update:ABC:1:item-1',
+		type: 'shopping.update',
+		payload: { itemId: 'item-1', bought: true },
+	});
+	const other = { ...update, id: 'u2', payload: { itemId: 'item-2', bought: true } };
+	const otherWg = { ...update, id: 'u3', shareCode: 'XYZ' };
+	assert.deepEqual(
+		withoutQueuedFollowUps([update, other, otherWg] as never, 'ABC', 'item-1')?.map((a) => a.id),
+		['u2', 'u3'],
+	);
+	assert.equal(withoutQueuedFollowUps([other] as never, 'ABC', 'item-1'), null);
 });

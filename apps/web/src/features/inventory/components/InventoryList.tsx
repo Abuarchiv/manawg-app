@@ -73,7 +73,7 @@ export function InventoryList({
 	const grouped = groupItemsByCategory(items.filter((item) => !isLow(item)));
 	const isEmpty = items.length === 0;
 	const hasQuickRestockItems = items.some(
-		(item) => item.decrementCount30d > 0 || item.lastDecrementedAt !== null,
+		(item) => isBelowThreshold(item) || item.decrementCount30d > 0,
 	);
 
 	const openEdit = useCallback((item: InventoryItemDto): void => {
@@ -184,6 +184,7 @@ export function InventoryList({
 				memberId={memberId}
 				mode={editing ? 'edit' : 'create'}
 				initial={editing}
+				items={items}
 				onItemRefreshed={setEditing}
 				onClose={() => {
 					setAddOpen(false);

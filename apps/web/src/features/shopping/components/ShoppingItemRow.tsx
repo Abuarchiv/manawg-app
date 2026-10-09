@@ -24,10 +24,12 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { useConfirmDelete } from '@/core/hooks/useConfirmDelete';
+import { ShoppingEditForm } from '@/features/shopping/components/ShoppingEditForm';
 import type { ShoppingItem } from '@/features/shopping/components/shopping-types';
+import type { EditShoppingItem } from '@/features/shopping/hooks/use-shopping-edit';
 import { cn } from '@/shared/lib/cn';
 import type { MemberInfo } from '@/shared/lib/member-types';
-import { Check, MoreHorizontal, Receipt, RotateCcw, Trash2 } from 'lucide-react';
+import { Check, MoreHorizontal, Pencil, Receipt, RotateCcw, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { memo, useEffect, useRef, useState } from 'react';
 
@@ -42,6 +44,7 @@ interface ShoppingItemRowProps {
 	queued?: boolean;
 	onToggle: (item: ShoppingItem) => void;
 	onRemove: (id: string, itemName: string) => void;
+	onEdit: EditShoppingItem;
 	removeError?: string | null;
 	highlighted: boolean;
 	shareCode: string;
@@ -56,6 +59,7 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 	queued = false,
 	onToggle,
 	onRemove,
+	onEdit,
 	removeError = null,
 	highlighted,
 	shareCode,
@@ -74,12 +78,22 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 	const adderName = item.addedByMemberId === identity.memberId ? 'dir' : adder.name;
 	const swipeStartX = useRef<number | null>(null);
 	const confirmAlertRef = useRef<HTMLDivElement>(null);
+	const editButtonRef = useRef<HTMLButtonElement>(null);
+	const wasEditingRef = useRef(false);
 	const [swipeX, setSwipeX] = useState(0);
+	const [drawerOpen, setDrawerOpen] = useState(false);
+	const [editing, setEditing] = useState(false);
 
 	// With large text the notice pushes the area over the close bar: bring it into view.
 	useEffect(() => {
 		if (isDeleteArmed) confirmAlertRef.current?.scrollIntoView({ block: 'nearest' });
 	}, [isDeleteArmed]);
+
+	// The form replaces the button: give focus back when it closes (no-op once the drawer is gone).
+	useEffect(() => {
+		if (!editing && wasEditingRef.current) editButtonRef.current?.focus();
+		wasEditingRef.current = editing;
+	}, [editing]);
 
 	function endSwipe(): void {
 		if (swipeStartX.current !== null && swipeX >= SWIPE_TOGGLE_PX && !pending && !queued) {
@@ -183,7 +197,14 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 					</ItemDescription>
 				</ItemContent>
 				<ItemActions className="ml-auto">
-					<Drawer onOpenChange={() => deleteConfirm.cancel()}>
+					<Drawer
+						open={drawerOpen}
+						onOpenChange={(open) => {
+							setDrawerOpen(open);
+							setEditing(false);
+							deleteConfirm.cancel();
+						}}
+					>
 						<DrawerTrigger
 							render={
 								<Button variant="ghost" size="icon" aria-label={`Artikelaktionen: ${item.name}`} />
@@ -204,6 +225,23 @@ export const ShoppingItemRow = memo(function ShoppingItemRow({
 								</DrawerDescription>
 							</DrawerHeader>
 							<div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
+								{editing ? (
+									<ShoppingEditForm
+										item={item}
+										onSave={(fields) => onEdit(item, fields)}
+										onDone={() => setEditing(false)}
+									/>
+								) : (
+									<Button
+										ref={editButtonRef}
+										type="button"
+										variant="outline"
+										onClick={() => setEditing(true)}
+									>
+										<Pencil data-icon="inline-start" aria-hidden />
+										Bearbeiten
+									</Button>
+								)}
 								{isBought && (
 									<>
 										<Button

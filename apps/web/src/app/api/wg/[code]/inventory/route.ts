@@ -3,7 +3,7 @@ import { db, wgInventoryItems } from '@/core/db';
 import { rejectWrite, responseCodec, withIdempotentWrite } from '@/core/db/idempotent-write';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
-import { serverError, tooMany } from '@/core/http/api-errors';
+import { conflict, serverError, tooMany } from '@/core/http/api-errors';
 import { parseBody } from '@/core/http/parse-body';
 import { readIdempotencyKey } from '@/core/idempotency-store';
 import { readListLimit } from '@/core/infra/env';
@@ -16,6 +16,7 @@ import {
 	groupItemsByCategory,
 } from '@/features/inventory/inventory';
 import { getRecentDecrementCounts } from '@/features/inventory/server/inventory-decrements';
+import { isInventoryNameTaken } from '@/features/inventory/server/inventory-duplicate';
 import { createInventoryItemMutation } from '@/features/inventory/server/inventory-mutations';
 import { and, asc, eq, lte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -107,6 +108,9 @@ export const POST = withWgRoute('inventory POST', async (req, { code }) => {
 			},
 		},
 		async (tx) => {
+			if (await isInventoryNameTaken(tx, wgId, parsed.data.name)) {
+				return rejectWrite(conflict('inventory_item_duplicate'));
+			}
 			const mutation = await createInventoryItemMutation(tx, {
 				...parsed.data,
 				wgId,

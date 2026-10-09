@@ -47,6 +47,8 @@ interface UseShoppingAddOptions {
 	setAddNotice: (notice: string | null) => void;
 	/** 409: name of the item that is already open on the list. */
 	onDuplicate: (name: string) => void;
+	/** An item typed into the field was saved (or queued); lets the page show where it landed. */
+	onAdded?: (id: string) => void;
 }
 
 /** Input field, draft (including an offline entry being edited) and adding items. */
@@ -60,6 +62,7 @@ export function useShoppingAdd({
 	refreshCount,
 	setAddNotice,
 	onDuplicate,
+	onAdded,
 }: UseShoppingAddOptions) {
 	const toast = useToast();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
@@ -235,6 +238,7 @@ export function useShoppingAdd({
 					}
 					settleTemp({ ...tempItem, id: queued.id, createdAt: queued.createdAt });
 					saved = true;
+					if (fromInput) onAdded?.(queued.id);
 					if (fromInput && nameValueRef.current === '') removeDraft(draftKey);
 					setAddNotice(OFFLINE_SAVED_NOTICE);
 					return;
@@ -247,7 +251,7 @@ export function useShoppingAdd({
 				if (retryableResponse) await load(true);
 				setAddError(
 					res.status === 409 && res.error === 'shopping_item_duplicate'
-						? shoppingDuplicateMessage(name)
+						? `${shoppingDuplicateMessage(name)}${quantity ? ' Die Menge änderst du über „Artikelaktionen“ → „Bearbeiten“.' : ''}`
 						: // The middleware rejects 429 and read-only mode before any processing: nothing was saved.
 							retryableResponse && res.status !== 429 && !isReadOnlyMode(res.error)
 							? 'Konnte nicht hinzugefügt werden. Prüfe kurz die Liste, ob der Artikel schon drin ist, und versuche es noch einmal.'
@@ -262,6 +266,7 @@ export function useShoppingAdd({
 				return;
 			}
 			saved = true;
+			if (fromInput && res.data.item) onAdded?.(res.data.item.id);
 			if (fromInput && nameValueRef.current === '') removeDraft(draftKey);
 			const warningMessage = notificationWarningMessage(res.data.warning);
 			if (warningMessage) toast.info(warningMessage);

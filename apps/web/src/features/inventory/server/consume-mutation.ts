@@ -1,10 +1,10 @@
 import 'server-only';
-import { shoppingItems, wgInventoryItems, wgInventoryLog } from '@/core/db';
+import { wgInventoryItems, wgInventoryLog } from '@/core/db';
 import type { WgInventoryItem, WgMember } from '@/core/db/schema';
 import type { DbTransaction } from '@/core/db/transaction';
-import { clampQuantity, isBelowThreshold, normalizeForMatch } from '@/features/inventory/inventory';
+import { clampQuantity, isBelowThreshold } from '@/features/inventory/inventory';
 import { pushBelowThresholdItemToShopping } from '@/features/inventory/server/inventory-mutations';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 export type ConsumeInventoryMutationInput = {
 	itemId: WgInventoryItem['id'];
@@ -60,32 +60,19 @@ export async function consumeInventoryMutation(
 		});
 	}
 
-	let autoPushedShoppingItemId: string | null = null;
-	if (isBelowThreshold(updated)) {
-		const normalizedName = normalizeForMatch(updated.name);
-		const openShoppingRows = await tx
-			.select({ id: shoppingItems.id, name: shoppingItems.name })
-			.from(shoppingItems)
-			.where(and(eq(shoppingItems.wgId, input.wgId), isNull(shoppingItems.boughtAt)));
-		const alreadyOpen = openShoppingRows.some(
-			(row) => normalizeForMatch(row.name) === normalizedName,
-		);
-		if (!alreadyOpen) {
-			autoPushedShoppingItemId = await pushBelowThresholdItemToShopping(
-				tx,
-				updated,
-				input.wgId,
-				input.memberId,
-			);
-		}
-	}
+	// Push only on the crossing itself: a bought or deleted entry must not come
+	// back on every further tap (same rule as the PATCH path).
+	const justCrossedThreshold = !wasAlreadyBelowThreshold && isBelowThreshold(updated);
+	const autoPushedShoppingItemId = justCrossedThreshold
+		? await pushBelowThresholdItemToShopping(tx, updated, input.wgId, input.memberId)
+		: null;
 
 	return {
 		kind: 'ok' as const,
 		updated,
 		appliedDelta,
 		clamped: requestedQuantity !== nextQuantity,
-		justCrossedThreshold: !wasAlreadyBelowThreshold && isBelowThreshold(updated),
+		justCrossedThreshold,
 		autoPushedShoppingItemId,
 	};
 }

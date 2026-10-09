@@ -14,6 +14,7 @@ import {
 	INVENTORY_LIMITS,
 	INVENTORY_UNITS,
 } from '@/features/inventory/inventory';
+import { isInventoryNameTaken } from '@/features/inventory/server/inventory-duplicate';
 import { updateInventoryItemMutation } from '@/features/inventory/server/inventory-mutations';
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
@@ -116,6 +117,12 @@ export const PATCH = withWgRoute<{ id: string }>('inventory PATCH', async (req, 
 			},
 		},
 		async (tx) => {
+			if (
+				parsed.data.name !== undefined &&
+				(await isInventoryNameTaken(tx, wgId, parsed.data.name, id))
+			) {
+				return rejectWrite(conflict('inventory_item_duplicate'));
+			}
 			const mutation = await updateInventoryItemMutation(tx, {
 				...parsed.data,
 				itemId: id,

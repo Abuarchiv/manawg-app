@@ -28,7 +28,7 @@ export function shoppingDuplicateMessage(name: string): string {
 	return `„${name}“ steht schon offen auf der Liste.`;
 }
 
-export type ShoppingActionVerb = 'abgehakt' | 'wieder geöffnet' | 'entfernt';
+export type ShoppingActionVerb = 'abgehakt' | 'wieder geöffnet' | 'entfernt' | 'geändert';
 
 /** Names item and action so the text does not read like an add error. */
 export function shoppingActionErrorMessage(
@@ -44,6 +44,8 @@ export function shoppingActionErrorMessage(
 			invalid_body: `${subject}: Die Anfrage war ungültig.`,
 			invalid_json: `${subject}: Die Anfrage war ungültig.`,
 			bought_invalid: `${subject}: Der Status ist ungültig.`,
+			name_invalid: `${subject}: Der Name muss 1 bis 120 Zeichen haben.`,
+			quantity_invalid: `${subject}: Die Menge darf höchstens 40 Zeichen haben.`,
 			id_invalid: 'Dieser Einkaufsartikel kann nicht mehr eindeutig zugeordnet werden.',
 		},
 		`${subject}. Versuche es gleich erneut.`,

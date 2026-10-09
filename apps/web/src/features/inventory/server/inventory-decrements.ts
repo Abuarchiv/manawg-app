@@ -1,7 +1,7 @@
 import 'server-only';
 import { db, wgInventoryLog } from '@/core/db';
 import { MS_PER_DAY } from '@/core/utils/time';
-import { and, eq, gte, inArray, lt } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, sql } from 'drizzle-orm';
 
 const DEFAULT_DECREMENT_WINDOW_DAYS = 30;
 export async function getRecentDecrementCounts(
@@ -13,7 +13,7 @@ export async function getRecentDecrementCounts(
 	if (itemIds.length === 0) return counts;
 	const since = new Date(Date.now() - days * MS_PER_DAY);
 	const rows = await db
-		.select({ itemId: wgInventoryLog.itemId, delta: wgInventoryLog.delta })
+		.select({ itemId: wgInventoryLog.itemId, count: sql<number>`count(*)::int` })
 		.from(wgInventoryLog)
 		.where(
 			and(
@@ -22,9 +22,8 @@ export async function getRecentDecrementCounts(
 				gte(wgInventoryLog.createdAt, since),
 				lt(wgInventoryLog.delta, 0),
 			),
-		);
-	for (const row of rows) {
-		counts.set(row.itemId, (counts.get(row.itemId) ?? 0) + 1);
-	}
+		)
+		.groupBy(wgInventoryLog.itemId);
+	for (const row of rows) counts.set(row.itemId, row.count);
 	return counts;
 }

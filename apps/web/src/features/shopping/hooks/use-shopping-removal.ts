@@ -1,13 +1,13 @@
 import { useToast } from '@/components/ui/Toast';
 import type { usePendingSet } from '@/core/hooks/usePendingSet';
 import { apiFetch } from '@/core/infra/api-client';
-import { discardQueuedEntry } from '@/core/offline/offline-client';
+import { discardQueuedEntry, updateOfflineQueue } from '@/core/offline/offline-client';
 import { isQueuedCreateId } from '@/core/offline/offline-queue';
 import {
 	clearBoughtErrorMessage,
 	shoppingActionErrorMessage,
 } from '@/features/shopping/shopping-errors';
-import { dropShoppingItems } from '@/features/shopping/shopping-toggle';
+import { dropShoppingItems, withoutQueuedFollowUps } from '@/features/shopping/shopping-toggle';
 import { isTempItemId } from '@/features/shopping/shopping-view';
 import { useCallback, useRef, useState } from 'react';
 import type { ShoppingActionContext } from './shopping-action-context';
@@ -42,6 +42,18 @@ export function useShoppingRemoval(ctx: RemovalContext) {
 		setRemoveError(message);
 	}, []);
 
+	/** The item is gone on the server, so a queued check-off for it could only fail on replay. */
+	const dropQueuedFollowUps = useCallback(
+		async (id: string): Promise<void> => {
+			if (
+				await updateOfflineQueue((actions) => withoutQueuedFollowUps(actions, wg.shareCode, id))
+			) {
+				refreshCount();
+			}
+		},
+		[refreshCount, wg.shareCode],
+	);
+
 	const remove = useCallback(
 		async (id: string, itemName: string): Promise<boolean> => {
 			if (isPending(id) || togglingRef.current.has(id) || isTempItemId(id)) return false;
@@ -70,6 +82,7 @@ export function useShoppingRemoval(ctx: RemovalContext) {
 				);
 				if (!res.ok) {
 					if (res.status === 404 && res.error === 'item_not_found') {
+						await dropQueuedFollowUps(id);
 						commit((prev) => dropShoppingItems(prev, (item) => item.id === id));
 						setRemoveError(
 							'Dieser Einkaufsartikel existiert nicht mehr und wurde aus deiner Liste entfernt.',
@@ -84,6 +97,7 @@ export function useShoppingRemoval(ctx: RemovalContext) {
 					);
 					return false;
 				}
+				await dropQueuedFollowUps(id);
 				commit((prev) => dropShoppingItems(prev, (item) => item.id === id));
 				void load(true);
 				return true;
@@ -93,6 +107,7 @@ export function useShoppingRemoval(ctx: RemovalContext) {
 		},
 		[
 			commit,
+			dropQueuedFollowUps,
 			encodedShareCode,
 			end,
 			failRemove,

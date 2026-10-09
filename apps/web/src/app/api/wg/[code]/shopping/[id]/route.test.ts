@@ -150,6 +150,8 @@ const db = {
 										id: state.current.id,
 										addedByMemberId: state.current.addedByMemberId,
 										name: state.current.name,
+										boughtAt: state.current.boughtAt,
+										boughtByMemberId: state.current.boughtByMemberId,
 									},
 								]
 							: [];
@@ -255,6 +257,12 @@ mock.module('@/features/pinnwand/server/announcement-replay', {
 });
 
 const { DELETE, PATCH } = await import('./route');
+
+const editBody = (fields: Record<string, unknown>) => ({
+	...fields,
+	expectedUpdatedAt: '2026-09-27T10:00:00.123Z',
+	expectedBoughtAt: null,
+});
 
 function harness(returning: () => Promise<unknown[]> = async () => [{ id: itemId }]) {
 	state = freshState();
@@ -381,8 +389,87 @@ test('retry of a bought PATCH replays after another member reopens the item', as
 	assert.equal(retry.status, 200);
 	assert.equal(state.patches, 1);
 	assert.equal(state.audits, 1);
-	assert.equal(state.notices, 1);
+	// A tick writes no pinnwand card.
+	assert.equal(state.notices, 0);
 	assert.equal(row().boughtAt, null);
+});
+
+test('stale PATCH whose target state already holds returns 200 without audit or notice', async () => {
+	const { patch, state } = harness();
+	row().updatedAt = new Date('2026-09-27T11:00:00.000Z');
+	row().boughtAt = new Date('2026-09-27T11:00:00.000Z');
+	row().boughtByMemberId = otherMemberId;
+
+	const response = await patch({ bought: true, expectedUpdatedAt: '2026-09-27T10:00:00.000Z' });
+
+	assert.equal(response.status, 200);
+	assert.equal(row().boughtByMemberId, otherMemberId);
+	assert.equal(state.audits, 0);
+	assert.equal(state.notices, 0);
+});
+
+test('editing name and quantity updates the row without touching the bought state', async () => {
+	const { patch, state } = harness();
+
+	const response = await patch({ body: editBody({ name: 'Hafermilch', quantity: '2 L' }) });
+
+	assert.equal(response.status, 200);
+	assert.deepEqual(state.update, {
+		name: 'Hafermilch',
+		quantity: '2 L',
+		updatedAt: state.update?.updatedAt,
+	});
+	assert.equal(state.audits, 1);
+	assert.equal(state.notices, 0);
+});
+
+test('an empty quantity clears it', async () => {
+	const { patch, state } = harness();
+
+	const response = await patch({ body: editBody({ quantity: '  ' }) });
+
+	assert.equal(response.status, 200);
+	assert.equal(state.update?.quantity, null);
+});
+
+test('a stale edit conflicts', async () => {
+	const { patch, state } = harness();
+	row().updatedAt = new Date('2026-09-27T11:00:00.000Z');
+
+	const response = await patch({
+		body: {
+			name: 'Hafermilch',
+			expectedUpdatedAt: '2026-09-27T10:00:00.000Z',
+			expectedBoughtAt: null,
+		},
+	});
+
+	assert.equal(response.status, 409);
+	assert.deepEqual(await response.json(), { error: 'shopping_item_changed' });
+	assert.equal(state.audits, 0);
+});
+
+test('renaming onto another open name returns 409 duplicate', async () => {
+	const postgresError = Object.assign(new Error('duplicate key'), {
+		code: '23505',
+		constraint: 'shopping_items_unique_open_name',
+	});
+	const { patch } = harness(async () => {
+		throw new DrizzleQueryError('update shopping_items', [], postgresError);
+	});
+
+	const response = await patch({ body: editBody({ name: 'Brot' }) });
+
+	assert.equal(response.status, 409);
+	assert.deepEqual(await response.json(), { error: 'shopping_item_duplicate' });
+});
+
+test('a body without bought, name or quantity is rejected', async () => {
+	const { patch } = harness();
+
+	const response = await patch({ body: editBody({}) });
+
+	assert.equal(response.status, 400);
 });
 
 test('the member who added a shopping item may delete it', async () => {

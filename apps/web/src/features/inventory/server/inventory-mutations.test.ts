@@ -22,6 +22,7 @@ mock.module('drizzle-orm', {
 });
 
 const { updateInventoryItemMutation } = await import('./inventory-mutations');
+const { consumeInventoryMutation } = await import('./consume-mutation');
 
 type Row = Record<string, unknown>;
 
@@ -172,4 +173,42 @@ test('dropping below the threshold puts the item on the shopping list once', asy
 	assert.equal(result.kind, 'ok');
 	assert.equal(result.autoPushedShoppingItemId, 'shopping-1');
 	assert.equal(shopping.length, 1);
+});
+
+test('consuming an item that is already at the threshold does not re-add or re-notify', async () => {
+	const { tx, shopping } = itemTx({ name: 'Spüli', quantity: 3, threshold: 3 });
+	const result = await consumeInventoryMutation(tx as never, {
+		itemId: 'item-1',
+		wgId: 'wg-1',
+		memberId: 'member-1',
+		delta: -1,
+	});
+	assert.equal(result.kind, 'ok');
+	assert.equal(result.kind === 'ok' && result.autoPushedShoppingItemId, null);
+	assert.equal(result.kind === 'ok' && result.justCrossedThreshold, false);
+	assert.deepEqual(shopping, []);
+});
+
+test('consuming across the threshold pushes exactly one shopping item', async () => {
+	const { tx, shopping } = itemTx({ name: 'Spüli', quantity: 4, threshold: 3 });
+	const result = await consumeInventoryMutation(tx as never, {
+		itemId: 'item-1',
+		wgId: 'wg-1',
+		memberId: 'member-1',
+		delta: -1,
+	});
+	assert.equal(result.kind === 'ok' && result.autoPushedShoppingItemId, 'shopping-1');
+	assert.equal(result.kind === 'ok' && result.justCrossedThreshold, true);
+	assert.equal(shopping.length, 1);
+});
+
+test('a name-only update ignores a changed updatedAt and does not conflict', async () => {
+	const { tx } = itemTx({ name: 'Spüli', quantity: 5, threshold: 1 });
+	const result = await updateInventoryItemMutation(tx as never, {
+		itemId: 'item-1',
+		wgId: 'wg-1',
+		memberId: 'member-1',
+		name: 'Spülmittel',
+	});
+	assert.equal(result.kind, 'ok');
 });
