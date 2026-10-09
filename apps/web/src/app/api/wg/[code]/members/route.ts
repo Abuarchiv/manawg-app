@@ -1,4 +1,3 @@
-import { postSystemNotice } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { getAuthenticatedUser } from '@/core/auth/server';
 import { db, wgMembers, wgs } from '@/core/db';
@@ -255,14 +254,6 @@ export const POST = withWgRoute('members POST', async (req, { code }) => {
 			entityId: member.id,
 			summary: `${member.name} ist der WG beigetreten.`,
 			metadata: { name: member.name },
-		});
-		await postSystemNotice({
-			wgId: wg.id,
-			authorMemberId: member.id,
-			kind: 'info',
-			source: 'system',
-			sourcePath: '/',
-			content: `${member.name} ist der WG beigetreten.`,
 		});
 		return NextResponse.json({ member });
 	} catch (err) {

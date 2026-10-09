@@ -6,6 +6,11 @@ export const ANNOUNCEMENT_SOURCES = [
 	'expense',
 	'shopping',
 ] as const;
+/**
+ * Sources a member writes by hand. Rows with any other source are automatic notices that only
+ * the export includes; the board and the activity page skip them.
+ */
+export const MEMBER_ANNOUNCEMENT_SOURCES: AnnouncementSource[] = ['manual', 'chore_swap'];
 export const ANNOUNCEMENT_REACTIONS = ['seen', 'take', 'ok'] as const;
 
 export type AnnouncementKind = (typeof ANNOUNCEMENT_KINDS)[number];

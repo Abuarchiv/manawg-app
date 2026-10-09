@@ -212,7 +212,6 @@ mock.module('@/core/idempotency-store', {
 mock.module('@/core/infra/observability', {
 	namedExports: { captureException: () => undefined, logApiError: () => undefined },
 });
-mock.module('@/core/activity-feed', { namedExports: { postSystemNotice: async () => undefined } });
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => undefined } });
 mock.module('@/core/notifications/notification-dispatch', {
 	namedExports: { dispatchNotificationSafely: async () => ({ warning: null }) },

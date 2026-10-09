@@ -173,6 +173,7 @@ mock.module('@/features/pinnwand/announcement-workflow', {
 	namedExports: {
 		ANNOUNCEMENT_KINDS: ['info', 'question', 'problem', 'request', 'decision'],
 		ANNOUNCEMENT_SOURCES: ['manual', 'system', 'chore_swap', 'expense', 'shopping'],
+		MEMBER_ANNOUNCEMENT_SOURCES: ['manual', 'chore_swap'],
 		summarizeAnnouncementReactions: () => new Map(),
 	},
 });
@@ -306,31 +307,23 @@ test('a repeated swap request returns the open post instead of a duplicate', asy
 	assert.equal(state.created.length, 0);
 });
 
-test('GET keeps open member posts that system notices pushed out of the newest window', async () => {
+test('GET lists the board in one query, in the order the database returns', async () => {
 	const { state, get } = harness();
-	const post = (id: string, createdAt: string, extra: Row = {}) => ({
+	const post = (id: string) => ({
 		id,
-		createdAt: new Date(createdAt),
+		createdAt: new Date('2026-09-20T00:00:00Z'),
 		pinnedAt: null,
 		status: 'open',
 		source: 'manual',
-		...extra,
 	});
-	const pinned = post('pinned', '2026-01-01T00:00:00Z', { pinnedAt: new Date('2026-09-01') });
-	const notice = post('notice', '2026-09-20T00:00:00Z', { source: 'shopping' });
-	const recentOpen = post('recent-open', '2026-09-10T00:00:00Z');
-	const oldOpen = post('old-open', '2026-02-01T00:00:00Z');
-	state.announcementResults = [
-		[pinned, notice, recentOpen],
-		[recentOpen, oldOpen],
-	];
+	state.announcementResults = [[post('pinned'), post('recent'), post('older')]];
 
 	const response = await get();
 	assert.equal(response.status, 200);
 	const { announcements: items } = await response.json();
 	assert.deepEqual(
 		(items as { id: string }[]).map((item) => item.id),
-		['pinned', 'notice', 'recent-open', 'old-open'],
+		['pinned', 'recent', 'older'],
 	);
-	assert.equal(state.announcementQueries, 2);
+	assert.equal(state.announcementQueries, 1);
 });

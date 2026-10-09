@@ -27,7 +27,6 @@ function createState(initialSlot: unknown) {
 		slot: initialSlot,
 		claimExpiresAt: new Date(Date.now() + 15 * 60_000),
 		imports: 0,
-		notices: 0,
 		audits: 0,
 		dispatches: 0,
 		capturing: false,
@@ -93,9 +92,6 @@ const withExpensePaymentLock = async (
 	}
 };
 
-mock.module('@/core/activity-feed', {
-	namedExports: { postSystemNotice: async () => state.notices++ },
-});
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => state.audits++ } });
 mock.module('@/core/db', {
 	namedExports: {
@@ -209,7 +205,7 @@ test('lost response and notification failure replay the one committed import', a
 	assert.equal(first.warning, 'notification_delivery_failed');
 	assert.deepEqual(replayed, { ...first, warning: null });
 	assert.equal(state.imports, 1);
-	assert.deepEqual([state.notices, state.audits, state.dispatches], [1, 1, 1]);
+	assert.deepEqual([state.audits, state.dispatches], [1, 1]);
 });
 
 test('a concurrent retry after claim lease reclaim inserts only once', async () => {

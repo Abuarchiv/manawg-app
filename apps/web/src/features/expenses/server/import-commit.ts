@@ -1,5 +1,4 @@
 import 'server-only';
-import { postSystemNotice } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, expenseImports, expenseSplits, expenses, wgMembers } from '@/core/db';
 import { type Prepared, bodyCodec, withIdempotentWrite } from '@/core/db/idempotent-write';
@@ -304,12 +303,6 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 	return { status: 200, body, context: value };
 }
 
-const IMPORT_SOURCE_LABELS: Partial<Record<ImportSource, string>> = {
-	splitwise_csv: 'Splitwise',
-	splid_csv: 'Splid',
-	ocr_screenshot: 'Screenshot',
-};
-
 const importCommitCodec = bodyCodec(isCommitResult);
 
 export type ImportCommitOutcome<S> =
@@ -357,16 +350,6 @@ export async function commitImport<S>(
 async function announceImport(input: CommitInput, value: ImportWriteResult): Promise<CommitResult> {
 	const { importId, inserted, skipped, errors, totalAmountCents } = value;
 	const importedLabel = `${inserted} ${inserted === 1 ? 'Ausgabe' : 'Ausgaben'}`;
-	const sourceLabel = IMPORT_SOURCE_LABELS[input.source];
-	await postSystemNotice({
-		wgId: input.wg.id,
-		authorMemberId: input.importedByMemberId,
-		kind: 'info',
-		source: 'expense',
-		// The internal source key (e.g. "splitwise_csv") does not belong in the pinboard text.
-		content: `${input.importedByName} hat ${importedLabel} importiert${sourceLabel ? ` (${sourceLabel})` : ''}.`,
-	});
-
 	await recordAuditEvent({
 		wgId: input.wg.id,
 		memberId: input.importedByMemberId,

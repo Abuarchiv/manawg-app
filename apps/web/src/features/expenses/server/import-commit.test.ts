@@ -26,7 +26,6 @@ const expenses = expenseFields;
 // delegate to whatever is current.
 let current: { db: unknown; tx: unknown } = { db: null, tx: null };
 
-mock.module('@/core/activity-feed', { namedExports: { postSystemNotice: async () => {} } });
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => {} } });
 mock.module('@/core/db', {
 	namedExports: {

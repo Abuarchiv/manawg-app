@@ -13,7 +13,6 @@ import {
 // rows the user skipped never take part in member-mapping validation.
 
 const env = installWgRouteMocks();
-mock.module('@/core/activity-feed', { namedExports: { postSystemNotice: async () => undefined } });
 mock.module('@/core/notifications/notification-dispatch', {
 	namedExports: { dispatchNotificationSafely: async () => ({ warning: null }) },
 });

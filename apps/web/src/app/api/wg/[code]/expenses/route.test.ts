@@ -311,9 +311,8 @@ mock.module('@/core/db/transaction', {
 });
 mock.module('@/core/activity-feed', {
 	namedExports: {
-		postChatSystemMessage: async () => undefined,
 		// Called once per created expense by recordExpenseCreatedSideEffects.
-		postSystemNotice: async () => {
+		postChatSystemMessage: async () => {
 			state.sideEffects++;
 		},
 	},

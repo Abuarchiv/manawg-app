@@ -17,6 +17,7 @@ import {
 } from '@/core/db';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
+import { MEMBER_ANNOUNCEMENT_SOURCES } from '@/features/pinnwand/announcement-workflow';
 import { and, asc, desc, eq, inArray, isNull, lte } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
@@ -77,7 +78,12 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 				source: announcements.source,
 			})
 			.from(announcements)
-			.where(eq(announcements.wgId, wg.id))
+			.where(
+				and(
+					eq(announcements.wgId, wg.id),
+					inArray(announcements.source, MEMBER_ANNOUNCEMENT_SOURCES),
+				),
+			)
 			.orderBy(desc(announcements.createdAt))
 			.limit(120),
 		db
@@ -159,6 +165,7 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 					eq(announcements.wgId, wg.id),
 					eq(announcements.status, 'open'),
 					inArray(announcements.kind, [...REMINDER_ANNOUNCEMENT_KINDS]),
+					inArray(announcements.source, MEMBER_ANNOUNCEMENT_SOURCES),
 				),
 			)
 			.orderBy(asc(announcements.createdAt))

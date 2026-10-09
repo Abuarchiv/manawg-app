@@ -1,5 +1,5 @@
 import 'server-only';
-import { postChatSystemMessage, postSystemNotice } from '@/core/activity-feed';
+import { postChatSystemMessage } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, expenseSplits, expenses, wgMembers } from '@/core/db';
 import type { Expense, ExpenseSplit } from '@/core/db/schema';
@@ -123,8 +123,8 @@ interface ExpenseCreatedSideEffectsInput {
 }
 
 /**
- * Best-effort activity fan-out for a newly created expense: pinnwand
- * announcement, chat system message, audit trail entry and push
+ * Best-effort activity fan-out for a newly created expense: chat system
+ * message, audit trail entry and push
  * notification. None of these can undo the expense that already committed,
  * so failures here are logged and swallowed rather than surfaced as a 500.
  */
@@ -133,15 +133,6 @@ export async function recordExpenseCreatedSideEffects(
 ): Promise<NotificationDispatchWarning> {
 	const { wg, actor, expense } = input;
 	const amount = formatEuroCents(expense.amountCents, expense.currency);
-
-	await postSystemNotice({
-		wgId: wg.id,
-		authorMemberId: actor.memberId,
-		kind: 'info',
-		source: 'expense',
-		sourcePath: `/ausgaben?highlight=${encodeURIComponent(expense.id)}`,
-		content: `${actor.name} hat eine Ausgabe eingetragen: ${expense.description} (${amount}).`,
-	});
 
 	await postChatSystemMessage({
 		wgId: wg.id,

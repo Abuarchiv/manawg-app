@@ -1,4 +1,3 @@
-import { postSystemNotice } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, shoppingItems } from '@/core/db';
 import {
@@ -164,14 +163,6 @@ export const POST = withWgRoute('shopping POST', async (req, { code }) => {
 				entityId: item.id,
 				summary: `${member.name} hat ${name} auf die Einkaufsliste gesetzt.`,
 				metadata: { title: name, quantity: safeQuantity },
-			});
-			await postSystemNotice({
-				wgId: wg.id,
-				authorMemberId: member.memberId,
-				kind: 'request',
-				source: 'shopping',
-				sourcePath: `/einkauf?highlight=${encodeURIComponent(item.id)}`,
-				content: `${member.name} hat ${safeQuantity ? `${name} (${safeQuantity})` : name} auf die Einkaufsliste gesetzt.`,
 			});
 			const { warning } = await dispatchNotificationSafely({
 				wg,

@@ -125,9 +125,6 @@ mock.module('@/core/auth/supabase-env', {
 mock.module('@/core/db/delete-account', {
 	namedExports: { removeAccountFromWgs: unreachable('removeAccountFromWgs') },
 });
-mock.module('@/core/activity-feed', {
-	namedExports: { postSystemNotice: unreachable('postSystemNotice') },
-});
 mock.module('@/core/audit', {
 	namedExports: { recordAuditEvent: unreachable('recordAuditEvent') },
 });

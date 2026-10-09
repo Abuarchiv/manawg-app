@@ -21,6 +21,7 @@ import {
 	ANNOUNCEMENT_KINDS,
 	ANNOUNCEMENT_SOURCES,
 	type AnnouncementSource,
+	MEMBER_ANNOUNCEMENT_SOURCES,
 	summarizeAnnouncementReactions,
 } from '@/features/pinnwand/announcement-workflow';
 import {
@@ -28,15 +29,27 @@ import {
 	persistAnnouncementReplayWarning,
 	withAnnouncementReplay,
 } from '@/features/pinnwand/server/announcement-replay';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import {
+	and,
+	asc,
+	desc,
+	eq,
+	exists,
+	gt,
+	inArray,
+	isNotNull,
+	notInArray,
+	or,
+	sql,
+} from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 const CONTENT_MIN = 1;
 const CONTENT_MAX = 2000;
 const ANNOUNCEMENTS_LIST_LIMIT = 300;
-/** Sources a member writes by hand; everything else is a system notice. */
-const MEMBER_ANNOUNCEMENT_SOURCES: AnnouncementSource[] = ['manual', 'chore_swap'];
+/** Done posts (resolved, or infos/decisions) leave the board this long after the last activity. */
+const BOARD_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const announcementKindSchema = z.enum(ANNOUNCEMENT_KINDS);
 
 type AnnouncementCreateWarning =
@@ -101,41 +114,41 @@ export const GET = withWgRoute('announcements GET', async (req, { code }) => {
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
 	const wgId = auth.wg.id;
-	const listOrder = [
-		sql`${announcements.pinnedAt} desc nulls last`,
-		desc(announcements.createdAt),
-	] as const;
-	// System notices (postSystemNotice) are stored as open posts too and can
-	// flood the newest window, so open posts written by members are fetched
-	// separately and always included next to the newest rows.
-	const [newestItems, openMemberItems] = await Promise.all([
-		db
-			.select()
-			.from(announcements)
-			.where(eq(announcements.wgId, wgId))
-			.orderBy(...listOrder)
-			.limit(ANNOUNCEMENTS_LIST_LIMIT),
-		db
-			.select()
-			.from(announcements)
-			.where(
-				and(
-					eq(announcements.wgId, wgId),
-					eq(announcements.status, 'open'),
-					inArray(announcements.source, MEMBER_ANNOUNCEMENT_SOURCES),
+	// The board shows only what members wrote; automatic notices (expense, shopping, join) remain
+	// in the table for the export, and the activity page shows those events. Done posts leave
+	// after BOARD_RETENTION_MS; pinned posts and open questions/problems/requests stay.
+	const cutoff = new Date(Date.now() - BOARD_RETENTION_MS);
+	const items = await db
+		.select()
+		.from(announcements)
+		.where(
+			and(
+				eq(announcements.wgId, wgId),
+				inArray(announcements.source, MEMBER_ANNOUNCEMENT_SOURCES),
+				or(
+					isNotNull(announcements.pinnedAt),
+					and(
+						eq(announcements.status, 'open'),
+						notInArray(announcements.kind, ['info', 'decision']),
+					),
+					gt(announcements.createdAt, cutoff),
+					gt(announcements.resolvedAt, cutoff),
+					exists(
+						db
+							.select({ id: announcementComments.id })
+							.from(announcementComments)
+							.where(
+								and(
+									eq(announcementComments.announcementId, announcements.id),
+									gt(announcementComments.createdAt, cutoff),
+								),
+							),
+					),
 				),
-			)
-			.orderBy(...listOrder)
-			.limit(ANNOUNCEMENTS_LIST_LIMIT),
-	]);
-	const itemsById = new Map(newestItems.map((item) => [item.id, item]));
-	for (const item of openMemberItems) itemsById.set(item.id, item);
-	const items = [...itemsById.values()].sort(
-		(a, b) =>
-			(b.pinnedAt?.getTime() ?? Number.NEGATIVE_INFINITY) -
-				(a.pinnedAt?.getTime() ?? Number.NEGATIVE_INFINITY) ||
-			b.createdAt.getTime() - a.createdAt.getTime(),
-	);
+			),
+		)
+		.orderBy(sql`${announcements.pinnedAt} desc nulls last`, desc(announcements.createdAt))
+		.limit(ANNOUNCEMENTS_LIST_LIMIT);
 
 	if (items.length === 0) return NextResponse.json({ announcements: [] });
 

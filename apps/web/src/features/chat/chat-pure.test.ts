@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { canDeleteMessage, canEditMessage, reconcileChatMessages } from './chat-pure';
+import {
+	canDeleteMessage,
+	canEditMessage,
+	chatDayLabel,
+	countChatReaders,
+	reconcileChatMessages,
+} from './chat-pure';
 
 const createdAt = '2026-09-23T10:00:00.000Z';
 const own = { id: 'm1', senderMemberId: 'me', kind: 'text', createdAt };
@@ -39,4 +45,27 @@ test('a full latest page past the loaded history replaces it instead of leaving 
 		page(1, 70).map((m) => m.id),
 	);
 	assert.deepEqual(reconcileChatMessages([], latest, [], 50), latest);
+});
+
+test('day pills say Heute, Gestern, a weekday within the week, else the date', () => {
+	const now = new Date(2026, 9, 9, 0, 30);
+	assert.equal(chatDayLabel(new Date(2026, 9, 9), now), 'Heute');
+	assert.equal(chatDayLabel(new Date(2026, 9, 8), now), 'Gestern');
+	assert.equal(chatDayLabel(new Date(2026, 9, 5), now), 'Montag');
+	assert.equal(chatDayLabel(new Date(2026, 9, 2), now), '2. Oktober');
+	assert.equal(chatDayLabel(new Date(2025, 9, 2), now), '2. Oktober 2025');
+	// Across the DST switch (25 October 2026 in Germany) a day is still a day.
+	assert.equal(chatDayLabel(new Date(2026, 9, 25), new Date(2026, 9, 26, 12)), 'Gestern');
+});
+
+test('read ticks count only the given readers who read up to the message', () => {
+	const reads = [
+		{ memberId: 'anna', lastReadAt: '2026-09-23T10:00:00.000Z' },
+		{ memberId: 'ben', lastReadAt: '2026-09-23T09:59:59.000Z' },
+		{ memberId: 'me', lastReadAt: '2026-09-23T11:00:00.000Z' },
+	];
+	assert.equal(countChatReaders(createdAt, reads, ['anna', 'ben']), 1);
+	assert.equal(countChatReaders(createdAt, reads, ['anna', 'ben', 'cleo']), 1);
+	assert.equal(countChatReaders('2026-09-23T09:00:00.000Z', reads, ['anna', 'ben']), 2);
+	assert.equal(countChatReaders('kaputt', reads, ['anna']), 0);
 });

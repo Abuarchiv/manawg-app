@@ -15,7 +15,7 @@ const tableNames = [
 	'shoppingItems',
 	'wgMembers',
 ];
-const columns = ['wgId', 'nextDueAt', 'createdAt', 'boughtAt', 'status', 'kind'];
+const columns = ['wgId', 'nextDueAt', 'createdAt', 'boughtAt', 'status', 'kind', 'source'];
 const tables = Object.fromEntries(
 	tableNames.map((name) => [
 		name,
@@ -173,13 +173,15 @@ test('reminders read open shopping items and open announcements from their own o
 
 	const openAnnouncementQuery = state.queries.find(
 		(query) =>
-			query.table === 'announcements' && JSON.stringify(query.where ?? null).includes('inArray'),
+			query.table === 'announcements' &&
+			JSON.stringify(query.where ?? null).includes('announcements.status'),
 	);
 	assert.deepEqual(openAnnouncementQuery?.where, [
 		'and',
 		['eq', 'announcements.wgId', 'wg-1'],
 		['eq', 'announcements.status', 'open'],
 		['inArray', 'announcements.kind', ['question', 'problem', 'request']],
+		['inArray', 'announcements.source', ['manual', 'chore_swap']],
 	]);
 	assert.deepEqual(openAnnouncementQuery?.orderBy, ['asc', 'announcements.createdAt']);
 	assert.equal(openAnnouncementQuery?.limit, 120);

@@ -2,12 +2,7 @@
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import {
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupTextarea,
-} from '@/components/ui/input-group';
+import { InputGroup, InputGroupTextarea } from '@/components/ui/input-group';
 import { Spinner } from '@/components/ui/spinner';
 import { readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import { haptic } from '@/shared/lib/haptics';
@@ -248,15 +243,16 @@ export function ChatComposer({
 	return (
 		<div
 			ref={rootRef}
-			className="relative shrink-0 border-t border-border bg-background"
+			data-chat-composer
+			className="relative shrink-0 bg-[#f0f2f5] dark:bg-[#202c33]"
 			aria-busy={pending}
 		>
 			{/* Hints scroll internally so the history stays visible at large font sizes. */}
 			<div className="max-h-[25dvh] overflow-y-auto">
 				{replyToMessageId && (
-					<div className="flex items-start gap-2 border-b border-border bg-muted px-3 py-2 text-xs">
+					<div className="mx-3 mt-2 flex items-start gap-2 rounded-lg border-s-4 border-[#06cf9c] bg-white py-1.5 ps-2.5 pe-1 text-xs dark:bg-[#1d282f]">
 						<div className="min-w-0 flex-1">
-							<div className="font-medium text-foreground">
+							<div className="font-medium text-[#008069] dark:text-[#06cf9c]">
 								Antwort an {replyToSenderName ?? 'Unbekannt'}
 							</div>
 							<div className="truncate text-muted-foreground">{replyToPreview ?? '…'}</div>
@@ -294,9 +290,9 @@ export function ChatComposer({
 				onSelect={insertMention}
 				onHoverIndex={setMentionActiveIndex}
 			/>
-			<div className="mx-auto flex w-full max-w-3xl items-end gap-2 px-4 py-2">
-				{/* Pill shape with a round send button, as in common messengers. */}
-				<InputGroup className="h-auto items-end rounded-3xl">
+			<div className="mx-auto flex w-full max-w-3xl items-end gap-2 px-3 py-2">
+				{/* WhatsApp layout: white pill field, round green send button next to it. */}
+				<InputGroup className="h-auto items-end rounded-3xl border-[#8696a0]/60 bg-white dark:bg-[#2a3942]">
 					<InputGroupTextarea
 						ref={textareaRef}
 						value={draft}
@@ -312,21 +308,18 @@ export function ChatComposer({
 						aria-activedescendant={activeOptionId}
 						className="max-h-[min(8rem,20dvh)] min-h-11 flex-1 px-4 py-2 text-base"
 					/>
-					<InputGroupAddon align="inline-end" className="py-1 pe-1">
-						<InputGroupButton
-							type="button"
-							variant="default"
-							size="icon-sm"
-							onMouseDown={(event) => event.preventDefault()}
-							onClick={() => void submit()}
-							disabled={pending || !draftHydrated || draft.trim().length === 0}
-							aria-label="Nachricht senden"
-							className="size-8 shrink-0 rounded-full"
-						>
-							{pending ? <Spinner aria-hidden /> : <Send aria-hidden />}
-						</InputGroupButton>
-					</InputGroupAddon>
 				</InputGroup>
+				<Button
+					type="button"
+					size="icon"
+					onMouseDown={(event) => event.preventDefault()}
+					onClick={() => void submit()}
+					disabled={pending || !draftHydrated || draft.trim().length === 0}
+					aria-label="Nachricht senden"
+					className="size-11 shrink-0 rounded-full bg-[#008069] text-white hover:bg-[#006e5a] active:bg-[#006e5a] disabled:bg-[#008069]/50 disabled:text-white dark:bg-[#00a884] dark:text-[#111b21] dark:hover:bg-[#06cf9c] dark:active:bg-[#06cf9c] dark:disabled:text-[#111b21]"
+				>
+					{pending ? <Spinner aria-hidden /> : <Send aria-hidden />}
+				</Button>
 			</div>
 			{/* Screen readers only: a visible line would make the composer taller and shift the list. */}
 			{pending && <output className="sr-only">Nachricht wird gesendet…</output>}

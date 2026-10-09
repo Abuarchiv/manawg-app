@@ -57,7 +57,6 @@ const db = {
 	}),
 };
 
-mock.module('@/core/activity-feed', { namedExports: { postSystemNotice: async () => undefined } });
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => undefined } });
 mock.module('@/core/db', {
 	namedExports: { db, idempotencyResponses: {}, shoppingItems, wgMembers: {} },

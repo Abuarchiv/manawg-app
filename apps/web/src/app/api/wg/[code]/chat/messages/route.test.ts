@@ -168,6 +168,7 @@ mock.module('@/core/db', {
 		wgChatMentions,
 		wgChatMessages,
 		wgChatReactions: {},
+		wgChatReads: {},
 		wgMembers,
 	},
 });

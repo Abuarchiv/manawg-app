@@ -97,9 +97,9 @@ test.describe('marker mobile overflow', () => {
 					Number.parseFloat(getComputedStyle(document.documentElement).fontSize),
 				);
 				expect(rootFontSize).toBeGreaterThanOrEqual(30);
-				const marker = page.locator('[data-slot="marker-content"]').first();
+				const marker = page.locator('[data-slot="chat-day"]').first();
 				await expect(marker).toBeVisible();
-				await expect(marker).toHaveText(/\d{1,2}\./);
+				await expect(marker).toHaveText(/\S/);
 				await marker.evaluate((element) => {
 					element.textContent = 'Donnerstag, 30. September';
 				});

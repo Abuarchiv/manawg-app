@@ -308,3 +308,44 @@ export function mergePagedReactions<
 	const fresh = older.filter((r) => !seen.has(key(r)));
 	return [...fresh, ...existing];
 }
+
+const WEEKDAY_FORMAT = new Intl.DateTimeFormat('de-DE', { weekday: 'long' });
+const DATE_FORMAT = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'long' });
+const DATE_YEAR_FORMAT = new Intl.DateTimeFormat('de-DE', {
+	day: 'numeric',
+	month: 'long',
+	year: 'numeric',
+});
+
+/** Day pill label as in messengers: Heute, Gestern, a weekday within the last week, else the date. */
+export function chatDayLabel(day: Date, now: Date = new Date()): string {
+	const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+	const start = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+	// Rounded: a day across a DST switch is 23 or 25 hours long.
+	const daysAgo = Math.round((today.getTime() - start.getTime()) / 86_400_000);
+	if (daysAgo === 0) return 'Heute';
+	if (daysAgo === 1) return 'Gestern';
+	if (daysAgo > 1 && daysAgo < 7) return WEEKDAY_FORMAT.format(start);
+	return (start.getFullYear() === today.getFullYear() ? DATE_FORMAT : DATE_YEAR_FORMAT).format(
+		start,
+	);
+}
+
+/** Last message a member has read, as its creation time. */
+export interface ChatReadMarker {
+	memberId: string;
+	lastReadAt: string;
+}
+
+/** How many of `readerIds` have read up to a message created at `createdAt`. */
+export function countChatReaders(
+	createdAt: string,
+	reads: readonly ChatReadMarker[],
+	readerIds: readonly string[],
+): number {
+	const at = Date.parse(createdAt);
+	if (!Number.isFinite(at)) return 0;
+	const readers = new Set(readerIds);
+	return reads.filter((read) => readers.has(read.memberId) && Date.parse(read.lastReadAt) >= at)
+		.length;
+}

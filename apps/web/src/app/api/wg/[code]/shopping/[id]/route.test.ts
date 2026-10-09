@@ -42,7 +42,6 @@ function freshState() {
 		audits: 0,
 		deleted: 0,
 		member: { memberId, name: 'Alex' },
-		notices: 0,
 		update: null as Record<string, unknown> | null,
 		current: {
 			id: itemId,
@@ -177,14 +176,6 @@ const db = {
 	},
 };
 
-mock.module('@/core/activity-feed', {
-	namedExports: {
-		postSystemNotice: async () => {
-			state.notices += 1;
-		},
-		resolveShoppingRequest: async () => {},
-	},
-});
 mock.module('@/core/audit', {
 	namedExports: {
 		recordAuditEvent: async () => {
@@ -317,7 +308,6 @@ test('reopening an item that conflicts with another open name returns 409', asyn
 		updatedAt: state.update?.updatedAt,
 	});
 	assert.equal(state.audits, 0);
-	assert.equal(state.notices, 0);
 });
 
 test('other database errors still use the shared 500 handler', async () => {
@@ -346,7 +336,6 @@ test('stale shopping state conflicts without mutation or notification', async ()
 	assert.equal(response.status, 409);
 	assert.deepEqual(await response.json(), { error: 'shopping_item_changed' });
 	assert.equal(state.audits, 0);
-	assert.equal(state.notices, 0);
 	assert.equal(row().boughtAt, null);
 });
 
@@ -359,7 +348,6 @@ test('legacy queued shopping update remains a visible conflict', async () => {
 	assert.deepEqual(await response.json(), { error: 'shopping_item_changed' });
 	assert.equal(state.patches, 0);
 	assert.equal(state.audits, 0);
-	assert.equal(state.notices, 0);
 });
 
 test('retry of a bought PATCH replays after another member reopens the item', async () => {
@@ -381,7 +369,6 @@ test('retry of a bought PATCH replays after another member reopens the item', as
 	assert.equal(retry.status, 200);
 	assert.equal(state.patches, 1);
 	assert.equal(state.audits, 1);
-	assert.equal(state.notices, 1);
 	assert.equal(row().boughtAt, null);
 });
 
