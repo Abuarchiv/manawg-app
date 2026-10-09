@@ -1,6 +1,6 @@
 import 'server-only';
 import { recordAuditEvent } from '@/core/audit';
-import { db, recurringExpenses, wgMembers } from '@/core/db';
+import { db, expenses, recurringExpenses, wgMembers } from '@/core/db';
 import { requireOwnerOrAdmin } from '@/core/guards/admin';
 import { badRequest, conflict, forbidden, notFound } from '@/core/http/api-errors';
 import { isRecurringDueAtEditAllowed } from '@/core/validators/recurring-due-date';
@@ -276,7 +276,9 @@ export async function deleteRecurringTemplate(caller: Caller, id: string): Promi
 
 /**
  * Move a template's due date on by one interval after a member booked the charge. Every member
- * may do this; the compare-and-set on `expectedNextDueAt` keeps two bookings from advancing twice.
+ * may do this, but only while a booking for the current due date exists (otherwise the charge
+ * would be skipped); the compare-and-set on `expectedNextDueAt` keeps two bookings from
+ * advancing twice.
  */
 export async function advanceRecurringTemplate(
 	caller: Caller,
@@ -291,6 +293,18 @@ export async function advanceRecurringTemplate(
 		return conflict('recurring_expense_already_advanced');
 	}
 	if (template.pausedAt) return badRequest('abo_paused');
+	const [booked] = await db
+		.select({ id: expenses.id })
+		.from(expenses)
+		.where(
+			and(
+				eq(expenses.wgId, wgId),
+				eq(expenses.recurringExpenseId, template.id),
+				eq(expenses.recurringDueAt, template.nextDueAt),
+			),
+		)
+		.limit(1);
+	if (!booked) return conflict('recurring_expense_not_booked');
 	const updated = await advanceRecurringDue(db, template);
 	if (!updated) {
 		const [current] = await db

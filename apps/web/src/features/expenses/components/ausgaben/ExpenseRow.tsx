@@ -71,6 +71,9 @@ export const ExpenseRow = memo(function ExpenseRow({
 	highlighted,
 }: ExpenseRowProps) {
 	const isPayer = expense.paidByMemberId === currentMemberId;
+	// The server lets only the payer or a debtor remove an expense.
+	const canRemove =
+		isPayer || expense.splits.some((split) => split.debtorMemberId === currentMemberId);
 	const impact = getExpenseImpact(expense, currentMemberId);
 	const who = (id: string) => (id === currentMemberId ? 'Du' : memberName(id));
 	const [deleteOpen, setDeleteOpen] = useState(false);
@@ -146,35 +149,37 @@ export const ExpenseRow = memo(function ExpenseRow({
 						</CollapsibleTrigger>
 					</ItemContent>
 					<ItemActions className="shrink-0">
-						<DropdownMenu>
-							<DropdownMenuTrigger
-								render={<Button variant="ghost" size="icon" />}
-								aria-label={`Aktionen für ${expense.description}`}
-							>
-								<MoreHorizontal />
-							</DropdownMenuTrigger>
-							<DropdownMenuContent align="end">
-								<DropdownMenuGroup>
-									{isPayer && (
+						{canRemove && (
+							<DropdownMenu>
+								<DropdownMenuTrigger
+									render={<Button variant="ghost" size="icon" />}
+									aria-label={`Aktionen für ${expense.description}`}
+								>
+									<MoreHorizontal />
+								</DropdownMenuTrigger>
+								<DropdownMenuContent align="end">
+									<DropdownMenuGroup>
+										{isPayer && (
+											<DropdownMenuItem
+												onClick={() => onEdit(expense)}
+												disabled={pendingIds.has(expense.id)}
+											>
+												<Pencil />
+												Bearbeiten
+											</DropdownMenuItem>
+										)}
 										<DropdownMenuItem
-											onClick={() => onEdit(expense)}
+											variant="destructive"
+											onClick={() => setDeleteOpen(true)}
 											disabled={pendingIds.has(expense.id)}
 										>
-											<Pencil />
-											Bearbeiten
+											<Trash2 />
+											Entfernen
 										</DropdownMenuItem>
-									)}
-									<DropdownMenuItem
-										variant="destructive"
-										onClick={() => setDeleteOpen(true)}
-										disabled={pendingIds.has(expense.id)}
-									>
-										<Trash2 />
-										Entfernen
-									</DropdownMenuItem>
-								</DropdownMenuGroup>
-							</DropdownMenuContent>
-						</DropdownMenu>
+									</DropdownMenuGroup>
+								</DropdownMenuContent>
+							</DropdownMenu>
+						)}
 					</ItemActions>
 					<CollapsibleContent className="w-full pr-1.5 pb-2">
 						{/* The week is already a heading; the exact time only appears in the details. */}

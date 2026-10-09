@@ -22,6 +22,7 @@ const state = {
 	limiterCalls: 0,
 	writes: 0,
 	claims: 0,
+	notified: [] as Array<Record<string, unknown>>,
 };
 
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => undefined } });
@@ -86,6 +87,14 @@ mock.module('@/features/expenses/server/expense-payments', {
 	},
 });
 
+mock.module('@/features/expenses/server/settle-notify', {
+	namedExports: {
+		notifySettlement: async (input: Record<string, unknown>) => {
+			state.notified.push(input);
+		},
+	},
+});
+
 const { responseCodec } = await import('../src/core/db/idempotent-write.ts');
 mock.module('@/features/expenses/server/settle-debt', {
 	namedExports: {
@@ -98,7 +107,7 @@ mock.module('@/features/expenses/server/settle-debt', {
 			return {
 				status: 200,
 				body: { settled: 0, settledIds: [] },
-				context: { kind: 'settled', settledIds: [] },
+				context: { kind: 'settled', settledIds: ['split-1'], settledCents: 443 },
 			};
 		},
 	},
@@ -139,6 +148,13 @@ test('a stored settlement replays without counting against the rate limit', asyn
 	assert.deepEqual(await replay.json(), { settled: 0, settledIds: [] });
 	assert.equal(state.limiterCalls, 1);
 	assert.equal(state.writes, 1);
+	// The other party hears about the settlement once, a replay stays silent.
+	assert.equal(state.notified.length, 1);
+	assert.partialDeepStrictEqual(state.notified[0], {
+		otherMemberId: TO,
+		amountCents: 443,
+		direction: 'paid',
+	});
 });
 
 test('a limiter outage answers a retryable 503 before claiming the key', async () => {

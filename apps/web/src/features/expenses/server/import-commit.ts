@@ -14,6 +14,10 @@ import {
 	hasCapturingExpensePayment,
 	withExpensePaymentLock,
 } from '@/features/expenses/server/expense-payments';
+import {
+	buildDuplicateKey,
+	loadDuplicateKeys,
+} from '@/features/expenses/server/import-duplicate-keys';
 import { settledAtForOwnShare } from '@/features/expenses/split-math';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import type { ImportSource, ParsedExpense } from '../import-parsers';
@@ -40,43 +44,6 @@ interface CommitResult {
 	skipped: number;
 	errors: Array<{ index: number; reason: string }>;
 	warning: NotificationDispatchWarning;
-}
-
-function buildDuplicateKey(
-	date: string,
-	description: string,
-	amountCents: number,
-	paidByMemberId: string,
-	currency: string,
-): string {
-	const key = [date.slice(0, 10), description.trim().toLowerCase(), amountCents, paidByMemberId];
-	// EUR import keys already persisted in this four-part format; keep them stable.
-	return (currency === 'EUR' ? key : [...key, currency]).join('|');
-}
-
-// Reads inside the same transaction as the writes: the duplicate keys are the
-// yardstick for every row of this import, so they must not be a snapshot taken
-// before a concurrent import added rows.
-async function loadDuplicateKeys(tx: DbTransaction, wgId: string): Promise<Set<string>> {
-	const rows = await tx
-		.select({
-			occurredAt: expenses.occurredAt,
-			description: expenses.description,
-			amountCents: expenses.amountCents,
-			currency: expenses.currency,
-			paidByMemberId: expenses.paidByMemberId,
-		})
-		.from(expenses)
-		.where(eq(expenses.wgId, wgId));
-	const set = new Set<string>();
-	for (const r of rows) {
-		const iso =
-			r.occurredAt instanceof Date
-				? r.occurredAt.toISOString()
-				: new Date(r.occurredAt).toISOString();
-		set.add(buildDuplicateKey(iso, r.description, r.amountCents, r.paidByMemberId, r.currency));
-	}
-	return set;
 }
 
 /**
@@ -226,9 +193,10 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 	let skipped = 0;
 	let totalAmountCents = 0;
 
-	const duplicateKeys = input.skipDuplicates
+	const existingCounts = input.skipDuplicates
 		? await loadDuplicateKeys(tx, input.wg.id)
-		: new Set<string>();
+		: new Map<string, number>();
+	const seenInFile = new Map<string, number>();
 
 	for (let i = 0; i < input.expenses.length; i += 1) {
 		const item = input.expenses[i];
@@ -243,10 +211,15 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 			errors.push({ index: i, reason: prepared.reason });
 			continue;
 		}
-		if (input.skipDuplicates && duplicateKeys.has(prepared.duplicateKey)) {
+		const occurrence = (seenInFile.get(prepared.duplicateKey) ?? 0) + 1;
+		seenInFile.set(prepared.duplicateKey, occurrence);
+		if (input.skipDuplicates && occurrence <= (existingCounts.get(prepared.duplicateKey) ?? 0)) {
 			skipped += 1;
 			continue;
 		}
+		// Later copies get a suffix so the unique index keeps them.
+		const storedKey =
+			occurrence === 1 ? prepared.duplicateKey : `${prepared.duplicateKey}|#${occurrence}`;
 
 		const expenseInsert = tx.insert(expenses).values({
 			wgId: input.wg.id,
@@ -255,7 +228,7 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 			currency: parsed.currency,
 			description: parsed.description,
 			importId: imp.id,
-			importDuplicateKey: input.skipDuplicates ? prepared.duplicateKey : null,
+			importDuplicateKey: input.skipDuplicates ? storedKey : null,
 			occurredAt: new Date(parsed.date),
 		});
 		const [row] = input.skipDuplicates
@@ -269,7 +242,6 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 		if (!row) {
 			if (input.skipDuplicates) {
 				skipped += 1;
-				duplicateKeys.add(prepared.duplicateKey);
 			} else {
 				errors.push({ index: i, reason: 'insert_failed' });
 			}
@@ -286,7 +258,6 @@ async function writeImport(tx: DbTransaction, input: CommitInput) {
 		);
 		inserted += 1;
 		totalAmountCents += parsed.amountCents;
-		duplicateKeys.add(prepared.duplicateKey);
 	}
 
 	await tx

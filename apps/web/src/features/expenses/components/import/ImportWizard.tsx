@@ -174,6 +174,7 @@ export function ImportWizard() {
 					recoveryAction={wizard.commitRecoveryAction}
 					onRecover={wizard.applyRecoveryAction}
 					expensesHref={returnHref}
+					parsed={wizard.preview?.parsed}
 				/>
 			)}
 			{wizard.commitState === 'pending' && <ImportProgress state="pending" />}

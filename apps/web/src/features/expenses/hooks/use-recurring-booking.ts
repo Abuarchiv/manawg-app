@@ -6,10 +6,11 @@ import { enqueueOfflineAction, readOfflineQueue } from '@/core/offline/offline-c
 import { createOfflineIdempotencyKey, createQueuedExpense } from '@/core/offline/offline-queue';
 import type { RecurringExpense } from '@/features/expenses/components/ausgaben/expense-types';
 import {
+	expenseSaveErrorMessage,
 	isPermanentClientError,
-	recurringAdvanceWarningMessage,
 } from '@/features/expenses/expense-errors';
 import { buildOptimisticExpense } from '@/features/expenses/optimistic-expense';
+import { withQueuedOccurredAt } from '@/features/expenses/queued-occurred-at';
 import { isRecurringBookingQueued } from '@/features/expenses/recurring-template-plan';
 import { useRef, useState } from 'react';
 import type { ExpensePageContext } from './expense-page-context';
@@ -19,57 +20,18 @@ const OFFLINE_RECURRING_EXPENSE_MESSAGE =
 	'Fixkosten-Ausgabe offline vorgemerkt. Die Vorlage bleibt bis zur Synchronisierung unverändert.';
 
 /**
- * Booking a due fixed cost: create the expense from the template, then advance the template's
- * due date. Offline, the expense is queued with the due date it books, so it is booked once.
+ * Booking a due fixed cost: create the expense from the template; the server advances the
+ * template's due date with it. Offline, the expense is queued with the due date it books, so it
+ * is booked once.
  */
 export function useRecurringBooking(ctx: ExpensePageContext) {
-	const {
-		wg,
-		identity,
-		toast,
-		notify,
-		pending,
-		updateExpenses,
-		updateRecurringExpenses,
-		reload,
-		refreshQueuedCount,
-	} = ctx;
+	const { wg, identity, toast, notify, pending, updateExpenses, reload, refreshQueuedCount } = ctx;
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
-	const recurringApiUrl = `/api/wg/${encodedShareCode}/recurring-expenses`;
 	const [creatingRecurringId, setCreatingRecurringId] = useState<string | null>(null);
 	const creatingRecurringRef = useRef(false);
 	const expenseRequestsRef = useRef(
 		new Map<string, { fingerprint: string; key: string; expectedRecurringNextDueAt: string }>(),
 	);
-
-	// Always awaited, so an advance failure surfaces as a warning even if the tab closes next.
-	async function advanceRecurringTemplate(
-		templateId: string,
-		expectedNextDueAt: string | undefined,
-	): Promise<boolean> {
-		const advanceRes = await apiFetch<{ recurringExpense: RecurringExpense }>(recurringApiUrl, {
-			method: 'PATCH',
-			memberId: identity.memberId,
-			body: JSON.stringify({
-				id: templateId,
-				...(expectedNextDueAt ? { expectedNextDueAt } : {}),
-			}),
-		});
-		if (advanceRes.ok) {
-			updateRecurringExpenses((current) =>
-				current.map((item) =>
-					item.id === advanceRes.data.recurringExpense.id ? advanceRes.data.recurringExpense : item,
-				),
-			);
-			return true;
-		}
-		if (advanceRes.status === 409 && advanceRes.error === 'recurring_expense_already_advanced') {
-			await reload();
-			return true;
-		}
-		notify.warning(recurringAdvanceWarningMessage(advanceRes.status, advanceRes.error));
-		return false;
-	}
 
 	async function createFromRecurringTemplate(template: RecurringExpense): Promise<void> {
 		if (creatingRecurringRef.current) return;
@@ -145,18 +107,21 @@ export function useRecurringBooking(ctx: ExpensePageContext) {
 			if (isPermanentClientError(createRes.status)) expenseRequestsRef.current.delete(template.id);
 			if (createRes.status === 0) {
 				const queuedCount = await enqueueOfflineAction(
-					createQueuedExpense({
-						wgId: wg.id,
-						shareCode: wg.shareCode,
-						memberId: identity.memberId,
-						idempotencyKey,
-						description: template.description,
-						amountCents: template.amountCents,
-						paidByMemberId: template.paidByMemberId,
-						splits: template.splits,
-						recurringExpenseId: template.id,
-						expectedRecurringNextDueAt,
-					}),
+					withQueuedOccurredAt(
+						createQueuedExpense({
+							wgId: wg.id,
+							shareCode: wg.shareCode,
+							memberId: identity.memberId,
+							idempotencyKey,
+							description: template.description,
+							amountCents: template.amountCents,
+							paidByMemberId: template.paidByMemberId,
+							splits: template.splits,
+							recurringExpenseId: template.id,
+							expectedRecurringNextDueAt,
+						}),
+						new Date().toISOString(),
+					),
 				);
 				if (queuedCount === 0) {
 					rollbackOptimisticExpense();
@@ -177,10 +142,12 @@ export function useRecurringBooking(ctx: ExpensePageContext) {
 			}
 			rollbackOptimisticExpense();
 			pending.end(optimisticId);
-			const message = 'Fixkosten-Ausgabe konnte nicht erstellt werden: Versuche es gleich erneut.';
+			const message = expenseSaveErrorMessage(createRes.error);
 			notify.error(message);
 			toast.error(message);
 			finishCreating();
+			// The template changed under us (already booked, paused or deleted): show its current state.
+			if (isPermanentClientError(createRes.status)) void reload();
 			return;
 		}
 		updateExpenses((current) => {
@@ -190,16 +157,14 @@ export function useRecurringBooking(ctx: ExpensePageContext) {
 				: [createRes.data.expense, ...withoutOptimistic];
 		});
 		pending.end(optimisticId);
-		const advanced = await advanceRecurringTemplate(template.id, expectedRecurringNextDueAt);
-		if (advanced) {
-			expenseRequestsRef.current.delete(template.id);
-			const pushWarning = notificationWarningMessage(createRes.data.warning);
-			if (pushWarning) notify.warning(pushWarning);
-			else notify.success('Fixkosten-Ausgabe wurde erstellt.');
-		}
+		// The server moved the template on in the same transaction as the booking.
+		expenseRequestsRef.current.delete(template.id);
+		const pushWarning = notificationWarningMessage(createRes.data.warning);
+		if (pushWarning) notify.warning(pushWarning);
+		else notify.success('Fixkosten-Ausgabe wurde erstellt.');
 		finishCreating();
 		void reload();
 	}
 
-	return { advanceRecurringTemplate, createFromRecurringTemplate, creatingRecurringId };
+	return { createFromRecurringTemplate, creatingRecurringId };
 }

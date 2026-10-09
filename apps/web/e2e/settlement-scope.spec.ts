@@ -583,6 +583,14 @@ test.describe('currency-scoped accounting', () => {
 					currency: 'CHF',
 				}),
 			).toMatchObject({ body: expect.stringContaining('CHF') });
+			expect(
+				formatNotificationMessage('expense.debt_settled', {
+					actorName: 'Ben',
+					amountCents: 2000,
+					currency: 'CHF',
+					direction: 'paid',
+				}),
+			).toMatchObject({ body: expect.stringContaining('CHF'), urlPath: '/ausgaben' });
 
 			const health = getWgHealth({
 				shareCode: 'WGCODE01',

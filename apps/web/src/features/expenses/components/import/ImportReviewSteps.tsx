@@ -1,10 +1,13 @@
 'use client';
 
 import { Checkbox } from '@/components/animate-ui/components/base/checkbox';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Spinner } from '@/components/ui/spinner';
+import { describeRejectedRowReason } from '@/features/expenses/import-parsers';
+import type { RejectedRow } from '@/features/expenses/import-parsers';
 import type { Ref } from 'react';
 import { ImportMemberMapping } from './ImportMemberMapping';
 import { ImportPreviewTable } from './ImportPreviewTable';
@@ -18,13 +21,20 @@ interface StepProps {
 }
 
 export function ImportMappingStep({ headingRef, wizard }: StepProps) {
+	const suggested = wizard.preview?.memberMapping ?? {};
+	// A suggestion stops being one as soon as the member picks something else.
+	const fuzzyNames = (wizard.preview?.fuzzyNames ?? []).filter(
+		(name) => wizard.mapping[name] === suggested[name],
+	);
 	return (
 		<section className="flex flex-col gap-4">
 			<ImportStepHeading headingRef={headingRef}>Namen WG-Mitgliedern zuordnen</ImportStepHeading>
 			<p className="text-sm text-muted-foreground">
 				{wizard.conflicts.length > 0
 					? 'Ordne die Namen zu, die noch offen sind.'
-					: 'Alle Namen automatisch erkannt. Bitte prüfen.'}
+					: fuzzyNames.length > 0
+						? 'Einige Namen wurden nur nach Ähnlichkeit zugeordnet. Bitte prüfen.'
+						: 'Alle Namen automatisch erkannt. Bitte prüfen.'}
 			</p>
 			<ImportMemberMapping
 				names={wizard.namesNeedingMapping}
@@ -32,6 +42,7 @@ export function ImportMappingStep({ headingRef, wizard }: StepProps) {
 				members={wizard.memberOptions}
 				onChange={wizard.updateMapping}
 				showErrors={wizard.mappingValidated}
+				suggestedNames={fuzzyNames}
 			/>
 			<div className="flex min-w-0 flex-wrap gap-2">
 				<Button className="flex-1" onClick={wizard.continueFromMapping}>
@@ -42,6 +53,31 @@ export function ImportMappingStep({ headingRef, wizard }: StepProps) {
 				</Button>
 			</div>
 		</section>
+	);
+}
+
+function RejectedRowsAlert({ rejected }: { rejected: readonly RejectedRow[] }) {
+	if (rejected.length === 0) return null;
+	return (
+		<Alert>
+			<AlertTitle>
+				{rejected.length === 1
+					? '1 Zeile konnte nicht gelesen werden'
+					: `${rejected.length} Zeilen konnten nicht gelesen werden`}
+			</AlertTitle>
+			<AlertDescription>
+				<details>
+					<summary className="min-h-11 cursor-pointer py-2">Details anzeigen</summary>
+					<ul className="flex flex-col gap-1">
+						{rejected.map((row) => (
+							<li key={row.line}>
+								Zeile {row.line}: {row.description} ({describeRejectedRowReason(row.reason)})
+							</li>
+						))}
+					</ul>
+				</details>
+			</AlertDescription>
+		</Alert>
 	);
 }
 
@@ -57,6 +93,7 @@ export function ImportPreviewStep({ headingRef, wizard }: StepProps) {
 			<p className="text-sm text-muted-foreground">
 				Prüfe Beträge und Anteile. Nicht gewünschte Einträge abwählen.
 			</p>
+			<RejectedRowsAlert rejected={wizard.preview.rejected ?? []} />
 			<ImportPreviewTable
 				expenses={wizard.preview.parsed}
 				mapping={wizard.mapping}

@@ -7,9 +7,14 @@ import {
 	parseDateIso,
 	stripBom,
 } from './import-csv-helpers';
-import { type ParsedExpense, type ParsedSplit, UnsupportedCurrencyError } from './import-types';
+import {
+	type ParsedExpense,
+	type ParsedSplit,
+	type RejectedRow,
+	UnsupportedCurrencyError,
+} from './import-types';
 
-export function parseSplidCsv(csv: string): ParsedExpense[] {
+export function parseSplidCsv(csv: string, rejected?: RejectedRow[]): ParsedExpense[] {
 	const firstNewline = csv.indexOf('\n');
 	const headerLine = firstNewline === -1 ? csv : csv.slice(0, firstNewline);
 	const delimiter = detectDelimiter(stripBom(headerLine));
@@ -27,22 +32,23 @@ export function parseSplidCsv(csv: string): ParsedExpense[] {
 	const out: ParsedExpense[] = [];
 	for (let r = 1; r < rows.length; r += 1) {
 		const fields = rows[r]?.fields ?? [];
+		const line = rows[r]?.lineNumber ?? r + 1;
 		const warnings: string[] = [];
 		const descRaw = (fields[idxDesc] ?? '').trim();
 		if (!descRaw) continue;
 		const date = parseDateIso(fields[idxDate] ?? '');
 		if (!date) {
-			warnings.push('date_invalid');
+			rejected?.push({ line, reason: 'date_invalid', description: descRaw });
 			continue;
 		}
 		const totalCents = parseAmountToCents(fields[idxAmount] ?? '');
 		if (totalCents === null || totalCents <= 0) {
-			warnings.push('amount_invalid');
+			rejected?.push({ line, reason: 'amount_invalid', description: descRaw });
 			continue;
 		}
 		const paidByName = (fields[idxPaidBy] ?? '').trim();
 		if (!paidByName) {
-			warnings.push('payer_missing');
+			rejected?.push({ line, reason: 'payer_missing', description: descRaw });
 			continue;
 		}
 		if (idxCurrency !== -1) {

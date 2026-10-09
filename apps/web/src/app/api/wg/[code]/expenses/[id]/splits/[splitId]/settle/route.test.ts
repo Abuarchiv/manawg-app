@@ -189,6 +189,9 @@ mock.module('@/core/guards/require-wg-member', {
 mock.module('@/core/rate-limit', {
 	namedExports: { checkRateLimit: async () => ({ success: true }), wgWriteLimiter: {} },
 });
+mock.module('@/features/expenses/server/settle-notify', {
+	namedExports: { notifySettlement: async () => undefined },
+});
 mock.module('@/features/expenses/server/expense-payments', {
 	namedExports: {
 		hasCapturingExpensePayment: async () => false,

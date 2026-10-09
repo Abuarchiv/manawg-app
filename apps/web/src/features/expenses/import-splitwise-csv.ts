@@ -8,7 +8,12 @@ import {
 	parseDateIso,
 	stripBom,
 } from './import-csv-helpers';
-import { type ParsedExpense, type ParsedSplit, UnsupportedCurrencyError } from './import-types';
+import {
+	type ParsedExpense,
+	type ParsedSplit,
+	type RejectedRow,
+	UnsupportedCurrencyError,
+} from './import-types';
 const CUSTOM_SPLIT_MAX_DRIFT_CENTS = 2;
 
 const SPLITWISE_KNOWN_COLS = new Set([
@@ -34,7 +39,7 @@ const SPLITWISE_KNOWN_COLS = new Set([
 	'last modified by',
 ]);
 
-export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
+export function parseSplitwiseCsv(csv: string, rejected?: RejectedRow[]): ParsedExpense[] {
 	const firstNewline = csv.indexOf('\n');
 	const headerLine = firstNewline === -1 ? csv : csv.slice(0, firstNewline);
 	const delimiter = detectDelimiter(stripBom(headerLine));
@@ -68,6 +73,7 @@ export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
 	const out: ParsedExpense[] = [];
 	for (let r = 1; r < rows.length; r += 1) {
 		const fields = rows[r]?.fields ?? [];
+		const line = rows[r]?.lineNumber ?? r + 1;
 		const warnings: string[] = [];
 		if (ignoredColumns.length > 0) {
 			warnings.push(`unknown_columns_ignored:${ignoredColumns.join('|')}`);
@@ -76,12 +82,12 @@ export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
 		if (!descRaw || /^total/i.test(descRaw)) continue;
 		const date = parseDateIso(fields[idxDate] ?? '');
 		if (!date) {
-			warnings.push('date_invalid');
+			rejected?.push({ line, reason: 'date_invalid', description: descRaw });
 			continue;
 		}
 		const totalCents = parseAmountToCents(fields[idxCost] ?? '');
 		if (totalCents === null || totalCents <= 0) {
-			warnings.push('amount_invalid');
+			rejected?.push({ line, reason: 'amount_invalid', description: descRaw });
 			continue;
 		}
 		const currencyRaw =
@@ -169,7 +175,7 @@ export function parseSplitwiseCsv(csv: string): ParsedExpense[] {
 			return cents !== null && cents !== 0;
 		});
 		if (participants.length === 0) {
-			warnings.push('no_participants');
+			rejected?.push({ line, reason: 'no_participants', description: descRaw });
 			continue;
 		}
 		const baseShare = Math.floor(totalCents / participants.length);

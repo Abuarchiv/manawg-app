@@ -174,6 +174,7 @@ export function SettlementDebtRow({
 									amountCents={debt.cents}
 									currency={debt.currency ?? 'EUR'}
 									onPaid={handleSettled}
+									onStale={() => onSettled()}
 								/>
 							</CollapsibleContent>
 						</Collapsible>

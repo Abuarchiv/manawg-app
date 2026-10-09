@@ -85,6 +85,7 @@ const columns: Record<string, string[]> = {
 	announcementComments: ['announcementId'],
 	announcements: ['wgId'],
 	auditEvents: ['wgId'],
+	choreCompletions: ['choreId'],
 	chores: ['wgId'],
 	expensePayments: ['wgId', 'status'],
 	expenseSplits: ['expenseId'],
@@ -94,6 +95,7 @@ const columns: Record<string, string[]> = {
 	shoppingItems: ['wgId'],
 	wgChatMessages: ['wgId'],
 	wgEvents: ['wgId'],
+	wgInventoryItems: ['wgId'],
 	wgMembers: ['wgId'],
 };
 const tables = Object.fromEntries(
@@ -105,6 +107,7 @@ const tables = Object.fromEntries(
 const rowsByTable: Record<string, Row[]> = {
 	announcements: [],
 	auditEvents: [],
+	choreCompletions: [],
 	chores: [],
 	expensePayments: completedPayments,
 	expenseSplits: splits,
@@ -241,6 +244,8 @@ test('exported expenses and completed payments reconstruct the app balances by c
 	assert.deepEqual(exported.sections.expensePayments, [
 		{
 			id: 'payment-usd',
+			fromName: 'Alice',
+			toName: 'Carol',
 			fromMemberId: 'alice',
 			toMemberId: 'carol',
 			amountCents: 2000,
@@ -249,6 +254,8 @@ test('exported expenses and completed payments reconstruct the app balances by c
 		},
 		{
 			id: 'payment-eur',
+			fromName: 'Bob',
+			toName: 'Alice',
 			fromMemberId: 'bob',
 			toMemberId: 'alice',
 			amountCents: 2500,
@@ -303,7 +310,7 @@ test('completed payments support optional JSON sections and paged CSV', async ()
 	);
 	assert.equal(
 		await response.text(),
-		'id;fromMemberId;toMemberId;amount;currency;completedAt\npayment-eur;bob;alice;25,00;EUR;2026-02-03T12:00:00.000Z',
+		'id;fromName;toName;fromMemberId;toMemberId;amount;currency;completedAt\npayment-eur;Bob;Alice;bob;alice;25,00;EUR;2026-02-03 13:00',
 	);
 });
 

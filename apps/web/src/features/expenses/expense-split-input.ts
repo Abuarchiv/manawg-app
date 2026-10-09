@@ -41,6 +41,11 @@ interface BuildSplitsInput {
 	 */
 	rotationOffset: number;
 	/**
+	 * Ids of the members an equal split is shared between; null or omitted means every active
+	 * member. Ids of moved-out members are ignored.
+	 */
+	participantIds?: readonly string[] | null | undefined;
+	/**
 	 * The saved splits of the expense being edited. When the amount and the
 	 * set of debtors are unchanged, an equal split resends these per-member
 	 * amounts instead of re-rotating the leftover cent: moving that cent to
@@ -74,11 +79,60 @@ export function isEqualExpenseSplit(
 	return actual.every((cents, index) => cents === expected[index]);
 }
 
+/**
+ * The members an equal split is shared between, when `splits` is an equal split of `amountCents`
+ * among active members (all of them or a subset); null otherwise.
+ */
+export function equalSplitParticipants(
+	amountCents: number,
+	splits: readonly DebtorShare[],
+	members: readonly SplitMemberLike[],
+): string[] | null {
+	if (splits.length === 0) return null;
+	const activeIds = new Set(members.filter((m) => m.active !== false).map((m) => m.id));
+	const ids = splits.map((split) => split.debtorMemberId);
+	if (new Set(ids).size !== ids.length || ids.some((id) => !activeIds.has(id))) return null;
+	const byAmount = (a: number, b: number) => a - b;
+	const expected = distributeCentsEqually(amountCents, ids).sort(byAmount);
+	const actual = splits.map((split) => split.amountCents).sort(byAmount);
+	return actual.every((cents, index) => cents === expected[index]) ? ids : null;
+}
+
+export interface ReopenedShare {
+	debtorMemberId: string;
+	previousCents: number;
+	/** Null when the share is removed by the edit. */
+	nextCents: number | null;
+}
+
+/**
+ * Shares already marked as paid that an edit reopens: the server only keeps the paid state of a
+ * share whose amount stays the same, and drops it when the share changes or disappears. The
+ * payer's own share never counts, it is settled by definition.
+ */
+export function settledSharesAffectedByEdit(
+	previousSplits: ReadonlyArray<DebtorShare & { settledAt: string | null }>,
+	nextSplits: readonly DebtorShare[],
+	paidByMemberId: string,
+): ReopenedShare[] {
+	const nextById = new Map(nextSplits.map((split) => [split.debtorMemberId, split.amountCents]));
+	return previousSplits.flatMap((split) => {
+		if (split.settledAt === null || split.debtorMemberId === paidByMemberId) return [];
+		const nextCents = nextById.get(split.debtorMemberId) ?? null;
+		return nextCents === split.amountCents
+			? []
+			: [{ debtorMemberId: split.debtorMemberId, previousCents: split.amountCents, nextCents }];
+	});
+}
+
 export function buildSplitsFromForm(input: BuildSplitsInput): SplitInputResult {
 	const { splitMode, members, manualSplits, amountCents, rotationOffset, previousSplits } = input;
 
 	if (splitMode === 'equal') {
-		const activeIds = members.filter((m) => m.active).map((m) => m.id);
+		const chosen = input.participantIds ? new Set(input.participantIds) : null;
+		const activeIds = members
+			.filter((m) => m.active && (!chosen || chosen.has(m.id)))
+			.map((m) => m.id);
 		if (activeIds.length === 0) return { ok: false, reason: 'no_members' };
 		const kept = keepPreviousEqualSplits(amountCents, activeIds, previousSplits);
 		if (kept) return { ok: true, splits: kept };

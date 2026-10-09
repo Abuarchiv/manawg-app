@@ -15,6 +15,7 @@ const recurringExpenses = {
 	pausedAt: 'recurringExpenses.pausedAt',
 };
 const wgMembers = { id: 'wgMembers.id' };
+const expenses = { id: 'expenses.id' };
 
 interface Template {
 	[key: string]: unknown;
@@ -48,6 +49,8 @@ const state = {
 	ownerChecks: 0,
 	callerId: otherMemberId,
 	isAdmin: false,
+	// Whether an expense was booked for the template's current due date.
+	booked: true,
 };
 
 const db = {
@@ -59,7 +62,14 @@ const db = {
 				return query;
 			},
 			where() {
-				const rows = table === wgMembers ? [{ id: creatorId }] : [{ ...state.template }];
+				const rows =
+					table === wgMembers
+						? [{ id: creatorId }]
+						: table === expenses
+							? state.booked
+								? [{ id: 'expense-1' }]
+								: []
+							: [{ ...state.template }];
 				return Object.assign(Promise.resolve(rows), { limit: async () => rows });
 			},
 		};
@@ -87,7 +97,7 @@ const db = {
 
 mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => {} } });
 mock.module('@/core/db', {
-	namedExports: { db, idempotencyResponses: {}, recurringExpenses, wgMembers },
+	namedExports: { db, expenses, idempotencyResponses: {}, recurringExpenses, wgMembers },
 });
 mock.module('@/core/db/transaction', {
 	namedExports: {
@@ -156,6 +166,7 @@ function harness({ callerId = otherMemberId, isAdmin = false } = {}) {
 	state.ownerChecks = 0;
 	state.callerId = callerId;
 	state.isAdmin = isAdmin;
+	state.booked = true;
 	return {
 		state,
 		patch: (body: Record<string, unknown>) =>
@@ -182,6 +193,17 @@ test('PATCH rejects moving nextDueAt out of the catch-up range', async (t) => {
 	const moved = await patch({ nextDueAt: '2026-11-01T00:00:00.000Z' });
 	assert.equal(moved.status, 200);
 	assert.equal(state.template.nextDueAt.toISOString(), '2026-11-01T00:00:00.000Z');
+});
+
+test('a template is not advanced while no expense was booked for its due date', async (t) => {
+	t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-25T12:00:00.000Z') });
+	const { state, patch } = harness({ callerId: otherMemberId });
+	state.booked = false;
+
+	const skipped = await patch({ expectedNextDueAt: currentDueAt.toISOString() });
+	assert.equal(skipped.status, 409);
+	assert.deepEqual(await skipped.json(), { error: 'recurring_expense_not_booked' });
+	assert.deepEqual(state.updates, []);
 });
 
 test('any member may advance a template after booking it, but only the owner may edit it', async (t) => {

@@ -3,9 +3,29 @@ import type { ParsedExpense } from './import-types';
 
 export { parseSplidCsv } from './import-splid-csv';
 export { parseSplitwiseCsv } from './import-splitwise-csv';
-export { type ImportSource, type ParsedExpense, UnsupportedCurrencyError } from './import-types';
+export {
+	type ImportSource,
+	type ParsedExpense,
+	type RejectedRow,
+	UnsupportedCurrencyError,
+} from './import-types';
 
-const FUZZY_MATCH_MAX_DISTANCE = 2;
+/** Short names differ by one letter all the time (Tom/Tim); only longer ones may be fuzzy. */
+function maxFuzzyDistance(length: number): number {
+	if (length < 5) return 0;
+	return length < 9 ? 1 : 2;
+}
+
+const REJECTED_ROW_REASONS: Record<string, string> = {
+	date_invalid: 'Datum nicht lesbar',
+	amount_invalid: 'Betrag nicht lesbar',
+	no_participants: 'Keine beteiligte Person',
+	payer_missing: 'Zahlende Person fehlt',
+};
+
+export function describeRejectedRowReason(reason: string): string {
+	return REJECTED_ROW_REASONS[reason] ?? reason;
+}
 
 /**
  * A parsed row's `warnings` are internal codes (see `parseSplitwiseCsv`), not
@@ -56,38 +76,51 @@ interface MemberRef {
 	name: string;
 }
 
+/**
+ * Maps file names to member ids: exact (normalized) matches first, then a conservative fuzzy
+ * match for names no member claimed exactly. Names matched fuzzily are added to `fuzzyNames`
+ * so the UI can ask for a check instead of presenting them as certain.
+ */
 export function matchMembers(
 	parsedNames: readonly string[],
 	wgMembers: readonly MemberRef[],
+	fuzzyNames?: Set<string>,
 ): Map<string, string | null> {
 	const result = new Map<string, string | null>();
 	const memberIndex = wgMembers.map((m) => ({
 		id: m.id,
-		name: m.name,
 		normalized: normalizeMemberName(m.name),
 	}));
+	const claimedExactly = new Set<string>();
+	const pending: Array<{ raw: string; normalized: string }> = [];
 	for (const raw of parsedNames) {
 		const normalized = normalizeMemberName(raw);
-		if (!normalized) {
-			result.set(raw, null);
-			continue;
-		}
-		const exact = memberIndex.find((m) => m.normalized === normalized);
+		const exact = normalized ? memberIndex.find((m) => m.normalized === normalized) : undefined;
 		if (exact) {
 			result.set(raw, exact.id);
-			continue;
+			claimedExactly.add(exact.id);
+		} else {
+			result.set(raw, null);
+			if (normalized) pending.push({ raw, normalized });
 		}
+	}
+	for (const { raw, normalized } of pending) {
 		let best: { id: string; distance: number; ambiguous: boolean } | null = null;
 		for (const m of memberIndex) {
+			if (claimedExactly.has(m.id)) continue;
+			const maxDistance = maxFuzzyDistance(Math.min(normalized.length, m.normalized.length));
 			const distance = levenshtein(normalized, m.normalized);
-			if (distance > FUZZY_MATCH_MAX_DISTANCE) continue;
+			if (distance > maxDistance) continue;
 			if (best === null || distance < best.distance) {
 				best = { id: m.id, distance, ambiguous: false };
 			} else if (distance === best.distance) {
 				best.ambiguous = true;
 			}
 		}
-		result.set(raw, best && !best.ambiguous ? best.id : null);
+		if (best && !best.ambiguous) {
+			result.set(raw, best.id);
+			fuzzyNames?.add(raw);
+		}
 	}
 	return result;
 }

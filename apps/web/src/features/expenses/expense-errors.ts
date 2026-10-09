@@ -124,16 +124,6 @@ export function recurringTemplateDeleteErrorMessage(error: string): string {
 	);
 }
 
-export function recurringAdvanceWarningMessage(status: number, error: string): string {
-	if (status === 409 && error === 'recurring_expense_already_advanced') {
-		return 'Ausgabe wurde erstellt, aber die Vorlage war schon weitergeschoben. Prüfe kurz, ob diese Fixkosten doppelt übernommen wurden.';
-	}
-	if (error === 'update_failed') {
-		return 'Ausgabe wurde erstellt, aber die Fixkosten-Vorlage konnte nicht weitergeschoben werden. Lade die Ausgaben neu und prüfe die nächste Fälligkeit.';
-	}
-	return 'Ausgabe wurde erstellt, aber die Fixkosten-Vorlage konnte nicht weitergeschoben werden. Prüfe sie später noch einmal.';
-}
-
 /**
  * Why a form's split rows cannot be submitted, in the wording the expense form
  * shows. Keyed by the reasons `buildSplitsFromForm` reports.
@@ -149,7 +139,7 @@ export function splitInputErrorMessage(
 		case 'splits_mismatch':
 			return SPLIT_SUM_MISMATCH;
 		case 'no_members':
-			return 'Keine Mitglieder vorhanden.';
+			return 'Wähle mindestens eine beteiligte Person aus.';
 	}
 }
 

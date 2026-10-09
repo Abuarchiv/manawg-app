@@ -13,6 +13,7 @@ import { formatEuroCents } from '@/core/utils/money';
 import { formatShortDate, parseValidDate } from '@/core/utils/time';
 import type { Abo, MemberOption } from '@/features/expenses/components/abos/abos-types';
 import {
+	canManageRecurringTemplate,
 	formatIntervalLabel,
 	previewNextOccurrences,
 } from '@/features/expenses/recurring-expenses';
@@ -44,10 +45,11 @@ export function AboRow({ abo, members, pending, onEdit, onTogglePause, onDelete 
 	const isPaused = abo.pausedAt !== null;
 	const isOverdue = !isPaused && berlinDayKey(new Date(abo.nextDueAt)) < berlinDayKey(new Date());
 	const preview = previewNextOccurrences(
-		{ nextDueAt: abo.nextDueAt, intervalMonths: abo.intervalMonths },
+		{ nextDueAt: abo.nextDueAt, intervalMonths: abo.intervalMonths, anchorAt: abo.anchorAt },
 		3,
 	);
-	const { identity } = useWg();
+	const { identity, isAdmin } = useWg();
+	const canManage = canManageRecurringTemplate(abo, identity.memberId, isAdmin);
 	const payerName = payer?.name ?? 'unbekannt';
 	// The cron skips (never advances) a template whose payer or debtor moved out.
 	const blockedByMovedOut =
@@ -141,41 +143,52 @@ export function AboRow({ abo, members, pending, onEdit, onTogglePause, onDelete 
 									.join(', ')}
 							</p>
 						)}
-						<div className="flex flex-wrap items-center gap-3 border-t pt-3">
-							{/* Pausing is deliberately here rather than a switch in the row: no accidental taps. */}
-							<Button
-								variant="outline"
-								onClick={() => onTogglePause(abo)}
-								disabled={pending}
-								aria-label={
-									isPaused ? `Fortsetzen: ${abo.description}` : `Pausieren: ${abo.description}`
-								}
-							>
-								{isPaused ? <Play data-icon="inline-start" /> : <Pause data-icon="inline-start" />}
-								{isPaused ? 'Fortsetzen' : 'Pausieren'}
-							</Button>
-							<Button
-								variant="outline"
-								size="icon"
-								onClick={() => onEdit(abo)}
-								disabled={pending}
-								aria-label={`${abo.description} bearbeiten`}
-							>
-								<Pencil />
-								<span className="sr-only">{abo.description} bearbeiten</span>
-							</Button>
-							<Button
-								variant="outline"
-								size="icon"
-								className="text-destructive"
-								onClick={() => onDelete(abo)}
-								disabled={pending}
-								aria-label={`${abo.description} löschen`}
-							>
-								<Trash2 />
-								<span className="sr-only">{abo.description} löschen</span>
-							</Button>
-						</div>
+						{canManage ? (
+							<div className="flex flex-wrap items-center gap-3 border-t pt-3">
+								{/* Pausing is deliberately here rather than a switch in the row: no accidental taps. */}
+								<Button
+									variant="outline"
+									onClick={() => onTogglePause(abo)}
+									disabled={pending}
+									aria-label={
+										isPaused ? `Fortsetzen: ${abo.description}` : `Pausieren: ${abo.description}`
+									}
+								>
+									{isPaused ? (
+										<Play data-icon="inline-start" />
+									) : (
+										<Pause data-icon="inline-start" />
+									)}
+									{isPaused ? 'Fortsetzen' : 'Pausieren'}
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									onClick={() => onEdit(abo)}
+									disabled={pending}
+									aria-label={`${abo.description} bearbeiten`}
+								>
+									<Pencil />
+									<span className="sr-only">{abo.description} bearbeiten</span>
+								</Button>
+								<Button
+									variant="outline"
+									size="icon"
+									className="text-destructive"
+									onClick={() => onDelete(abo)}
+									disabled={pending}
+									aria-label={`${abo.description} löschen`}
+								>
+									<Trash2 />
+									<span className="sr-only">{abo.description} löschen</span>
+								</Button>
+							</div>
+						) : (
+							<p className="border-t pt-3 text-sm text-muted-foreground">
+								Nur wer die Fixkosten angelegt hat oder Admin der WG ist, kann sie ändern, pausieren
+								oder löschen.
+							</p>
+						)}
 					</div>
 				</CollapsiblePanel>
 			</Collapsible>

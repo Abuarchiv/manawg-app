@@ -2,6 +2,8 @@ import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
 import { todayInputValue } from '@/core/utils/local-date';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import type { AboSplit, MemberOption } from '@/features/expenses/components/abos/abos-types';
+import { participantsOrAll } from '@/features/expenses/components/ausgaben/expense-form-draft';
+import { equalSplitParticipants } from '@/features/expenses/expense-split-input';
 
 export const DESCRIPTION_MAX = 200;
 export const AMOUNT_MIN_EUROS = 0.01;
@@ -31,12 +33,19 @@ export type AboSplitBuildError =
 	| 'splits_empty'
 	| 'splits_mismatch';
 
-export function buildEqualSplits(members: MemberOption[], amountCents: number): AboSplit[] {
+export function buildEqualSplits(
+	members: MemberOption[],
+	amountCents: number,
+	participantIds?: readonly string[] | null,
+): AboSplit[] {
 	// Only active members carry a share of a new equal split; members who
 	// moved out stay in history but must not divide the amount.
-	const participants = members.some((member) => member.active)
+	const active = members.some((member) => member.active)
 		? members.filter((member) => member.active)
 		: members;
+	const participants = participantIds
+		? active.filter((member) => participantIds.includes(member.id))
+		: active;
 	if (participants.length === 0) return [];
 	const base = Math.floor(amountCents / participants.length);
 	const remainder = amountCents - base * participants.length;
@@ -55,27 +64,14 @@ export function isoDateToInput(iso: string): string {
 	return `${year}-${month}-${day}`;
 }
 
-export function initialSplitMode(
+/** The members of a saved equal split (null = everyone), or 'manual' when the shares differ. */
+export function initialEqualParticipants(
 	initial: AboFormValues | undefined,
 	members: MemberOption[],
-): SplitMode {
-	if (!initial) return 'equal';
-	const equal = buildEqualSplits(members, initial.amountCents);
-	const sameLength = initial.splits.length === equal.length;
-	if (!sameLength) return 'manual';
-	const sortedInitial = [...initial.splits].sort((a, b) =>
-		a.debtorMemberId.localeCompare(b.debtorMemberId),
-	);
-	const sortedEqual = [...equal].sort((a, b) => a.debtorMemberId.localeCompare(b.debtorMemberId));
-	const allEqual = sortedInitial.every((split, idx) => {
-		const counterpart = sortedEqual[idx];
-		return (
-			counterpart !== undefined &&
-			split.debtorMemberId === counterpart.debtorMemberId &&
-			split.amountCents === counterpart.amountCents
-		);
-	});
-	return allEqual ? 'equal' : 'manual';
+): string[] | null | 'manual' {
+	if (!initial) return null;
+	const participants = equalSplitParticipants(initial.amountCents, initial.splits, members);
+	return participants ? participantsOrAll(participants, members) : 'manual';
 }
 
 export function initialManualMap(initial: AboFormValues | undefined): Record<string, string> {
@@ -95,6 +91,7 @@ export function buildAboSplits(input: {
 	activeMembers: MemberOption[];
 	splitCandidates: MemberOption[];
 	manualSplits: Record<string, string>;
+	participantIds?: readonly string[] | null;
 }): AboSplit[] | AboSplitBuildError {
 	const {
 		amountCents: parsedAmountCents,
@@ -102,10 +99,11 @@ export function buildAboSplits(input: {
 		activeMembers,
 		splitCandidates,
 		manualSplits,
+		participantIds,
 	} = input;
 	if (parsedAmountCents === null) return 'amount_invalid';
 	if (splitMode === 'equal') {
-		const equal = buildEqualSplits(activeMembers, parsedAmountCents);
+		const equal = buildEqualSplits(activeMembers, parsedAmountCents, participantIds);
 		if (equal.length === 0) return 'no_members';
 		return equal;
 	}

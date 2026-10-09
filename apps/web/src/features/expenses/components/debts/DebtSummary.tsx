@@ -13,7 +13,7 @@ import { ItemGroup } from '@/components/ui/item';
 import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { formatEuroCents } from '@/core/utils/money';
 import type { Expense } from '@/features/expenses/components/ausgaben/expense-types';
-import { getDebtOverview } from '@/features/expenses/debt-overview';
+import { getDebtOverview, listedMemberBalances } from '@/features/expenses/debt-overview';
 import type { SettlementSummary, SimplifiedDebt } from '@/features/expenses/debt-reduction';
 import { cn } from '@/shared/lib/cn';
 import { Bell } from 'lucide-react';
@@ -25,6 +25,8 @@ interface MemberBalance {
 	memberName: string;
 	currency: string;
 	balanceCents: number;
+	/** False for members who moved out. */
+	active?: boolean;
 }
 
 // The member's own balance is the page's key number: larger than body text, in the heading row.
@@ -93,14 +95,17 @@ export function DebtSummary({
 		);
 	}
 
+	const shownBalances = listedMemberBalances(balances, (member) => member.active !== false);
 	const ownBalances = balances.filter(
 		(member) => member.memberId === currentMemberId && member.balanceCents !== 0,
 	);
 	const ownBalance = ownBalances.length === 1 ? ownBalances[0] : null;
 	// The own row is already in the heading; only drop it while the list stays visible.
 	const listedBalances =
-		ownBalance && balances.length > 1 ? balances.filter((m) => m !== ownBalance) : balances;
-	const showBalances = balances.length > 1 && listedBalances.length > 0;
+		ownBalance && shownBalances.length > 1
+			? shownBalances.filter((m) => m !== ownBalance)
+			: shownBalances;
+	const showBalances = shownBalances.length > 1 && listedBalances.length > 0;
 
 	return (
 		<Card size="sm">

@@ -188,6 +188,12 @@ mock.module('@/features/expenses/server/expense-payments', {
 		hasCapturingExpensePayment: async () => false,
 	},
 });
+mock.module('@/features/expenses/server/settle-notify', {
+	namedExports: {
+		notifySettlement: async () => undefined,
+		announcePayPalSettlement: async () => undefined,
+	},
+});
 mock.module('@/features/expenses/server/open-expenses', {
 	namedExports: { loadOpenExpenses: async () => [] },
 });
@@ -196,6 +202,7 @@ mock.module('@/features/expenses/paypal-settlement', {
 		isPayPalCaptureDebtChanged: () => false,
 		parsePayPalAmountCents: () => 1200,
 		terminalPayPalCaptureOutcome: () => null,
+		isUnapprovedPayPalOrder: () => false,
 	},
 });
 mock.module('drizzle-orm', {

@@ -23,6 +23,7 @@ import {
 	settleDebtPair,
 	settlementCodec,
 } from '@/features/expenses/server/settle-debt';
+import { notifySettlement } from '@/features/expenses/server/settle-notify';
 import {
 	type SettlementConfirmation,
 	parseSettlementConfirmation,
@@ -151,6 +152,17 @@ export const POST = withWgRoute('settle-batch POST', async (req, { code }) => {
 				toMemberId: confirmation.toMemberId,
 				splitIds: outcome.settledIds,
 			},
+		});
+		await notifySettlement({
+			wg: auth.wg,
+			actor: auth.member,
+			otherMemberId:
+				auth.member.memberId === confirmation.fromMemberId
+					? confirmation.toMemberId
+					: confirmation.fromMemberId,
+			amountCents: outcome.settledCents,
+			currency: confirmation.currency,
+			direction: auth.member.memberId === confirmation.fromMemberId ? 'paid' : 'received',
 		});
 	}
 	return noStoreJson(result.body, result.status);

@@ -1,3 +1,4 @@
+import { postSystemNotice } from '@/core/activity-feed';
 import { recordAuditEvent } from '@/core/audit';
 import { db, expenseSplits, expenses, recurringExpenses, wgMembers, wgs } from '@/core/db';
 import { TransactionAbort } from '@/core/db/transaction';
@@ -24,11 +25,14 @@ import { type NextRequest, NextResponse } from 'next/server';
 // stay due, so the remainder is drained by the following runs.
 const TEMPLATE_LIMIT = 500;
 const TEMPLATE_BATCH_SIZE = 10;
+/** A blocked template is announced by the first run after it fell due only; runs are daily. */
+const BLOCKED_NOTICE_WINDOW_MS = 25 * 60 * 60 * 1000;
 
 interface DueRecurring {
 	id: string;
 	wgId: string;
 	paidByMemberId: string;
+	createdByMemberId: string;
 	description: string;
 	amountCents: number;
 	intervalMonths: number;
@@ -48,7 +52,7 @@ async function createExpenseForDueAt(
 	template: DueRecurring,
 	splits: RecurringSplit[],
 	dueAt: Date,
-): Promise<string | 'duplicate' | null> {
+): Promise<string | 'duplicate' | 'blocked' | null> {
 	try {
 		// The expense and its splits are one fact and are written in one
 		// transaction: a compensating delete is itself a database call, and if it
@@ -114,7 +118,7 @@ async function createExpenseForDueAt(
 					recurringExpenseId: template.id,
 					wgId: template.wgId,
 				});
-				return null;
+				return 'blocked';
 			}
 			const [inserted] = await tx
 				.insert(expenses)
@@ -165,6 +169,17 @@ async function createExpenseForDueAt(
 	}
 }
 
+/** Tells the WG that a template is not booked because a member of it moved out. */
+function announceBlockedTemplate(template: DueRecurring): Promise<void> {
+	return postSystemNotice({
+		wgId: template.wgId,
+		authorMemberId: template.createdByMemberId,
+		kind: 'info',
+		source: 'expense',
+		content: `Die Fixkosten „${template.description}“ werden nicht gebucht, weil ein beteiligtes Mitglied ausgezogen ist. Passe die Anteile an oder pausiere die Fixkosten.`,
+	});
+}
+
 async function advanceTemplate(template: DueRecurring): Promise<CreatedAdvance[]> {
 	const splits = parseRecurringSplits(template.splitsJson);
 	if (!recurringSplitsMatchAmount(splits, template.amountCents)) return [];
@@ -182,6 +197,13 @@ async function advanceTemplate(template: DueRecurring): Promise<CreatedAdvance[]
 	while (dueAt <= now) {
 		const followingDueAt = addMonthsFromAnchor(dueAt, anchorDay, intervalMonths);
 		const expenseId = await createExpenseForDueAt(template, splits, dueAt);
+		if (expenseId === 'blocked') {
+			// Ceiling: there is no stored "already told" flag, so if exactly that first run is missed the WG hears nothing.
+			if (now.getTime() - template.nextDueAt.getTime() < BLOCKED_NOTICE_WINDOW_MS) {
+				await announceBlockedTemplate(template);
+			}
+			break;
+		}
 		if (expenseId === null) break;
 
 		shouldUpdateTemplate = true;
@@ -250,6 +272,7 @@ export const GET = withCronLogging(
 				id: recurringExpenses.id,
 				wgId: recurringExpenses.wgId,
 				paidByMemberId: recurringExpenses.paidByMemberId,
+				createdByMemberId: recurringExpenses.createdByMemberId,
 				description: recurringExpenses.description,
 				amountCents: recurringExpenses.amountCents,
 				intervalMonths: recurringExpenses.intervalMonths,

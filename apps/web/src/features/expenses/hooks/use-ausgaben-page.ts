@@ -18,7 +18,12 @@ import {
 	computeDirectDebts,
 	computeNetBalances,
 } from '@/features/expenses/debt-reduction';
-import { payerOptions, splitCandidates } from '@/features/expenses/expense-split-input';
+import { type ExpenseScope, filterExpenses } from '@/features/expenses/expense-filter';
+import {
+	payerOptions,
+	settledSharesAffectedByEdit,
+	splitCandidates,
+} from '@/features/expenses/expense-split-input';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionNotifier, ExpensePageContext } from './expense-page-context';
@@ -35,7 +40,7 @@ const RECURRING_PREVIEW_LIMIT = 4;
 
 /** Expenses page: loads data, keeps form and mutations together and provides the display derivations. */
 export function useAusgabenPage() {
-	const { wg, members, identity } = useWg();
+	const { wg, members, identity, isAdmin } = useWg();
 	const toast = useToast();
 	const searchParams = useSearchParams();
 	const router = useRouter();
@@ -92,7 +97,7 @@ export function useAusgabenPage() {
 	};
 	const support = useExpenseFormSupport(ctx, form);
 	const recurring = useRecurringExpenseActions(ctx, form, support);
-	const expenseSubmit = useExpenseSubmit(ctx, form, support, recurring.advanceRecurringTemplate);
+	const expenseSubmit = useExpenseSubmit(ctx, form, support);
 	const rowActions = useExpenseRowActions(ctx);
 
 	useEffect(() => {
@@ -167,12 +172,21 @@ export function useAusgabenPage() {
 	// History by calendar week; the API returns newest first.
 	// Render only the newest entries (balances still use all); "Mehr anzeigen" loads more.
 	const [visibleLimit, setVisibleLimit] = useState(EXPENSE_RENDER_PAGE);
-	const highlightIndex = highlightedId ? expenses.findIndex((e) => e.id === highlightedId) : -1;
+	const [searchQuery, setSearchQuery] = useState('');
+	const [scope, setScope] = useState<ExpenseScope>('all');
+	const shownExpenses = useMemo(
+		() =>
+			filterExpenses(expenses, { query: searchQuery, scope }, identity.memberId, stableMemberName),
+		[expenses, searchQuery, scope, identity.memberId, stableMemberName],
+	);
+	const highlightIndex = highlightedId
+		? shownExpenses.findIndex((e) => e.id === highlightedId)
+		: -1;
 	const renderLimit = Math.max(visibleLimit, highlightIndex + 1);
 	const expenseWeeks = useMemo(() => {
 		const weeks: Array<{ label: string; items: typeof expenses }> = [];
 		const now = new Date();
-		for (const expense of expenses.slice(0, renderLimit)) {
+		for (const expense of shownExpenses.slice(0, renderLimit)) {
 			const date = parseValidDate(expense.occurredAt);
 			const label = date ? formatWeekLabel(startOfWeek(date), now) : 'Datum unbekannt';
 			const current = weeks.at(-1);
@@ -180,7 +194,7 @@ export function useAusgabenPage() {
 			else weeks.push({ label, items: [expense] });
 		}
 		return weeks;
-	}, [expenses, renderLimit]);
+	}, [shownExpenses, renderLimit]);
 
 	const { payments } = data;
 	const balanceMembers = useMemo(
@@ -197,8 +211,9 @@ export function useAusgabenPage() {
 			computeNetBalances(expenses, balanceMembers, payments).map(({ cents, ...member }) => ({
 				...member,
 				balanceCents: cents,
+				active: members.find((m) => m.id === member.memberId)?.active !== false,
 			})),
-		[expenses, balanceMembers, payments],
+		[expenses, balanceMembers, payments, members],
 	);
 	const settlementSummary = useMemo(
 		() => buildSettlementSummary(expenses, balanceMembers, payments),
@@ -226,6 +241,17 @@ export function useAusgabenPage() {
 		previewAmount !== null && previewAmount >= AMOUNT_MIN_EUROS && previewAmount <= AMOUNT_MAX_EUROS
 			? support.buildSplits(Math.round(previewAmount * CENTS_PER_EURO))
 			: null;
+	const editedExpense = form.editingExpense
+		? expenses.find((expense) => expense.id === form.editingExpense?.id)
+		: undefined;
+	const reopenedShares =
+		editedExpense && splitPreview?.ok
+			? settledSharesAffectedByEdit(
+					editedExpense.splits,
+					splitPreview.splits,
+					editedExpense.paidByMemberId,
+				)
+			: [];
 	const formCurrency = form.editingExpense
 		? (expenses.find((expense) => expense.id === form.editingExpense?.id)?.currency ??
 			form.editingExpense.currency ??
@@ -241,6 +267,7 @@ export function useAusgabenPage() {
 		wg,
 		members,
 		identity,
+		isAdmin,
 		wgBaseHref: `/wg/${encodeURIComponent(wg.shareCode)}`,
 		highlightedId,
 		recurringId,
@@ -256,8 +283,13 @@ export function useAusgabenPage() {
 		showSkeleton: data.initialLoading && expenses.length === 0,
 		expanded,
 		expenseWeeks,
-		hasMoreExpenses: renderLimit < expenses.length,
-		hiddenExpenseCount: expenses.length - renderLimit,
+		hasMoreExpenses: renderLimit < shownExpenses.length,
+		hiddenExpenseCount: Math.max(0, shownExpenses.length - renderLimit),
+		shownExpenseCount: shownExpenses.length,
+		searchQuery,
+		setSearchQuery,
+		scope,
+		setScope,
 		showMoreExpenses: () => setVisibleLimit(renderLimit + EXPENSE_RENDER_PAGE),
 		directDebts,
 		memberBalances,
@@ -271,6 +303,7 @@ export function useAusgabenPage() {
 		// moved-out member has to be offered anyway.
 		selectableSplitMembers: splitCandidates(members, form.splitMode, form.manualSplits),
 		splitPreview,
+		reopenedShares,
 		formCurrency,
 		clearPendingCreateRequests,
 		memberName,

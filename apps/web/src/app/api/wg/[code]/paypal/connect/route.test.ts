@@ -548,3 +548,30 @@ test('completion rechecks recipient compare-and-set after provider work', async 
 	assert.deepEqual(state.updates, []);
 	assert.equal(response.headers.get('set-cookie'), null);
 });
+
+test('disconnect clears the stored merchant, but not while a payment is active', async () => {
+	const post = (connect: ReturnType<typeof harness>['connect'], body: unknown) =>
+		connect.POST(
+			new Request('https://manawg.example/api/connect', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(body),
+			}),
+			{ code },
+		);
+
+	const idle = harness({ savedMerchantId: merchantId });
+	const ok = await post(idle.connect, { action: 'disconnect' });
+	assert.equal(ok.status, 200);
+	assert.deepEqual(await ok.json(), { connected: false });
+	assert.deepEqual(idle.state.updates, [{ paypalMerchantId: null }]);
+
+	const busy = harness({ savedMerchantId: merchantId, activePayment: true });
+	const blocked = await post(busy.connect, { action: 'disconnect' });
+	assert.equal(blocked.status, 409);
+	assert.equal((await blocked.json()).error, 'paypal_payment_pending');
+	assert.deepEqual(busy.state.updates, []);
+
+	const extra = await post(harness().connect, { action: 'disconnect', merchantId });
+	assert.equal(extra.status, 400);
+});

@@ -37,6 +37,17 @@ export function terminalPayPalCaptureOutcome(
 	return null;
 }
 
+/** The payer never approved the order at PayPal, so nothing can have been captured. */
+export function isUnapprovedPayPalOrder(
+	orderStatus: string | undefined,
+	captureStatuses: readonly (string | undefined)[],
+): boolean {
+	return (
+		(orderStatus === 'CREATED' || orderStatus === 'PAYER_ACTION_REQUIRED') &&
+		captureStatuses.length === 0
+	);
+}
+
 export function isPayPalCapturePendingResult(result: PayPalCaptureResult): boolean {
 	if (!result.ok) {
 		if (result.status === 0 || result.status === 429 || result.status >= 500) return false;

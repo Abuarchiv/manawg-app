@@ -141,7 +141,7 @@ type SettlementOutcome =
 	| { kind: 'member_not_in_wg' }
 	| { kind: 'blocked' }
 	| { kind: 'changed' }
-	| { kind: 'settled'; settledIds: string[] };
+	| { kind: 'settled'; settledIds: string[]; settledCents: number };
 
 export const settlementCodec = responseCodec();
 
@@ -227,6 +227,6 @@ export async function settleDebtPair(
 			confirmation.fromMemberId,
 			confirmation.toMemberId,
 		),
-		context: { kind: 'settled', settledIds },
+		context: { kind: 'settled', settledIds, settledCents },
 	};
 }

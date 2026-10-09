@@ -1,5 +1,5 @@
 import type { NotificationWarning } from '@/core/notifications/notification-warning';
-import type { ParsedExpense } from '@/features/expenses/import-parsers';
+import type { ParsedExpense, RejectedRow } from '@/features/expenses/import-parsers';
 import type { MemberRef } from '@/shared/lib/member-types';
 import type { ImportSourceKind } from './ImportSourcePicker';
 
@@ -23,6 +23,10 @@ export interface PreviewResponse {
 	memberMapping: Record<string, string | null>;
 	conflicts: string[];
 	members: MemberRef[];
+	/** CSV rows the parser could not read; absent on older responses. */
+	rejected?: RejectedRow[];
+	/** Names matched by similarity only; the member should confirm them. */
+	fuzzyNames?: string[];
 }
 
 export interface CommitResponse {

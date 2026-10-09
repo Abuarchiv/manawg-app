@@ -80,12 +80,12 @@ interface ReminderMessageInput {
 	debtorName: string;
 	creditorName: string;
 	amountCents: number;
-	currency?: string;
+	currency: string;
 	oldestDebtAgeDays: number;
 }
 
 export function formatReminderMessage(input: ReminderMessageInput): string {
-	const amount = formatEuroCents(input.amountCents, input.currency ?? 'EUR').replace(/ /g, ' ');
+	const amount = formatEuroCents(input.amountCents, input.currency).replace(/ /g, ' ');
 	const ageSuffix =
 		input.oldestDebtAgeDays >= 1
 			? ` seit ${input.oldestDebtAgeDays} ${input.oldestDebtAgeDays === 1 ? 'Tag' : 'Tagen'}`

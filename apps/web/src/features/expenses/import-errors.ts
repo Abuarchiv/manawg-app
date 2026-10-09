@@ -39,6 +39,8 @@ const IMPORT_ERROR_MESSAGES: Readonly<Record<string, string>> = {
 	unsupported_currency:
 		'Diese Datei enthält keine unterstützte Währung. Verwende einen Export in Euro (EUR).',
 	empty_payload: 'Keine Ausgaben gefunden. Prüfe die Datei und versuche es erneut.',
+	rows_unreadable:
+		'Keine Zeile der Datei konnte gelesen werden. Prüfe Datum, Betrag und zahlende Person in der Datei.',
 	invalid_skip_indexes: 'Die Auswahl ist veraltet. Öffne die Vorschau erneut.',
 	preview_hash_required: 'Die Vorschau fehlt. Erstelle sie erneut.',
 	invalid_body:
@@ -83,6 +85,7 @@ export function recoveryActionFor(
 		error === 'too_many_rows' ||
 		error === 'unsupported_currency' ||
 		error === 'empty_payload' ||
+		error === 'rows_unreadable' ||
 		error === 'invalid_body' ||
 		error === 'invalid_json' ||
 		error === 'no_valid_splits' ||

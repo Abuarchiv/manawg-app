@@ -29,7 +29,7 @@ mock.module('@/core/idempotency-store', {
 });
 const collection = await import('../src/app/api/wg/[code]/recurring-expenses/route.ts');
 const item = await import('../src/app/api/wg/[code]/recurring-expenses/[id]/route.ts');
-const { recurringExpenses, wgMembers } = tables;
+const { expenses, recurringExpenses, wgMembers } = tables;
 
 type Route = (req: never, ctx: never) => Promise<Response>;
 
@@ -74,7 +74,9 @@ test('both recurring expense PATCH routes guard financial edits without blocking
 					const result = Promise.resolve(rows) as Promise<unknown[]> & {
 						limit: (count: number) => Promise<unknown[]>;
 					};
-					result.limit = async () => (table === recurringExpenses ? [template] : []);
+					// The expense lookup stands for the booking that lets a template advance.
+					result.limit = async () =>
+						table === recurringExpenses || table === expenses ? [template] : [];
 					return result;
 				},
 			};

@@ -2,7 +2,7 @@
 
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import {
 	InputGroup,
@@ -18,6 +18,7 @@ import { CENTS_PER_EURO } from '@/core/utils/money';
 import type { MemberOption } from '@/features/expenses/components/abos/abos-types';
 import { amountErrorMessage } from '@/features/expenses/components/ausgaben/constants';
 import { splitInputErrorMessage } from '@/features/expenses/expense-errors';
+import { countMissedOccurrences } from '@/features/expenses/recurring-expenses';
 import { useEffect, useMemo, useState } from 'react';
 import { AboSplitFields } from './AboSplitFields';
 import {
@@ -28,8 +29,8 @@ import {
 	INTERVAL_OPTIONS,
 	type SplitMode,
 	buildAboSplits,
+	initialEqualParticipants,
 	initialManualMap,
-	initialSplitMode,
 	isoDateToInput,
 } from './abo-form-model';
 
@@ -72,7 +73,13 @@ export function AboForm({
 	const [nextDueAt, setNextDueAt] = useState(
 		initial ? isoDateToInput(initial.nextDueAt) : todayInputValue(),
 	);
-	const [splitMode, setSplitMode] = useState<SplitMode>(initialSplitMode(initial, activeMembers));
+	const initialParticipants = initialEqualParticipants(initial, activeMembers);
+	const [splitMode, setSplitMode] = useState<SplitMode>(
+		initialParticipants === 'manual' ? 'manual' : 'equal',
+	);
+	const [participantIds, setParticipantIds] = useState<string[] | null>(
+		initialParticipants === 'manual' ? null : initialParticipants,
+	);
 	const [manualSplits, setManualSplits] = useState<Record<string, string>>(
 		initialManualMap(initial),
 	);
@@ -86,7 +93,9 @@ export function AboForm({
 		setPaidByMemberId(initial.paidByMemberId);
 		setIntervalMonths(initial.intervalMonths);
 		setNextDueAt(isoDateToInput(initial.nextDueAt));
-		setSplitMode(initialSplitMode(initial, activeMembers));
+		const participants = initialEqualParticipants(initial, activeMembers);
+		setSplitMode(participants === 'manual' ? 'manual' : 'equal');
+		setParticipantIds(participants === 'manual' ? null : participants);
 		setManualSplits(initialManualMap(initial));
 		setSplitError(null);
 	}, [initial, activeMembers]);
@@ -104,6 +113,12 @@ export function AboForm({
 		error && parsedAmountCents === null
 			? amountErrorMessage(parseEuroAmount(amountStr), amountStr)
 			: null;
+	// A start in the past is booked retroactively by the daily run; say so before it happens.
+	const dueDateChanged = !initial || nextDueAt !== isoDateToInput(initial.nextDueAt);
+	const missedBookings =
+		dueDateChanged && nextDueAt.length > 0 && nextDueAt < todayInputValue()
+			? countMissedOccurrences(inputDateToIso(nextDueAt) ?? '', intervalMonths)
+			: 0;
 	const nextDueError = error && nextDueAt.trim().length === 0 ? 'Fälligkeit fehlt.' : null;
 	const formError = error && !descriptionError && !amountError && !nextDueError ? error : null;
 
@@ -130,6 +145,7 @@ export function AboForm({
 			activeMembers,
 			splitCandidates,
 			manualSplits,
+			participantIds,
 		});
 	}
 
@@ -280,6 +296,13 @@ export function AboForm({
 						aria-describedby={nextDueError ? 'abo-next-due-error' : undefined}
 						className="text-base"
 					/>
+					{missedBookings > 0 && (
+						<FieldDescription>
+							Liegt in der Vergangenheit: Beim nächsten täglichen Lauf{' '}
+							{missedBookings === 1 ? 'wird 1 Buchung' : `werden ${missedBookings} Buchungen`}{' '}
+							nachgetragen und die WG wird benachrichtigt.
+						</FieldDescription>
+					)}
 					<FieldError id="abo-next-due-error">{nextDueError}</FieldError>
 				</Field>
 				<AboSplitFields
@@ -291,6 +314,11 @@ export function AboForm({
 						setSplitError(null);
 					}}
 					splitCandidates={splitCandidates}
+					participantIds={participantIds}
+					onParticipantsChange={(ids) => {
+						setParticipantIds(ids);
+						setSplitError(null);
+					}}
 					manualSplits={manualSplits}
 					onManualSplitChange={(memberId, value) => {
 						setManualSplits((current) => ({ ...current, [memberId]: value }));

@@ -26,6 +26,7 @@ import {
 	expenseAmountSchema,
 	expenseDescriptionSchema,
 	expenseSplitSchema,
+	occurredAtSchema,
 } from '@/features/expenses/expense-schemas';
 import {
 	hasCapturingExpensePayment,
@@ -45,6 +46,7 @@ const patchSchema = z.object({
 	amountCents: expenseAmountSchema.optional(),
 	currency: currencySchema.optional(),
 	imageUrl: imageUrlSchema,
+	occurredAt: occurredAtSchema.optional(),
 	expectedUpdatedAt: z.string().datetime({ offset: true }).optional(),
 	splits: z.array(expenseSplitSchema).min(1).max(MAX_SPLITS).optional(),
 });
@@ -125,13 +127,15 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 			description: 'description_invalid',
 			currency: 'currency_invalid',
 			imageUrl: 'image_invalid',
+			occurredAt: 'occurred_at_invalid',
 			expectedUpdatedAt: 'expected_updated_at_invalid',
 			splits: 'splits_invalid',
 		},
 	});
 	if (!parsed.ok) return parsed.response;
 
-	const { description, amountCents, currency, imageUrl, expectedUpdatedAt, splits } = parsed.data;
+	const { description, amountCents, currency, imageUrl, occurredAt, expectedUpdatedAt, splits } =
+		parsed.data;
 
 	// A total change without a matching splits array would silently desync
 	// expenses.amountCents from sum(expenseSplits.amountCents) — the invariant
@@ -197,6 +201,7 @@ export const PATCH = withWgRoute<{ id: string }>('expense PATCH', async (req, { 
 	if (amountCents !== undefined) updates.amountCents = amountCents;
 	if (currency !== undefined) updates.currency = currency;
 	if (imageUrl !== undefined) updates.imageUrl = imageUrl ?? null;
+	if (occurredAt !== undefined) updates.occurredAt = new Date(occurredAt);
 
 	// The amount change and the replaced splits are one edit, so they are written in one
 	// transaction: a failure leaves the old splits in place instead of an expense with none.

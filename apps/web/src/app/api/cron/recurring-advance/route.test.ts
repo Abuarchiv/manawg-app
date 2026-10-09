@@ -20,6 +20,7 @@ interface Template {
 	id: string;
 	wgId: string;
 	paidByMemberId: string;
+	createdByMemberId: string;
 	description: string;
 	amountCents: number;
 	intervalMonths: number;
@@ -76,6 +77,7 @@ function freshState(initialDueAt: Date, intervalMonths: number, anchorAt: Date |
 			id: templateId,
 			wgId,
 			paidByMemberId: memberId,
+			createdByMemberId: memberId,
 			description: 'Miete',
 			amountCents: 500,
 			intervalMonths,
@@ -89,6 +91,7 @@ function freshState(initialDueAt: Date, intervalMonths: number, anchorAt: Date |
 		expenses: [] as ExpenseRow[],
 		splits: [] as unknown[],
 		notifications: [] as unknown[],
+		notices: [] as unknown[],
 		events: [] as unknown[],
 		updatePredicates: [] as Predicate[],
 		updateResults: [] as unknown[],
@@ -279,6 +282,9 @@ const db = {
 	},
 };
 
+mock.module('@/core/activity-feed', {
+	namedExports: { postSystemNotice: async (notice: unknown) => state.notices.push(notice) },
+});
 mock.module('@/core/audit', {
 	namedExports: { recordAuditEvent: async (event: unknown) => state.events.push(event) },
 });
@@ -644,5 +650,40 @@ test('a template with a moved-out payer or debtor is skipped without advancing',
 		assert.deepEqual(state.updateResults, []);
 		assert.equal(state.template.nextDueAt.toISOString(), julyDueAt.toISOString());
 		assert.equal(state.loggedErrors.length, 1);
+	});
+});
+
+test('a blocked template is announced to the WG once, by the first run after it fell due', async (t) => {
+	t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-01T09:00:00.000Z') });
+	const freshDueAt = new Date('2026-09-01T00:00:00.000Z');
+	const first = harness({
+		initialDueAt: freshDueAt,
+		patchAfterInsert: null,
+		activeMemberIds: [],
+	});
+	await withCronSecret(async () => {
+		await first.get();
+		assert.equal(first.state.notices.length, 1);
+		assert.deepEqual(first.state.notices[0], {
+			wgId,
+			authorMemberId: memberId,
+			kind: 'info',
+			source: 'expense',
+			content:
+				'Die Fixkosten „Miete“ werden nicht gebucht, weil ein beteiligtes Mitglied ausgezogen ist. Passe die Anteile an oder pausiere die Fixkosten.',
+		});
+	});
+
+	t.mock.timers.reset();
+	t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-02T09:00:00.000Z') });
+	const later = harness({
+		initialDueAt: freshDueAt,
+		patchAfterInsert: null,
+		activeMemberIds: [],
+	});
+	await withCronSecret(async () => {
+		await later.get();
+		assert.equal(later.state.notices.length, 0);
+		assert.equal(later.state.template.nextDueAt.toISOString(), freshDueAt.toISOString());
 	});
 });

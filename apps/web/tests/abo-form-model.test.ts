@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { buildAboSplits, buildEqualSplits, initialSplitMode } = await import(
+const { buildAboSplits, buildEqualSplits, initialEqualParticipants } = await import(
 	'../src/features/expenses/components/abos/abo-form-model.ts'
 );
 
@@ -42,13 +42,19 @@ test('an abo whose shares match the equal split opens in equal mode', () => {
 		nextDueAt: '2026-10-01T10:00:00.000Z',
 		splits: buildEqualSplits([anna, ben], 1000),
 	};
-	assert.equal(initialSplitMode(initial, [anna, ben]), 'equal');
-	assert.equal(
-		initialSplitMode({ ...initial, splits: [{ debtorMemberId: 'a', amountCents: 1000 }] }, [
+	assert.equal(initialEqualParticipants(initial, [anna, ben]), null);
+	// One member carrying the whole amount is an equal split among that subset.
+	assert.deepEqual(
+		initialEqualParticipants({ ...initial, splits: [{ debtorMemberId: 'a', amountCents: 1000 }] }, [
 			anna,
 			ben,
 		]),
-		'manual',
+		['a'],
 	);
-	assert.equal(initialSplitMode(undefined, [anna, ben]), 'equal');
+	const uneven = [
+		{ debtorMemberId: 'a', amountCents: 600 },
+		{ debtorMemberId: 'b', amountCents: 400 },
+	];
+	assert.equal(initialEqualParticipants({ ...initial, splits: uneven }, [anna, ben]), 'manual');
+	assert.equal(initialEqualParticipants(undefined, [anna, ben]), null);
 });

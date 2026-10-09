@@ -4,11 +4,13 @@ import { db, expensePayments, wgMembers } from '@/core/db';
 import { logApiError } from '@/core/infra/observability';
 import { getPayPalOrder } from '@/core/infra/paypal';
 import { formatEuroCents } from '@/core/utils/money';
-import { and, eq, lt } from 'drizzle-orm';
+import { and, asc, eq, lt } from 'drizzle-orm';
 import { parsePayPalAmountCents, terminalPayPalCaptureOutcome } from '../paypal-settlement';
 import { withExpensePaymentLock } from './expense-payments';
 
 const STALE_CAPTURE_MS = 15 * 60 * 1000;
+/** Grace after the order expired before an unapproved `capturing` row is given up. */
+const ABANDONED_BUFFER_MS = 60 * 60 * 1000;
 
 /**
  * Resolves stuck `capturing` payments whose payer never finished the flow.
@@ -26,6 +28,7 @@ export async function reconcileStaleCapturingPayments(
 				lt(expensePayments.createdAt, new Date(now.getTime() - STALE_CAPTURE_MS)),
 			),
 		)
+		.orderBy(asc(expensePayments.createdAt))
 		.limit(20);
 	const result = { completed: 0, failed: 0, pending: 0 };
 
@@ -45,12 +48,19 @@ export async function reconcileStaleCapturingPayments(
 			continue;
 		}
 
+		// An order nobody approved can never complete; without this it blocks the WG forever.
+		const abandoned = payment.expiresAt.getTime() + ABANDONED_BUFFER_MS < now.getTime();
+
 		let order: Awaited<ReturnType<typeof getPayPalOrder>>;
 		try {
 			order = await getPayPalOrder(payment.providerOrderId, payment.payeeMerchantId);
 		} catch (err) {
 			logApiError('[paypal reconcile] order lookup failed', err);
-			result.pending += 1;
+			if (abandoned && err instanceof Error && err.message.startsWith('paypal_api_404')) {
+				if (await finish('failed')) result.failed += 1;
+			} else {
+				result.pending += 1;
+			}
 			continue;
 		}
 
@@ -72,10 +82,11 @@ export async function reconcileStaleCapturingPayments(
 
 		if (order.status !== 'COMPLETED' || !capture) {
 			if (
-				terminalPayPalCaptureOutcome(
+				(terminalPayPalCaptureOutcome(
 					order.status,
 					captures.map((item) => item.status),
-				) &&
+				) ||
+					(abandoned && !captures.some((item) => item.status === 'PENDING'))) &&
 				(await finish('failed'))
 			) {
 				result.failed += 1;

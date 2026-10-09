@@ -505,6 +505,7 @@ test.describe('date integrity ui', () => {
 			allDay: true,
 			location: null,
 			recurrence: null,
+			createdByMemberId: FIXTURE_WG.memberId,
 		};
 		let saved: unknown;
 		await page.route(`**/api/wg/${SHARE_CODE}/events*`, (route) =>

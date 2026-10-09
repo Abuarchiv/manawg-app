@@ -237,6 +237,32 @@ describe('issue swarm routes', () => {
 		);
 	});
 
+	test('CSV writes all-day events as a plain date, not a Berlin clock time', () => {
+		assert.equal(
+			toCsv([{ startsAt: '2026-07-05T00:00:00.000Z', allDay: true }], ['startsAt', 'allDay']),
+			'\uFEFFstartsAt;allDay\n2026-07-05;true',
+		);
+	});
+
+	test('CSV writes Berlin local time and readable splits', () => {
+		assert.equal(
+			toCsv(
+				[
+					{
+						occurredAt: '2026-03-29T22:00:00.000Z',
+						note: '2026-03-29T22:00:00.000Z',
+						splits: [
+							{ debtor: 'Anna', amountCents: 1234 },
+							{ debtor: 'Ben', amountCents: 500 },
+						],
+					},
+				],
+				['occurredAt', 'note', 'splits'],
+			),
+			'\uFEFFoccurredAt;note;splits\n2026-03-30 00:00;2026-03-29T22:00:00.000Z;"Anna: 12,34; Ben: 5,00"',
+		);
+	});
+
 	test('presigned uploads reject path traversal keys before configuration lookup', async () => {
 		await assert.rejects(createPresignedUpload('../outside.png', 'image/png', 1), {
 			message: 'Invalid S3 key',

@@ -14,7 +14,7 @@ export interface SettlementPreview {
 	netCents: number;
 	settleableCents: number;
 	remainingCents: number;
-	splits: Array<{ id: string; expenseId: string; amountCents: number }>;
+	splits: Array<{ id: string; expenseId: string; amountCents: number; offset?: boolean }>;
 	reason?: string;
 }
 
@@ -89,7 +89,11 @@ export function useDebtSettlement({
 				currency: preview.currency,
 				netCents: preview.netCents,
 				settleableCents: preview.settleableCents,
-				splits: preview.splits.map(({ id, amountCents }) => ({ id, amountCents })),
+				splits: preview.splits.map(({ id, amountCents, offset }) => ({
+					id,
+					amountCents,
+					offset: offset === true,
+				})),
 			},
 		};
 		const fingerprint = JSON.stringify(body);

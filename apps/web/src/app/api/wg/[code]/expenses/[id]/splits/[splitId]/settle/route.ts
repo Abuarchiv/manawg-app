@@ -19,6 +19,7 @@ import {
 	loadCompletedExpensePayments,
 	withExpensePaymentLock,
 } from '@/features/expenses/server/expense-payments';
+import { notifySettlement } from '@/features/expenses/server/settle-notify';
 import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 
@@ -210,6 +211,16 @@ export const POST = withWgRoute<{ id: string; splitId: string }>(
 				paidByMemberId: current.paidByMemberId,
 			},
 		});
+		if (settled) {
+			await notifySettlement({
+				wg: auth.wg,
+				actor: auth.member,
+				otherMemberId: isDebtor ? current.paidByMemberId : current.debtorMemberId,
+				amountCents: current.amountCents,
+				currency: current.currency,
+				direction: isDebtor ? 'paid' : 'received',
+			});
+		}
 
 		return NextResponse.json({ split: updated });
 	},

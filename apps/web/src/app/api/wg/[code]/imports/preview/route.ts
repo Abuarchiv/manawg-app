@@ -11,6 +11,7 @@ import {
 } from '@/features/expenses/import-body';
 import {
 	type ParsedExpense,
+	type RejectedRow,
 	UnsupportedCurrencyError,
 	collectUniqueNames,
 	findMappingConflicts,
@@ -51,12 +52,13 @@ export const POST = withWgRoute('imports/preview', async (req, { code }) => {
 	if (!limited.success) return tooMany();
 
 	let parsedExpenses: ParsedExpense[];
+	const rejected: RejectedRow[] = [];
 	try {
 		parsedExpenses =
 			source === 'splitwise_csv'
-				? parseSplitwiseCsv(payload)
+				? parseSplitwiseCsv(payload, rejected)
 				: source === 'splid_csv'
-					? parseSplidCsv(payload)
+					? parseSplidCsv(payload, rejected)
 					: parseOcrText(payload).expenses;
 	} catch (parseErr) {
 		if (parseErr instanceof UnsupportedCurrencyError) {
@@ -79,10 +81,13 @@ export const POST = withWgRoute('imports/preview', async (req, { code }) => {
 	const activeMemberIds = new Set(members.map((member) => member.id));
 
 	const names = collectUniqueNames(parsedExpenses);
-	const autoMatched = matchMembers(names, members);
+	const fuzzyNames = new Set<string>();
+	const autoMatched = matchMembers(names, members, fuzzyNames);
 	const mapping: Record<string, string | null> = {};
 	for (const name of names) {
 		const candidate = memberMapping?.[name] ?? autoMatched.get(name);
+		// A mapping the member chose explicitly is not a guess.
+		if (memberMapping?.[name]) fuzzyNames.delete(name);
 		// An unknown or moved-out member id becomes a conflict for that name.
 		mapping[name] = candidate && activeMemberIds.has(candidate) ? candidate : null;
 	}
@@ -94,5 +99,7 @@ export const POST = withWgRoute('imports/preview', async (req, { code }) => {
 		memberMapping: mapping,
 		conflicts,
 		members,
+		rejected,
+		fuzzyNames: Array.from(fuzzyNames),
 	});
 });

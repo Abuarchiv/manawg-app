@@ -181,7 +181,11 @@ export async function makeQueueModule({
 	const instance = `?instance=${instances}`;
 	const mockInstance = (specifier: string, namedExports: Record<string, unknown>) =>
 		mock.module(`${specifier}${instance}`, { namedExports });
-	mockInstance('@/core/infra/api-client', { apiFetch });
+	mockInstance('@/core/infra/api-client', {
+		apiFetch,
+		REQUEST_TIMEOUT_MS: 15_000,
+		anySignal: (signals: AbortSignal[]) => AbortSignal.any(signals),
+	});
 	mockInstance('@/core/utils/browser', { safeLocalStorage: () => storage });
 	mockInstance('@/core/auth/identity', { getIdentity: identity });
 	mockInstance('@/core/offline/offline-queue', defaultQueue);

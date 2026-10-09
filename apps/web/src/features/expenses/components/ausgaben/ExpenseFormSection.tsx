@@ -3,28 +3,30 @@
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field';
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { FieldGroup } from '@/components/ui/field';
 import { Separator } from '@/components/ui/separator';
 import { Spinner } from '@/components/ui/spinner';
 import { type ActionNotice, ActionNoticeBanner } from '@/components/wg/ActionNoticeBanner';
 import type { Member } from '@/components/wg/WgContextProvider';
+import type { ReopenedShare } from '@/features/expenses/expense-split-input';
 import { cn } from '@/shared/lib/cn';
 import { useKeyboardOpen } from '@/shared/lib/use-keyboard-open';
 import { ArrowLeft } from 'lucide-react';
 import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
 import { CloseDraftDialog, ReplaceDraftDialog } from './ExpenseDraftDialogs';
 import { ExpenseExtras } from './ExpenseExtras';
+import { ExpensePayerDateFields } from './ExpensePayerDateFields';
 import { ExpenseSplitFieldset } from './ExpenseSplitFieldset';
 import { TextField } from './TextField';
 import { DESCRIPTION_MAX } from './constants';
 import type { SplitMode } from './expense-form-draft';
 import type { RecurringExpense } from './expense-types';
 import { useExpenseFormDirty } from './use-expense-form-dirty';
+import type { ExpenseFormExtras } from './use-expense-form-extras';
 
 const EXPENSE_DESCRIPTION_FIELD_ID = 'expense-description';
 
-export type ExpenseFormField = 'description' | 'amount' | 'splits';
+export type ExpenseFormField = 'description' | 'amount' | 'date' | 'splits';
 export type ExpenseFormFieldErrors = Partial<Record<ExpenseFormField, string>>;
 
 interface ExpenseFormSectionProps {
@@ -44,6 +46,8 @@ interface ExpenseFormSectionProps {
 	setRecurringIntervalMonths: Dispatch<SetStateAction<number>>;
 	manualSplits: Record<string, string>;
 	setManualSplits: Dispatch<SetStateAction<Record<string, string>>>;
+	extras: ExpenseFormExtras;
+	reopenedShares: ReopenedShare[];
 	imageUrl: string | null;
 	setImageUrl: Dispatch<SetStateAction<string | null>>;
 	shareCode: string;
@@ -95,6 +99,8 @@ export function ExpenseFormSection({
 	setRecurringIntervalMonths,
 	manualSplits,
 	setManualSplits,
+	extras,
+	reopenedShares,
 	imageUrl,
 	setImageUrl,
 	shareCode,
@@ -147,6 +153,7 @@ export function ExpenseFormSection({
 		splitMode,
 		manualSplits,
 		imageUrl,
+		...extras.draftFields,
 		recurringIntervalMonths,
 		identityMemberId,
 		formModeKey,
@@ -263,28 +270,18 @@ export function ExpenseFormSection({
 									error={fieldErrors.amount}
 									enterKeyHint="next"
 								/>
-								<Field data-disabled={formSaving}>
-									<FieldLabel htmlFor="paid-by">Bezahlt von</FieldLabel>
-									<NativeSelect
-										id="paid-by"
-										value={paidByMemberId}
-										onChange={(event) => setPaidByMemberId(event.target.value)}
-										disabled={formSaving || isEditingExpense}
-										className="w-full [&_select]:h-auto [&_select]:py-[0.5625rem] [&_select]:text-base"
-									>
-										{payerOptions.map((member) => (
-											<NativeSelectOption key={member.id} value={member.id}>
-												{member.name}
-												{member.id === identityMemberId ? ' (du)' : ''}
-											</NativeSelectOption>
-										))}
-									</NativeSelect>
-									{isEditingExpense && (
-										<FieldDescription>
-											Die zahlende Person kann bei einer bestehenden Ausgabe nicht geändert werden.
-										</FieldDescription>
-									)}
-								</Field>
+								<ExpensePayerDateFields
+									paidByMemberId={paidByMemberId}
+									setPaidByMemberId={setPaidByMemberId}
+									payerOptions={payerOptions}
+									identityMemberId={identityMemberId}
+									isEditingExpense={isEditingExpense}
+									occurredOn={extras.occurredOn}
+									setOccurredOn={extras.setOccurredOn}
+									dateError={fieldErrors.date}
+									onClearDateError={() => onClearFieldError('date')}
+									formSaving={formSaving}
+								/>
 								<ExpenseSplitFieldset
 									members={members}
 									splitCandidates={splitCandidates}
@@ -292,6 +289,9 @@ export function ExpenseFormSection({
 									setSplitMode={setSplitMode}
 									manualSplits={manualSplits}
 									setManualSplits={setManualSplits}
+									participantIds={extras.participantIds}
+									setParticipantIds={extras.setParticipantIds}
+									reopenedShares={reopenedShares}
 									splitsError={fieldErrors.splits}
 									onClearSplitsError={() => onClearFieldError('splits')}
 									amountStr={amountStr}

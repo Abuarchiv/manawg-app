@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { buildSplitsFromForm, isEqualExpenseSplit, remainderCandidates } = await import(
-	'./expense-split-input'
-);
+const {
+	buildSplitsFromForm,
+	equalSplitParticipants,
+	isEqualExpenseSplit,
+	remainderCandidates,
+	settledSharesAffectedByEdit,
+} = await import('./expense-split-input');
 const { distributeRemainderCents } = await import('./components/ausgaben/manual-split-distribute');
 
 const members = [
@@ -144,5 +148,85 @@ test('editing an equal split re-splits when the amount or the debtors change', (
 			['c', 250],
 			['d', 250],
 		],
+	);
+});
+
+test('an equal split can be limited to chosen participants', () => {
+	const result = buildSplitsFromForm({
+		splitMode: 'equal',
+		members,
+		manualSplits: {},
+		amountCents: 1001,
+		rotationOffset: 0,
+		participantIds: ['b', 'c'],
+	});
+	assert.ok(result.ok);
+	assert.deepEqual(result.splits.map((s) => s.debtorMemberId).sort(), ['b', 'c']);
+	assert.equal(
+		result.splits.reduce((sum, s) => sum + s.amountCents, 0),
+		1001,
+	);
+});
+
+test('an equal split without any usable participant is refused', () => {
+	for (const participantIds of [[], ['gone']]) {
+		const result = buildSplitsFromForm({
+			splitMode: 'equal',
+			members,
+			manualSplits: {},
+			amountCents: 1000,
+			rotationOffset: 0,
+			participantIds,
+		});
+		assert.deepEqual(result, { ok: false, reason: 'no_members' });
+	}
+});
+
+test('a saved equal split among a subset reopens with that subset', () => {
+	const subset = [
+		{ debtorMemberId: 'a', amountCents: 500 },
+		{ debtorMemberId: 'c', amountCents: 500 },
+	];
+	assert.deepEqual(equalSplitParticipants(1000, subset, members), ['a', 'c']);
+	assert.equal(
+		equalSplitParticipants(
+			1000,
+			[
+				{ debtorMemberId: 'a', amountCents: 600 },
+				{ debtorMemberId: 'c', amountCents: 400 },
+			],
+			members,
+		),
+		null,
+	);
+	assert.equal(
+		equalSplitParticipants(1000, subset, [
+			{ id: 'a', active: true },
+			{ id: 'c', active: false },
+		]),
+		null,
+	);
+});
+
+test('edits that reopen paid shares are reported, unchanged and own shares are not', () => {
+	const paid = '2026-01-01T00:00:00.000Z';
+	const previous = [
+		{ debtorMemberId: 'payer', amountCents: 500, settledAt: paid },
+		{ debtorMemberId: 'b', amountCents: 500, settledAt: paid },
+		{ debtorMemberId: 'c', amountCents: 500, settledAt: paid },
+		{ debtorMemberId: 'd', amountCents: 500, settledAt: null },
+	];
+	const next = [
+		{ debtorMemberId: 'payer', amountCents: 600 },
+		{ debtorMemberId: 'b', amountCents: 600 },
+		{ debtorMemberId: 'c', amountCents: 500 },
+		{ debtorMemberId: 'd', amountCents: 700 },
+	];
+	assert.deepEqual(settledSharesAffectedByEdit(previous, next, 'payer'), [
+		{ debtorMemberId: 'b', previousCents: 500, nextCents: 600 },
+	]);
+	assert.deepEqual(
+		settledSharesAffectedByEdit(previous, [{ debtorMemberId: 'c', amountCents: 500 }], 'payer'),
+		[{ debtorMemberId: 'b', previousCents: 500, nextCents: null }],
 	);
 });

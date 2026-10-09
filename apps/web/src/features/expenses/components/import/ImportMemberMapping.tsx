@@ -1,5 +1,6 @@
 'use client';
 
+import { Badge } from '@/components/ui/badge';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 
@@ -14,6 +15,8 @@ interface Props {
 	members: readonly MemberOption[];
 	onChange: (name: string, memberId: string | null) => void;
 	showErrors?: boolean;
+	/** Names the server matched by similarity only. */
+	suggestedNames?: readonly string[];
 }
 
 export function ImportMemberMapping({
@@ -22,6 +25,7 @@ export function ImportMemberMapping({
 	members,
 	onChange,
 	showErrors = false,
+	suggestedNames = [],
 }: Props) {
 	if (names.length === 0)
 		return <p className="text-sm text-muted-foreground">Keine Namen erkannt.</p>;
@@ -34,7 +38,12 @@ export function ImportMemberMapping({
 				const invalid = showErrors && !value;
 				return (
 					<Field key={name} data-invalid={invalid || undefined}>
-						<FieldLabel htmlFor={`import-map-${index}`}>{name}</FieldLabel>
+						<FieldLabel htmlFor={`import-map-${index}`}>
+							{name}
+							{value && suggestedNames.includes(name) && (
+								<Badge variant="secondary">Vorschlag, bitte prüfen</Badge>
+							)}
+						</FieldLabel>
 						<NativeSelect
 							id={`import-map-${index}`}
 							value={value}

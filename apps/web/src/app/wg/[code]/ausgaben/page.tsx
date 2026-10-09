@@ -45,7 +45,7 @@ function usePreloadExpenseForm(): void {
 export default function AusgabenPage() {
 	usePreloadExpenseForm();
 	const page = useAusgabenPage();
-	const { wg, members, identity, data, form, support, recurring, submit, notify } = page;
+	const { wg, members, identity, isAdmin, data, form, support, recurring, submit, notify } = page;
 	const { expenses, recurringExpenses, initialLoading, refreshing, loadError } = data;
 	const { showForm, setShowForm, editingExpense, editingRecurringExpense } = form;
 	const isEditingQueuedRecurring = form.queueEditType === 'recurring.create';
@@ -134,6 +134,8 @@ export default function AusgabenPage() {
 					setRecurringIntervalMonths={form.setRecurringIntervalMonths}
 					manualSplits={form.manualSplits}
 					setManualSplits={form.setManualSplits}
+					extras={form.extras}
+					reopenedShares={page.reopenedShares}
 					imageUrl={form.imageUrl}
 					setImageUrl={form.setImageUrl}
 					shareCode={wg.shareCode}
@@ -223,6 +225,8 @@ export default function AusgabenPage() {
 					creatingRecurringId={recurring.creatingRecurringId}
 					isPending={page.pending.isPending}
 					memberName={page.memberName}
+					currentMemberId={identity.memberId}
+					isAdmin={isAdmin}
 					onCreateFromTemplate={(item) => void recurring.createFromRecurringTemplate(item)}
 					onEditTemplate={form.startRecurringEdit}
 					onDeleteTemplate={(item) => void recurring.deleteRecurringTemplate(item)}
@@ -231,6 +235,11 @@ export default function AusgabenPage() {
 			)}
 			<ExpenseHistory
 				expenseCount={expenses.length}
+				shownCount={page.shownExpenseCount}
+				query={page.searchQuery}
+				onQueryChange={page.setSearchQuery}
+				scope={page.scope}
+				onScopeChange={page.setScope}
 				weeks={page.expenseWeeks}
 				showSkeleton={page.showSkeleton}
 				initialLoading={initialLoading}

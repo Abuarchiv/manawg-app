@@ -66,7 +66,6 @@ export function useRecurringExpenseActions(
 	}
 
 	return {
-		advanceRecurringTemplate: booking.advanceRecurringTemplate,
 		saveRecurringTemplate: templateSave.saveRecurringTemplate,
 		createFromRecurringTemplate: booking.createFromRecurringTemplate,
 		deleteRecurringTemplate,

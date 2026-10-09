@@ -25,6 +25,7 @@ const expensePayments = {
 	toMemberId: 'payment.toMemberId',
 	payeeMerchantId: 'payment.payeeMerchantId',
 	status: 'payment.status',
+	amountCents: 'payment.amountCents',
 	expiresAt: 'payment.expiresAt',
 };
 const wgMembers = {
@@ -104,6 +105,12 @@ mock.module('@/core/infra/paypal-onboarding', {
 });
 mock.module('@/core/rate-limit', {
 	namedExports: { checkRateLimit: async () => ({ success: true }), wgWriteLimiter: {} },
+});
+mock.module('@/features/expenses/server/settle-notify', {
+	namedExports: {
+		notifySettlement: async () => undefined,
+		announcePayPalSettlement: async () => undefined,
+	},
 });
 mock.module('@/features/expenses/server/open-expenses', {
 	namedExports: { loadOpenExpenses: () => active.loadOpenExpenses() },
@@ -712,4 +719,35 @@ test('a new capture is refused when its direct debt was replaced by an equal sim
 	assert.equal(fixture.payment.status, 'failed');
 	assert.deepEqual(fixture.captureOrderIds, []);
 	assert.deepEqual(fixture.readOrderIds, []);
+});
+
+test('an order the payer never approved is released instead of blocking the WG', async () => {
+	const fixture = createPayPalFixture({
+		captureResponses: [new Error('ORDER_NOT_APPROVED')],
+		orderResponses: [{ id: providerOrderId, status: 'CREATED' }],
+	});
+	const response = await fixture.capture();
+	assert.equal(response.status, 202);
+	assert.partialDeepStrictEqual(await response.json(), { status: 'PENDING' });
+	assert.equal(fixture.payment.status, 'created');
+});
+
+test('a stored order with an outdated amount is replaced by a fresh one', async () => {
+	const stale = createPayPalFixture({ initialAmountCents: 900, createdOrderIds: ['fresh-order'] });
+	const replaced = await stale.createOrder();
+	assert.equal(replaced.status, 200);
+	assert.partialDeepStrictEqual(await replaced.json(), {
+		orderId: 'fresh-order',
+		amountCents: 1200,
+	});
+	assert.equal(stale.createdOrderInputs[0]?.amountCents, 1200);
+	assert.ok(stale.statusWrites.includes('failed'));
+
+	const same = createPayPalFixture();
+	const reused = await same.createOrder();
+	assert.partialDeepStrictEqual(await reused.json(), {
+		orderId: providerOrderId,
+		amountCents: 1200,
+	});
+	assert.equal(same.createdOrderInputs.length, 0);
 });

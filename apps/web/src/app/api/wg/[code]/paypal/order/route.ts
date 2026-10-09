@@ -187,15 +187,21 @@ export const POST = withWgRoute('paypal order POST', async (req, { code }) => {
 						fromName: memberById.get(parsed.data.fromMemberId)?.name ?? 'Mitglied',
 					};
 				}
-				return {
-					kind: 'response' as const,
-					response: NextResponse.json({
-						orderId: current.orderId,
-						amountCents: current.amountCents,
-					}),
-				};
-			}
-			if (current) {
+				if (current.amountCents === debt.cents) {
+					return {
+						kind: 'response' as const,
+						response: NextResponse.json({
+							orderId: current.orderId,
+							amountCents: current.amountCents,
+						}),
+					};
+				}
+				// The debt changed since this order was created; PayPal would show a stale amount.
+				await tx
+					.update(expensePayments)
+					.set({ status: 'failed' })
+					.where(and(eq(expensePayments.id, current.id), eq(expensePayments.status, 'created')));
+			} else if (current) {
 				const expired = await tx
 					.update(expensePayments)
 					.set({ status: 'failed' })

@@ -2,15 +2,26 @@
 
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Empty, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { ExpenseRow } from '@/features/expenses/components/ausgaben/ExpenseRow';
 import { ExpensesSkeleton } from '@/features/expenses/components/ausgaben/ExpensesSkeleton';
 import type { Expense, ExpenseSplit } from '@/features/expenses/components/ausgaben/expense-types';
+import type { ExpenseScope } from '@/features/expenses/expense-filter';
 import { cn } from '@/shared/lib/cn';
 import { FileInput } from 'lucide-react';
 import Link from 'next/link';
 
+/** Below this many expenses the list is short enough to scan without a filter. */
+const FILTER_MIN_EXPENSES = 6;
+
 interface ExpenseHistoryProps {
 	expenseCount: number;
+	shownCount: number;
+	query: string;
+	onQueryChange: (query: string) => void;
+	scope: ExpenseScope;
+	onScopeChange: (scope: ExpenseScope) => void;
 	weeks: Array<{ label: string; items: Expense[] }>;
 	showSkeleton: boolean;
 	initialLoading: boolean;
@@ -31,6 +42,11 @@ interface ExpenseHistoryProps {
 
 export function ExpenseHistory({
 	expenseCount,
+	shownCount,
+	query,
+	onQueryChange,
+	scope,
+	onScopeChange,
 	weeks,
 	showSkeleton,
 	initialLoading,
@@ -61,6 +77,46 @@ export function ExpenseHistory({
 				</Empty>
 			) : (
 				<div className="flex flex-col gap-4">
+					{expenseCount >= FILTER_MIN_EXPENSES && (
+						<div className="flex flex-col gap-2">
+							<Input
+								type="search"
+								value={query}
+								onChange={(event) => onQueryChange(event.target.value)}
+								placeholder="Ausgaben suchen"
+								aria-label="Ausgaben suchen"
+								enterKeyHint="search"
+								className="text-base"
+							/>
+							<ToggleGroup
+								variant="segmented"
+								value={[scope]}
+								onValueChange={(values) => {
+									const value = values[0];
+									if (value === 'all' || value === 'paid' || value === 'involved') {
+										onScopeChange(value);
+									}
+								}}
+								className="w-full"
+								aria-label="Ausgaben filtern"
+							>
+								<ToggleGroupItem value="all" className="flex-1">
+									Alle
+								</ToggleGroupItem>
+								<ToggleGroupItem value="paid" className="flex-1">
+									Von mir bezahlt
+								</ToggleGroupItem>
+								<ToggleGroupItem value="involved" className="flex-1">
+									Ich bin beteiligt
+								</ToggleGroupItem>
+							</ToggleGroup>
+						</div>
+					)}
+					{shownCount === 0 && (
+						<output className="block py-6 text-center text-sm text-muted-foreground">
+							Keine passenden Ausgaben gefunden.
+						</output>
+					)}
 					{weeks.map((week) => (
 						<section key={week.label} aria-label={week.label} className="flex flex-col gap-1.5">
 							<h3 className="px-0 text-[12px] font-medium text-muted-foreground">{week.label}</h3>

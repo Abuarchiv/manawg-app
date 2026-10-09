@@ -1,5 +1,6 @@
 'use client';
 
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
 	Field,
 	FieldDescription,
@@ -19,8 +20,9 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import type { Member } from '@/components/wg/WgContextProvider';
 import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
 import { formatEuroCents } from '@/core/utils/money';
-import { remainderCandidates } from '@/features/expenses/expense-split-input';
+import { type ReopenedShare, remainderCandidates } from '@/features/expenses/expense-split-input';
 import type { Dispatch, SetStateAction } from 'react';
+import { EqualParticipantsPicker } from './EqualParticipantsPicker';
 import { ManualSplitSummary } from './ManualSplitSummary';
 import { SplitReview } from './SplitReview';
 import type { SplitMode } from './expense-form-draft';
@@ -32,6 +34,11 @@ interface ExpenseSplitFieldsetProps {
 	setSplitMode: Dispatch<SetStateAction<SplitMode>>;
 	manualSplits: Record<string, string>;
 	setManualSplits: Dispatch<SetStateAction<Record<string, string>>>;
+	/** Who shares an equal split; null means every active member. */
+	participantIds: string[] | null;
+	setParticipantIds: (ids: string[] | null) => void;
+	/** Paid shares the current edit would reopen. */
+	reopenedShares: ReopenedShare[];
 	splitsError: string | undefined;
 	onClearSplitsError: () => void;
 	amountStr: string;
@@ -53,6 +60,9 @@ export function ExpenseSplitFieldset({
 	setSplitMode,
 	manualSplits,
 	setManualSplits,
+	participantIds,
+	setParticipantIds,
+	reopenedShares,
 	splitsError,
 	onClearSplitsError,
 	amountStr,
@@ -68,6 +78,7 @@ export function ExpenseSplitFieldset({
 	const historicalShareHintId = `${splitErrorId}-inactive-share`;
 	const remainderMembers = remainderCandidates(members);
 	const firstSplitMemberId = splitCandidates[0]?.id;
+	const memberName = (id: string) => members.find((member) => member.id === id)?.name ?? '?';
 	const splitErrorTargetsMode =
 		Boolean(splitsError) && (splitMode !== 'manual' || firstSplitMemberId === undefined);
 	return (
@@ -178,12 +189,40 @@ export function ExpenseSplitFieldset({
 				</FieldGroup>
 			)}
 			{splitMode !== 'manual' && (
+				<EqualParticipantsPicker
+					candidates={splitCandidates}
+					participantIds={participantIds}
+					onChange={(ids) => {
+						onClearSplitsError();
+						setParticipantIds(ids);
+					}}
+					idPrefix="participant"
+					disabled={formSaving}
+				/>
+			)}
+			{splitMode !== 'manual' && (
 				<SplitReview
 					members={splitCandidates}
 					splits={previewSplits}
 					paidByMemberId={paidByMemberId}
 					currency={currency}
 				/>
+			)}
+			{reopenedShares.length > 0 && (
+				<Alert>
+					<AlertDescription className="flex flex-col gap-1">
+						{reopenedShares.map((share) => (
+							<span key={share.debtorMemberId}>
+								Der Anteil von {memberName(share.debtorMemberId)} (
+								{formatEuroCents(share.previousCents, currency)}) ist schon als bezahlt vermerkt und
+								wird wegen der Änderung wieder geöffnet
+								{share.nextCents === null
+									? ' (entfällt).'
+									: ` (neu ${formatEuroCents(share.nextCents, currency)}).`}
+							</span>
+						))}
+					</AlertDescription>
+				</Alert>
 			)}
 		</FieldSet>
 	);

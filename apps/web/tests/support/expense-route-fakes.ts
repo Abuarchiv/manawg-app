@@ -158,6 +158,12 @@ export function installWgRouteMocks(): RouteEnv {
 	};
 	mock.module('drizzle-orm', { namedExports: predicateOperators });
 	mock.module('@/core/audit', { namedExports: { recordAuditEvent: async () => undefined } });
+	mock.module('@/features/expenses/server/settle-notify', {
+		namedExports: {
+			notifySettlement: async () => undefined,
+			announcePayPalSettlement: async () => undefined,
+		},
+	});
 	mock.module('@/core/db', { namedExports: { ...tables, db: delegate(() => env.db) } });
 	mock.module('@/core/db/private-image-deletions', {
 		namedExports: {

@@ -9,6 +9,7 @@ const tables: Record<string, object> = Object.fromEntries(
 		'announcementComments',
 		'announcements',
 		'auditEvents',
+		'choreCompletions',
 		'chores',
 		'expensePayments',
 		'expenseSplits',
@@ -18,6 +19,7 @@ const tables: Record<string, object> = Object.fromEntries(
 		'shoppingItems',
 		'wgChatMessages',
 		'wgEvents',
+		'wgInventoryItems',
 		'wgMembers',
 	].map((name) => [
 		name,
@@ -270,6 +272,26 @@ test('new sections are part of the full dump and export CSV headers', async () =
 					createdAt: new Date('2026-03-02T08:00:00Z'),
 				},
 			],
+			wgInventoryItems: [
+				{
+					id: 'rice',
+					name: 'Reis',
+					quantity: 2,
+					unit: 'Packung',
+					threshold: 1,
+					category: 'lebensmittel',
+					lastDecrementedAt: null,
+					createdAt: new Date('2026-03-01T08:00:00Z'),
+				},
+			],
+			choreCompletions: [
+				{
+					id: 'done',
+					choreTitle: 'Bad',
+					completedByMemberId: 'member',
+					completedAt: new Date('2026-03-03T08:00:00Z'),
+				},
+			],
 			wgEvents: [
 				{
 					id: 'event',
@@ -304,13 +326,22 @@ test('new sections are part of the full dump and export CSV headers', async () =
 		},
 	]);
 	assert.equal(sections.events?.[0]?.createdByName, '');
+	assert.equal(sections.inventory?.[0]?.name, 'Reis');
+	assert.deepEqual(sections.choreCompletions, [
+		{
+			id: 'done',
+			choreTitle: 'Bad',
+			completedByName: 'Alice',
+			completedAt: '2026-03-03T08:00:00.000Z',
+		},
+	]);
 
 	const expected = {
 		chatMessages: 'id;createdAt;senderName;kind;body;imageUrl;editedAt;deletedAt;replyToMessageId',
 		announcementComments:
-			'id;announcementId;authorName;content;createdAt\ncomment;post;Alice;"\'=HYPERLINK(""x"")";2026-03-02T08:00:00.000Z',
+			'id;announcementId;authorName;content;createdAt\ncomment;post;Alice;"\'=HYPERLINK(""x"")";2026-03-02 09:00',
 		events:
-			'id;title;description;startsAt;endsAt;allDay;location;recurrence;createdByName;createdAt\nevent;Putzparty;;2026-03-05T18:00:00.000Z;;false;Küche;;;2026-03-01T08:00:00.000Z',
+			'id;title;description;startsAt;endsAt;allDay;location;recurrence;createdByName;createdAt\nevent;Putzparty;;2026-03-05 19:00;;false;Küche;;;2026-03-01 09:00',
 	};
 	for (const [section, csv] of Object.entries(expected)) {
 		const csvResponse = await route.get(`?format=csv&section=${section}`);
@@ -342,6 +373,6 @@ test('the counts summary counts rows per section instead of downloading them', a
 	assert.equal(counts.chatMessages, 3);
 	assert.equal(counts.members, 2);
 	assert.equal(counts.expenses, 0);
-	assert.equal(Object.keys(counts).length, 12);
+	assert.equal(Object.keys(counts).length, 14);
 	assert.deepEqual(route.limits, []);
 });

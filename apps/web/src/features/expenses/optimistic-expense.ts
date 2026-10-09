@@ -13,6 +13,7 @@ export function buildOptimisticExpense({
 	paidByMemberId,
 	imageUrl,
 	splits,
+	occurredAt,
 	previous,
 }: {
 	id: string;
@@ -21,6 +22,8 @@ export function buildOptimisticExpense({
 	paidByMemberId: string;
 	imageUrl: string | null;
 	splits: DebtorShare[];
+	/** The day chosen in the form; omitted keeps the previous date or means now. */
+	occurredAt?: string;
 	previous?: Expense;
 }): Expense {
 	const now = new Date().toISOString();
@@ -31,7 +34,7 @@ export function buildOptimisticExpense({
 		currency: previous?.currency ?? 'EUR',
 		description,
 		imageUrl,
-		occurredAt: previous?.occurredAt ?? now,
+		occurredAt: occurredAt ?? previous?.occurredAt ?? now,
 		createdAt: previous?.createdAt ?? now,
 		updatedAt: now,
 		splits: splits.map((split, index) => {
@@ -46,4 +49,10 @@ export function buildOptimisticExpense({
 			};
 		}),
 	};
+}
+
+/** The list is shown newest first; a stable sort keeps entries of the same moment in place. */
+export function sortExpensesNewestFirst(expenses: Expense[]): Expense[] {
+	const time = (expense: Expense) => Date.parse(expense.occurredAt) || 0;
+	return [...expenses].sort((a, b) => time(b) - time(a));
 }

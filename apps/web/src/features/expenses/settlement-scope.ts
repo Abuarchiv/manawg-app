@@ -34,7 +34,8 @@ export interface SettlementPreview {
 	netCents: number;
 	settleableCents: number;
 	remainingCents: number;
-	splits: Array<{ id: string; expenseId: string; amountCents: number }>;
+	/** `offset` marks a counter-claim (to -> from) that is cancelled together with the debt. */
+	splits: Array<{ id: string; expenseId: string; amountCents: number; offset?: boolean }>;
 	reason?: 'no_direct_splits';
 }
 
@@ -42,7 +43,7 @@ export interface SettlementReview {
 	currency?: string;
 	netCents: number;
 	settleableCents: number;
-	splits: Array<{ id: string; amountCents: number }>;
+	splits: Array<{ id: string; amountCents: number; offset?: boolean }>;
 }
 
 export interface SettlementConfirmation {
@@ -62,6 +63,7 @@ const settlementSplitSchema = z
 	.object({
 		id: z.string().uuid(),
 		amountCents: centsSchema,
+		offset: z.boolean().default(false),
 	})
 	.strict();
 
@@ -85,7 +87,7 @@ const settlementExpectedSchema = z
 				});
 			}
 			ids.add(split.id);
-			total += split.amountCents;
+			total += split.offset ? -split.amountCents : split.amountCents;
 		}
 		if (value.settleableCents > value.netCents || total !== value.settleableCents) {
 			ctx.addIssue({
@@ -142,7 +144,8 @@ export function settlementScopeMatches(
 	return review.splits.every(
 		(split, index) =>
 			split.id === actual.splits[index]?.id &&
-			split.amountCents === actual.splits[index]?.amountCents,
+			split.amountCents === actual.splits[index]?.amountCents &&
+			!!split.offset === !!actual.splits[index]?.offset,
 	);
 }
 
@@ -200,17 +203,57 @@ export function selectSettlementScope(
 			return diff !== 0 ? diff : a.id.localeCompare(b.id);
 		});
 
+	const inCurrency = orderedSplits.filter(
+		(split) =>
+			split.settledAt === null &&
+			split.amountCents > 0 &&
+			(split.currency ?? 'EUR').trim().toUpperCase() === normalizedCurrency,
+	);
 	const selected: SettlementPreview['splits'] = [];
 	let remainingCents = netCents;
-	for (const split of orderedSplits) {
+	for (const split of inCurrency) {
 		if (remainingCents <= 0 || selected.length >= MAX_SETTLEMENT_SPLITS) break;
 		if (split.debtorMemberId !== fromMemberId) continue;
 		if (split.paidByMemberId !== toMemberId) continue;
-		if ((split.currency ?? 'EUR').trim().toUpperCase() !== normalizedCurrency) continue;
-		if (split.settledAt !== null) continue;
-		if (split.amountCents <= 0 || split.amountCents > remainingCents) continue;
+		if (split.amountCents > remainingCents) continue;
 		selected.push({ id: split.id, expenseId: split.expenseId, amountCents: split.amountCents });
 		remainingCents -= split.amountCents;
+	}
+
+	// Mutual expenses: when no single split fits the netted amount, cancel both directions
+	// of the pair at once. Only valid while no payment sits beside the open splits.
+	const pair = inCurrency.filter(
+		(split) =>
+			(split.debtorMemberId === fromMemberId && split.paidByMemberId === toMemberId) ||
+			(split.debtorMemberId === toMemberId && split.paidByMemberId === fromMemberId),
+	);
+	const counterCents = pair
+		.filter((split) => split.debtorMemberId === toMemberId)
+		.reduce((sum, split) => sum + split.amountCents, 0);
+	const pairCents =
+		pair.reduce(
+			(sum, split) => sum + (split.debtorMemberId === fromMemberId ? split.amountCents : 0),
+			0,
+		) - counterCents;
+	if (
+		counterCents > 0 &&
+		pairCents > 0 &&
+		pairCents <= netCents &&
+		pairCents > netCents - remainingCents &&
+		pair.length <= MAX_SETTLEMENT_SPLITS
+	) {
+		return {
+			currency: normalizedCurrency,
+			netCents,
+			settleableCents: pairCents,
+			remainingCents: netCents - pairCents,
+			splits: pair.map((split) => ({
+				id: split.id,
+				expenseId: split.expenseId,
+				amountCents: split.amountCents,
+				...(split.debtorMemberId === toMemberId ? { offset: true } : {}),
+			})),
+		};
 	}
 
 	return {

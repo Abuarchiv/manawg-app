@@ -80,10 +80,15 @@ export function SettlementReviewDialog({
 											)}
 										</ItemTitle>
 										<ItemDescription className="line-clamp-none [overflow-wrap:break-word]">
-											{expense ? formatShortDate(expense.occurredAt) : 'Aktueller offener Anteil'}
+											{split.offset
+												? 'Gegenforderung, wird verrechnet'
+												: expense
+													? formatShortDate(expense.occurredAt)
+													: 'Aktueller offener Anteil'}
 										</ItemDescription>
 									</ItemContent>
 									<Badge variant="outline" className="font-mono tabular-nums">
+										{split.offset ? '−' : ''}
 										{formatEuroCents(split.amountCents, debt.currency)}
 									</Badge>
 								</Item>
@@ -107,8 +112,9 @@ export function SettlementReviewDialog({
 				{preview?.splits.length === 0 && (
 					<Alert>
 						<AlertDescription>
-							Keine direkt zuordenbaren Anteile. Es wird keine Zahlung eingetragen. Prüft die
-							ursprünglichen Ausgaben einzeln.
+							Dieser Betrag ergibt sich aus der Verrechnung über andere Mitglieder und kann nicht
+							direkt eingetragen werden. Es wird keine Zahlung eingetragen. Gleiche zuerst die
+							einzelnen Schulden mit den jeweiligen Mitgliedern aus.
 						</AlertDescription>
 					</Alert>
 				)}

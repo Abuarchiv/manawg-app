@@ -44,6 +44,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { formatEuroCents } from '@/core/utils/money';
 import { formatRelativeTime, formatShortDate, parseTimestamp } from '@/core/utils/time';
 import {
+	canBookRecurringTemplate,
+	canManageRecurringTemplate,
 	getRecurringExpenseHref,
 	wasRecurringExpenseAlreadyCreated,
 } from '@/features/expenses/recurring-expenses';
@@ -69,6 +71,8 @@ interface RecurringExpensesSectionProps {
 	onDeleteTemplate: (item: RecurringExpense) => void;
 	onPrepareNewExpense: () => void;
 	memberName: (id: string) => string;
+	currentMemberId: string;
+	isAdmin: boolean;
 }
 
 export function RecurringExpensesSection({
@@ -87,6 +91,8 @@ export function RecurringExpensesSection({
 	onDeleteTemplate,
 	onPrepareNewExpense,
 	memberName,
+	currentMemberId,
+	isAdmin,
 }: RecurringExpensesSectionProps): React.ReactElement {
 	const [open, setOpen] = useState(recurringFilterActive || recurringId !== null);
 	const [deleteCandidate, setDeleteCandidate] = useState<RecurringExpense | null>(null);
@@ -141,51 +147,66 @@ export function RecurringExpensesSection({
 									const nextDueAt = parseTimestamp(item.nextDueAt);
 									const due = !paused && nextDueAt !== null && nextDueAt <= Date.now();
 									const pending = recurringActionPending || isPending(item.id);
-									const primary = due || alreadyCreated;
-									const menu = (
-										<ItemActions className="shrink-0 self-start">
-											<DropdownMenu>
-												<DropdownMenuTrigger
-													render={<Button variant="ghost" size="icon" />}
-													disabled={pending}
-													aria-label={`Fixkosten-Aktionen: ${item.description}`}
-												>
-													<MoreHorizontal aria-hidden />
-												</DropdownMenuTrigger>
-												<DropdownMenuContent align="end" className="w-52 max-w-[calc(100vw-2rem)]">
-													<DropdownMenuGroup>
-														<DropdownMenuItem
-															onClick={() => onEditTemplate(item)}
-															disabled={pending}
-															className="min-h-11"
-															aria-label={`Fixkosten-Vorlage bearbeiten: ${item.description}`}
-														>
-															<Pencil aria-hidden />
-															Vorlage bearbeiten
-														</DropdownMenuItem>
-														<DropdownMenuItem
-															render={<Link href={getRecurringExpenseHref(shareCode, item.id)} />}
-															disabled={pending || paused}
-															className="min-h-11"
-															aria-label={`Fixkosten-Ausgabe manuell erfassen: ${item.description}`}
-														>
-															Manuell erfassen
-														</DropdownMenuItem>
-														<DropdownMenuItem
-															variant="destructive"
-															onClick={() => setDeleteCandidate(item)}
-															disabled={pending}
-															className="min-h-11"
-															aria-label={`Fixkosten-Vorlage löschen: ${item.description}`}
-														>
-															<Trash2 aria-hidden />
-															Löschen
-														</DropdownMenuItem>
-													</DropdownMenuGroup>
-												</DropdownMenuContent>
-											</DropdownMenu>
-										</ItemActions>
-									);
+									const canManage = canManageRecurringTemplate(item, currentMemberId, isAdmin);
+									// The server refuses a booking for someone else's payment without a share of one's own.
+									const canBook = canBookRecurringTemplate(item, currentMemberId);
+									const primary = (due && canBook) || alreadyCreated;
+									const menu =
+										canManage || canBook ? (
+											<ItemActions className="shrink-0 self-start">
+												<DropdownMenu>
+													<DropdownMenuTrigger
+														render={<Button variant="ghost" size="icon" />}
+														disabled={pending}
+														aria-label={`Fixkosten-Aktionen: ${item.description}`}
+													>
+														<MoreHorizontal aria-hidden />
+													</DropdownMenuTrigger>
+													<DropdownMenuContent
+														align="end"
+														className="w-52 max-w-[calc(100vw-2rem)]"
+													>
+														<DropdownMenuGroup>
+															{canManage && (
+																<DropdownMenuItem
+																	onClick={() => onEditTemplate(item)}
+																	disabled={pending}
+																	className="min-h-11"
+																	aria-label={`Fixkosten-Vorlage bearbeiten: ${item.description}`}
+																>
+																	<Pencil aria-hidden />
+																	Vorlage bearbeiten
+																</DropdownMenuItem>
+															)}
+															{canBook && (
+																<DropdownMenuItem
+																	render={
+																		<Link href={getRecurringExpenseHref(shareCode, item.id)} />
+																	}
+																	disabled={pending || paused}
+																	className="min-h-11"
+																	aria-label={`Fixkosten-Ausgabe manuell erfassen: ${item.description}`}
+																>
+																	Manuell erfassen
+																</DropdownMenuItem>
+															)}
+															{canManage && (
+																<DropdownMenuItem
+																	variant="destructive"
+																	onClick={() => setDeleteCandidate(item)}
+																	disabled={pending}
+																	className="min-h-11"
+																	aria-label={`Fixkosten-Vorlage löschen: ${item.description}`}
+																>
+																	<Trash2 aria-hidden />
+																	Löschen
+																</DropdownMenuItem>
+															)}
+														</DropdownMenuGroup>
+													</DropdownMenuContent>
+												</DropdownMenu>
+											</ItemActions>
+										) : null;
 									return (
 										<Item
 											key={item.id}
@@ -226,11 +247,16 @@ export function RecurringExpensesSection({
 														Für diese Fälligkeit vermutlich schon übernommen.
 													</ItemDescription>
 												)}
+												{due && !alreadyCreated && !canBook && (
+													<ItemDescription className="line-clamp-none">
+														Nur beteiligte Personen können diese Fixkosten erfassen.
+													</ItemDescription>
+												)}
 											</ItemContent>
 											{!primary && menu}
 											{primary && (
 												<ItemFooter className="flex-row items-center justify-end gap-2">
-													{due && !alreadyCreated ? (
+													{due && !alreadyCreated && canBook ? (
 														<Button
 															className="flex-1"
 															onClick={() => onCreateFromTemplate(item)}

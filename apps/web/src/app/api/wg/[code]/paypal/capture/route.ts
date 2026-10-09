@@ -1,4 +1,3 @@
-import { recordAuditEvent } from '@/core/audit';
 import { db, expensePayments, wgMembers } from '@/core/db';
 import { lockActiveAccountMember } from '@/core/db/account-deletion';
 import { requireWgMember } from '@/core/guards/require-wg-member';
@@ -13,11 +12,11 @@ import {
 	isPayPalConfigured,
 } from '@/core/infra/paypal';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
-import { formatEuroCents } from '@/core/utils/money';
 import { computeNetBalances, simplifyDebts } from '@/features/expenses/debt-reduction';
 import { computeBalances } from '@/features/expenses/debts';
 import {
 	isPayPalCaptureDebtChanged,
+	isUnapprovedPayPalOrder,
 	parsePayPalAmountCents,
 	terminalPayPalCaptureOutcome,
 } from '@/features/expenses/paypal-settlement';
@@ -27,6 +26,7 @@ import {
 	withExpensePaymentLock,
 } from '@/features/expenses/server/expense-payments';
 import { loadOpenExpenses } from '@/features/expenses/server/open-expenses';
+import { announcePayPalSettlement } from '@/features/expenses/server/settle-notify';
 import { and, eq, gt } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
@@ -288,6 +288,27 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 				captures.map((item) => item.status),
 			);
 			if (!terminalOutcome) {
+				// Our own capture attempt hit an order the payer never approved: release the row, or
+				// its `capturing` status would block the whole WG's finances.
+				if (
+					!captureState.reconcileFirst &&
+					isUnapprovedPayPalOrder(
+						order.status,
+						captures.map((item) => item.status),
+					)
+				) {
+					await withExpensePaymentLock(auth.wg.id, (tx) =>
+						tx
+							.update(expensePayments)
+							.set({ status: 'created' })
+							.where(
+								and(
+									eq(expensePayments.id, capturePayment.id),
+									eq(expensePayments.status, 'capturing'),
+								),
+							),
+					);
+				}
 				return NextResponse.json(
 					{
 						status: 'PENDING',
@@ -358,24 +379,7 @@ export const POST = withWgRoute('paypal capture POST', async (req, { code }) => 
 				currency: capturePayment.currency,
 			});
 		}
-		try {
-			await recordAuditEvent({
-				wgId: auth.wg.id,
-				memberId: auth.member.memberId,
-				eventType: 'expense.debt.paid.paypal',
-				entityType: 'expense_payment',
-				entityId: capturePayment.id,
-				summary: `${auth.member.name} hat ${formatEuroCents(capturePayment.amountCents, capturePayment.currency)} per PayPal beglichen.`,
-				metadata: {
-					fromMemberId: capturePayment.fromMemberId,
-					toMemberId: capturePayment.toMemberId,
-					amountCents: capturePayment.amountCents,
-					providerOrderId: capturePayment.providerOrderId,
-				},
-			});
-		} catch (auditError) {
-			logApiError('[paypal capture] audit failed', auditError);
-		}
+		await announcePayPalSettlement(auth.wg, auth.member, capturePayment);
 
 		return NextResponse.json({
 			status: 'COMPLETED',

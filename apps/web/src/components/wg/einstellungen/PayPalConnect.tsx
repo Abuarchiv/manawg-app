@@ -6,6 +6,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { apiFetch } from '@/core/infra/api-client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { PayPalDisconnectDialog } from './PayPalDisconnectDialog';
+import { isPayPalActionUrl } from './paypal-action-url';
 
 interface PayPalConnectionStatus {
 	available: boolean;
@@ -30,8 +32,6 @@ const PAYPAL_HINTS = [
 	'permissions_granted',
 ];
 
-const PAYPAL_ACTION_HOSTS = new Set(['paypal.com', 'www.paypal.com', 'www.sandbox.paypal.com']);
-
 const PAYPAL_CONSENT =
 	'Mit „PayPal verbinden“ stimmst du zu, dass die für die Verknüpfung nötigen Kontodaten zwischen ManaWG und PayPal ausgetauscht werden.';
 const PAYPAL_PENDING = 'PayPal-Verbindung wartet noch auf Bestätigung.';
@@ -51,22 +51,6 @@ function isConnectionStatus(value: unknown): value is PayPalConnectionStatus {
 	if (typeof value !== 'object' || value === null) return false;
 	const status = value as Record<string, unknown>;
 	return typeof status.available === 'boolean' && typeof status.connected === 'boolean';
-}
-
-function isPayPalActionUrl(value: unknown): value is string {
-	if (typeof value !== 'string') return false;
-	try {
-		const url = new URL(value);
-		return (
-			url.protocol === 'https:' &&
-			(url.port === '' || url.port === '443') &&
-			!url.username &&
-			!url.password &&
-			PAYPAL_ACTION_HOSTS.has(url.hostname.toLowerCase())
-		);
-	} catch {
-		return false;
-	}
 }
 
 function connectionError(error: string): string {
@@ -115,6 +99,7 @@ export function PayPalConnect({
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [confirmDisconnect, setConfirmDisconnect] = useState(false);
 
 	useEffect(() => {
 		if (pendingReturn.current?.scope !== scope) pendingReturn.current = null;
@@ -299,6 +284,32 @@ export function PayPalConnect({
 		}
 	}
 
+	async function disconnect(): Promise<void> {
+		const currentScope = scope;
+		setBusy(true);
+		setError(null);
+		try {
+			const result = await apiFetch<{ connected?: boolean }>(endpoint, {
+				method: 'POST',
+				memberId,
+				body: JSON.stringify({ action: 'disconnect' }),
+			});
+			if (scopeRef.current !== currentScope) return;
+			if (!result.ok) {
+				setError(connectionError(result.error));
+				return;
+			}
+			setStatus({ available: true, connected: false });
+			void refreshMembers(memberId);
+		} catch {
+			if (scopeRef.current === currentScope) {
+				setError('PayPal konnte nicht getrennt werden. Bitte versuche es erneut.');
+			}
+		} finally {
+			if (scopeRef.current === currentScope) setBusy(false);
+		}
+	}
+
 	async function retryConnection(): Promise<void> {
 		const currentScope = scope;
 		const pending = pendingReturn.current;
@@ -330,9 +341,24 @@ export function PayPalConnect({
 					</p>
 				)
 			) : status?.connected ? (
-				<p className="text-sm" aria-live="polite">
-					PayPal verbunden
-				</p>
+				<>
+					<p className="text-sm" aria-live="polite">
+						PayPal verbunden
+					</p>
+					<Button
+						type="button"
+						variant="outline"
+						disabled={busy}
+						onClick={() => setConfirmDisconnect(true)}
+					>
+						PayPal trennen
+					</Button>
+					<PayPalDisconnectDialog
+						open={confirmDisconnect}
+						onOpenChange={setConfirmDisconnect}
+						onConfirm={() => void disconnect()}
+					/>
+				</>
 			) : status?.available !== false ? (
 				<>
 					<p className="text-sm text-muted-foreground">{PAYPAL_CONSENT}</p>

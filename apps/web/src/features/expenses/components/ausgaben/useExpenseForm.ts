@@ -8,10 +8,10 @@ import {
 	writeDraft,
 } from '@/core/offline/drafts';
 import type { OfflineActionType } from '@/core/offline/offline-queue';
-import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
+import { formatEuroInput } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { buildExpensePrefillDraft } from '@/features/expenses/expense-prefill';
-import { isEqualExpenseSplit } from '@/features/expenses/expense-split-input';
+import { equalSplitParticipants } from '@/features/expenses/expense-split-input';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
 	type ExpenseDraft,
@@ -19,22 +19,13 @@ import {
 	type ExpenseSuggestion,
 	type SplitMode,
 	parseDraftEditTarget,
+	participantsOrAll,
+	queuedEqualParticipants,
 	recurringTemplateSuggestion,
 	splitsToManualInput,
 } from './expense-form-draft';
 import type { Expense, RecurringExpense } from './expense-types';
-
-function isEqualQueuedSplit(draft: ExpenseDraft, members: readonly FormMember[]): boolean {
-	const amount = parseEuroAmount(draft.amountStr ?? '');
-	if (amount === null || !draft.manualSplits) return false;
-	const splits = Object.entries(draft.manualSplits).flatMap(([debtorMemberId, value]) => {
-		const share = parseEuroAmount(value);
-		return share === null
-			? []
-			: [{ debtorMemberId, amountCents: Math.round(share * CENTS_PER_EURO) }];
-	});
-	return isEqualExpenseSplit(Math.round(amount * CENTS_PER_EURO), splits, members);
-}
+import { isoToInputDate, useExpenseFormExtras } from './use-expense-form-extras';
 
 /** The member fields this hook reads; structural so it needs no WG context provider. */
 interface FormMember {
@@ -99,6 +90,7 @@ export function useExpenseForm({
 	const [invalidEditDraft, setInvalidEditDraft] = useState(false);
 	const [pendingPrefill, setPendingPrefill] = useState<ExpenseSuggestion | null>(null);
 	const [recurringSourceId, setRecurringSourceId] = useState<string | null>(null);
+	const extras = useExpenseFormExtras();
 
 	const draftKey = buildDraftKey(shareCode, identityMemberId, 'expense');
 	// Lets the once-per-draft restore read the current members.
@@ -135,19 +127,24 @@ export function useExpenseForm({
 		if (draft.imageUrl !== undefined) setImageUrl(draft.imageUrl);
 		if (draft.paidByMemberId) setPaidByMemberId(draft.paidByMemberId);
 		// Queued expenses always carry per-person amounts; an equal split stays "Gleichmäßig".
-		const queuedEqual =
-			draft.queueEditId !== undefined &&
-			draft.splitMode === 'manual' &&
-			isEqualQueuedSplit(draft, membersRef.current);
+		const queuedParticipants =
+			draft.queueEditId !== undefined && draft.splitMode === 'manual'
+				? queuedEqualParticipants(draft, membersRef.current)
+				: null;
+		const queuedEqual = queuedParticipants !== null;
 		if (draft.splitMode) setSplitMode(queuedEqual ? 'equal' : draft.splitMode);
 		if (draft.manualSplits && !queuedEqual) setManualSplits(draft.manualSplits);
+		extras.restore(draft);
+		if (queuedParticipants) {
+			extras.setParticipantIds(participantsOrAll(queuedParticipants, membersRef.current));
+		}
 		if (typeof draft.recurringSourceId === 'string') setRecurringSourceId(draft.recurringSourceId);
 		if (draft.queueEditId) setQueueEditId(draft.queueEditId);
 		if (draft.queueEditType) setQueueEditType(draft.queueEditType);
 		if (draft.recurringIntervalMonths) setRecurringIntervalMonths(draft.recurringIntervalMonths);
 		if (draft.recurringNextDueAt) setRecurringNextDueAt(draft.recurringNextDueAt);
 		setDraftHydrated(true);
-	}, [draftKey, identityMemberId]);
+	}, [draftKey, identityMemberId, extras.restore, extras.setParticipantIds]);
 
 	useEffect(() => {
 		if (!draftHydrated) return;
@@ -161,12 +158,14 @@ export function useExpenseForm({
 			paidByMemberId,
 			splitMode,
 			manualSplits,
+			...extras.draftFields,
 			queueEditId,
 			queueEditType,
 			recurringIntervalMonths,
 			recurringNextDueAt,
 		});
 	}, [
+		extras.draftFields,
 		amountStr,
 		description,
 		editingExpense,
@@ -206,6 +205,7 @@ export function useExpenseForm({
 			setPaidByMemberId(prefill.paidByMemberId);
 			setSplitMode(prefill.splitMode);
 			setManualSplits(prefill.manualSplits);
+			extras.reset();
 			setQueueEditId(null);
 			setQueueEditType(null);
 			setEditingExpense(null);
@@ -215,7 +215,7 @@ export function useExpenseForm({
 			setPendingPrefill(null);
 			setShowForm(true);
 		},
-		[draftKey],
+		[draftKey, extras.reset],
 	);
 
 	const suggestPrefill = useCallback(
@@ -274,6 +274,7 @@ export function useExpenseForm({
 		setPaidByMemberId(identityMemberId);
 		setSplitMode('equal');
 		setManualSplits({});
+		extras.reset();
 		setFormError(null);
 		setConflictExpenseId(null);
 		setEditingExpense(null);
@@ -293,11 +294,15 @@ export function useExpenseForm({
 		setAmountStr(formatEuroInput(expense.amountCents / CENTS_PER_EURO));
 		setImageUrl(expense.imageUrl);
 		setPaidByMemberId(expense.paidByMemberId);
-		// "Equal" only if the splits cover EVERY current member and each share matches what
-		// largest-remainder rounding produces for the same (amount, member order) pair; shares
-		// that merely differ by a cent, or a missing member, are a manual split.
-		const isEqual = isEqualExpenseSplit(expense.amountCents, expense.splits, members);
-		if (isEqual) {
+		// "Equal" only if every share is an equal part among active members (all or a subset), as
+		// largest-remainder rounding produces it; shares that differ by a cent, or a moved-out
+		// member's share, make it a manual split.
+		const participants = equalSplitParticipants(expense.amountCents, expense.splits, members);
+		extras.load({
+			occurredOn: isoToInputDate(expense.occurredAt),
+			participantIds: participants ? participantsOrAll(participants, members) : null,
+		});
+		if (participants) {
 			setSplitMode('equal');
 			setManualSplits({});
 		} else {
@@ -329,6 +334,7 @@ export function useExpenseForm({
 		// starts in manual mode even when the shares happen to be equal.
 		setSplitMode('manual');
 		setManualSplits(splitsToManualInput(template.splits));
+		extras.reset();
 		setRecurringIntervalMonths(template.intervalMonths);
 		setEditingExpense(null);
 		setInvalidEditDraft(false);
@@ -354,6 +360,7 @@ export function useExpenseForm({
 		setSplitMode,
 		manualSplits,
 		setManualSplits,
+		extras,
 		formError,
 		setFormError,
 		conflictExpenseId,

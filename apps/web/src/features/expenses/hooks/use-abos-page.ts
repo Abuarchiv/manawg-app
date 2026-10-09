@@ -264,7 +264,10 @@ export function useAbosPage() {
 		if (res.ok) {
 			setNoticeMessage('success', 'Fixkosten gelöscht.');
 		} else {
-			updateAbos((current) => upsertAbo(current, previousAbo));
+			// Already deleted elsewhere: keep the row gone and show what the server has.
+			const alreadyGone = res.status === 404 && res.error === 'recurring_expense_not_found';
+			if (alreadyGone) void load(false);
+			else updateAbos((current) => upsertAbo(current, previousAbo));
 			const message = aboDeleteErrorMessage(res.error);
 			setNoticeMessage('error', message);
 			toast.error(message);

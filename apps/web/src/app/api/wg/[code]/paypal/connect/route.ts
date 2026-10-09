@@ -38,6 +38,7 @@ import { z } from 'zod';
 const COOKIE_MAX_AGE = 30 * 60;
 const startSchema = z.object({ action: z.literal('start'), consent: z.literal(true) }).strict();
 const completeSchema = z.object({ action: z.literal('complete') }).strict();
+const disconnectSchema = z.object({ action: z.literal('disconnect') }).strict();
 const confirmSchema = z
 	.object({ action: z.literal('confirm'), merchantId: z.string().refine(isPayPalMerchantId) })
 	.strict();
@@ -86,7 +87,8 @@ export const POST = withWgRoute<{ code: string }>('paypal connect POST', async (
 	const start = startSchema.safeParse(raw);
 	const confirm = confirmSchema.safeParse(raw);
 	const complete = completeSchema.safeParse(raw);
-	if (!start.success && !confirm.success && !complete.success) {
+	const disconnect = disconnectSchema.safeParse(raw);
+	if (!start.success && !confirm.success && !complete.success && !disconnect.success) {
 		const error =
 			raw &&
 			typeof raw === 'object' &&
@@ -105,6 +107,41 @@ export const POST = withWgRoute<{ code: string }>('paypal connect POST', async (
 		`paypal-connect:${auth.wg.id}:${auth.member.memberId}`,
 	);
 	if (!limited.success) return tooMany();
+
+	// Needs no PayPal call, so a member can still remove the stored ID after the integration is off.
+	if (disconnect.success) {
+		try {
+			const result = await withExpensePaymentLock(auth.wg.id, async (tx) => {
+				const actor = await lockActiveAccountMember(
+					tx,
+					auth.wg.id,
+					auth.member.memberId,
+					auth.authUserId,
+				);
+				if (!actor) return 'member_deactivated' as const;
+				const [member] = await tx
+					.select({ id: wgMembers.id })
+					.from(wgMembers)
+					.where(and(eq(wgMembers.id, auth.member.memberId), eq(wgMembers.wgId, auth.wg.id)))
+					.for('update');
+				if (!member) return 'member_not_found' as const;
+				if (await hasActiveExpensePayment(tx, auth.wg.id)) return 'paypal_payment_pending' as const;
+				await tx
+					.update(wgMembers)
+					.set({ paypalMerchantId: null })
+					.where(and(eq(wgMembers.id, auth.member.memberId), eq(wgMembers.wgId, auth.wg.id)));
+				return 'disconnected' as const;
+			});
+			if (result === 'member_deactivated') return unauthorized('member_deactivated');
+			if (result === 'member_not_found') return notFound('member_not_found');
+			if (result === 'paypal_payment_pending') return conflict(result);
+			return noStoreResponse({ connected: false });
+		} catch (err) {
+			logApiError('[paypal connect disconnect]', err);
+			return serverError('paypal_disconnect_failed');
+		}
+	}
+
 	const config = getPayPalOnboardingConfig();
 	if (!config) return conflict('paypal_not_configured');
 

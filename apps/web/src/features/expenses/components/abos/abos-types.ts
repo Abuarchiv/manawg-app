@@ -11,6 +11,9 @@ export interface Abo {
 	paidByMemberId: string;
 	intervalMonths: number;
 	nextDueAt: string;
+	/** Original cadence anchor; absent on legacy rows. */
+	anchorAt?: string | null;
+	createdByMemberId?: string;
 	lastCreatedAt: string | null;
 	pausedAt: string | null;
 	splits: AboSplit[];

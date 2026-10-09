@@ -45,6 +45,7 @@ export function useExpenseFormSupport(
 			splitMode: form.splitMode,
 			members,
 			manualSplits: form.manualSplits,
+			participantIds: form.extras.participantIds,
 			amountCents,
 			// Cycles the "+1 cent" recipient across expenses so the same person
 			// doesn't always eat the leftover cent on uneven splits.

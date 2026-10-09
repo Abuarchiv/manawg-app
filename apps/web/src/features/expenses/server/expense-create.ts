@@ -12,6 +12,7 @@ import {
 	expenseAmountSchema,
 	expenseDescriptionSchema,
 	expenseSplitSchema,
+	occurredAtSchema,
 } from '@/features/expenses/expense-schemas';
 import { hasCapturingExpensePayment } from '@/features/expenses/server/expense-payments';
 import { insertExpenseWithSplits } from '@/features/expenses/server/expenses';
@@ -37,7 +38,7 @@ export const createExpenseSchema = z
 		currency: currencySchema.optional().default('EUR'),
 		description: expenseDescriptionSchema,
 		imageUrl: imageUrlSchema,
-		occurredAt: z.string().datetime({ offset: true }).optional(),
+		occurredAt: occurredAtSchema.optional(),
 		recurringExpenseId: z.string().uuid().optional(),
 		expectedRecurringNextDueAt: z.string().datetime({ offset: true }).optional(),
 		splits: z.array(expenseSplitSchema).min(1).max(MAX_SPLITS),

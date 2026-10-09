@@ -122,7 +122,12 @@ export function useImportWizard() {
 		// Without a recognised expense the mapping step would be empty and claim both
 		// "all names recognised" and "no names recognised".
 		if (res.data.parsed.length === 0) {
-			showImportError('preview', 'empty_payload', 'Vorschau fehlgeschlagen');
+			const unreadable = (res.data.rejected?.length ?? 0) > 0;
+			showImportError(
+				'preview',
+				unreadable ? 'rows_unreadable' : 'empty_payload',
+				'Vorschau fehlgeschlagen',
+			);
 			return;
 		}
 		setPreview(res.data);

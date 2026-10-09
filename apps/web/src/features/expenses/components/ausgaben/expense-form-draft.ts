@@ -1,9 +1,13 @@
 import type { OfflineActionType } from '@/core/offline/offline-queue';
-import { formatEuroInput } from '@/core/utils/amount';
+import { formatEuroInput, parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO } from '@/core/utils/money';
 import { parseTimestamp } from '@/core/utils/time';
 import { currencySchema } from '@/core/validators/currency';
 import type { buildExpensePrefillDraft } from '@/features/expenses/expense-prefill';
+import {
+	type SplitMemberLike,
+	equalSplitParticipants,
+} from '@/features/expenses/expense-split-input';
 import type { Expense, RecurringExpense } from './expense-types';
 
 export type SplitMode = 'equal' | 'manual';
@@ -33,6 +37,8 @@ export type ExpenseDraft = {
 	paidByMemberId?: string;
 	splitMode?: SplitMode;
 	manualSplits?: Record<string, string>;
+	occurredOn?: string;
+	participantIds?: string[] | null;
 	queueEditId?: string;
 	queueEditType?: OfflineActionType;
 	recurringIntervalMonths?: number;
@@ -100,4 +106,30 @@ export function recurringTemplateSuggestion(template: RecurringExpense): Expense
 		manualSplits: splitsToManualInput(template.splits),
 		recurringSourceId: template.id,
 	};
+}
+
+/** The participants of a queued expense when its saved shares are an equal split, else null. */
+export function queuedEqualParticipants(
+	draft: ExpenseDraft,
+	members: readonly SplitMemberLike[],
+): string[] | null {
+	const amount = parseEuroAmount(draft.amountStr ?? '');
+	if (amount === null || !draft.manualSplits) return null;
+	const splits = Object.entries(draft.manualSplits).flatMap(([debtorMemberId, value]) => {
+		const share = parseEuroAmount(value);
+		return share === null
+			? []
+			: [{ debtorMemberId, amountCents: Math.round(share * CENTS_PER_EURO) }];
+	});
+	return equalSplitParticipants(Math.round(amount * CENTS_PER_EURO), splits, members);
+}
+
+/** `null` stands for "every active member". */
+export function participantsOrAll(
+	participants: string[],
+	members: readonly SplitMemberLike[],
+): string[] | null {
+	return participants.length === members.filter((member) => member.active).length
+		? null
+		: participants;
 }

@@ -10,6 +10,7 @@ import {
 	shouldRetryPayPalCapture,
 } from '@/features/expenses/paypal-settlement';
 import { useEffect, useRef, useState } from 'react';
+import { PAYPAL_STALE_CODES, paypalErrorMessage } from './paypal-errors';
 
 interface PayPalButtonsInstance {
 	render(container: HTMLElement): Promise<void>;
@@ -95,6 +96,8 @@ interface PayPalPaymentButtonProps {
 	amountCents: number;
 	currency: string;
 	onPaid: (message?: string) => void;
+	/** The debt on screen is outdated (changed or order expired); the caller reloads balances. */
+	onStale?: () => void;
 }
 
 export function PayPalPaymentButton({
@@ -106,9 +109,14 @@ export function PayPalPaymentButton({
 	amountCents,
 	currency,
 	onPaid,
+	onStale,
 }: PayPalPaymentButtonProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const onPaidRef = useRef(onPaid);
+	const onStaleRef = useRef(onStale);
+	onStaleRef.current = onStale;
+	// Set when createOrder already showed a specific message, so PayPal's onError keeps it.
+	const orderErrorShownRef = useRef(false);
 	const pendingOrderIdRef = useRef<string | null>(null);
 	const statusLookupFailedRef = useRef(false);
 	const reconcileCaptureRef = useRef<(orderId: string) => Promise<CaptureOutcome>>(
@@ -169,7 +177,9 @@ export function PayPalPaymentButton({
 				}
 				if (!shouldRetryPayPalCapture(result)) {
 					updatePendingOrder(null);
-					setError(PAYPAL_ERROR);
+					const code = result.ok ? '' : result.error;
+					setError(paypalErrorMessage(code) ?? PAYPAL_ERROR);
+					if (PAYPAL_STALE_CODES.has(code)) onStaleRef.current?.();
 					return 'failed';
 				}
 			}
@@ -191,7 +201,15 @@ export function PayPalPaymentButton({
 					body: JSON.stringify({ fromMemberId, toMemberId, currency }),
 				},
 			);
-			if (!result.ok) throw new Error(result.error);
+			if (!result.ok) {
+				const message = paypalErrorMessage(result.error);
+				if (message) {
+					orderErrorShownRef.current = true;
+					setError(message);
+					if (PAYPAL_STALE_CODES.has(result.error)) onStaleRef.current?.();
+				}
+				throw new Error(result.error);
+			}
 			return result.data.orderId;
 		};
 
@@ -233,7 +251,10 @@ export function PayPalPaymentButton({
 				buttons = paypal.Buttons({
 					createOrder,
 					onApprove,
-					onError: () => setError(PAYPAL_ERROR),
+					onError: () => {
+						if (!orderErrorShownRef.current) setError(PAYPAL_ERROR);
+						orderErrorShownRef.current = false;
+					},
 				});
 				await buttons.render(containerRef.current);
 			} catch {

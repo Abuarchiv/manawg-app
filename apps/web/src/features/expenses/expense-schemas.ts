@@ -26,3 +26,18 @@ export const expenseAmountSchema = z
 	.max(AMOUNT_MAX_CENTS);
 
 export const expenseDescriptionSchema = z.string().trim().min(1).max(DESCRIPTION_MAX_LENGTH);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Local noon plus time zone offsets can put "today" up to a day ahead of the server clock. */
+const OCCURRED_AT_MAX_FUTURE_MS = 2 * DAY_MS;
+const OCCURRED_AT_MAX_AGE_MS = 5 * 365 * DAY_MS;
+
+/** The day an expense happened: not meaningfully in the future and at most about five years back. */
+export const occurredAtSchema = z
+	.string()
+	.datetime({ offset: true })
+	.refine((value) => {
+		const time = Date.parse(value);
+		const now = Date.now();
+		return time <= now + OCCURRED_AT_MAX_FUTURE_MS && time >= now - OCCURRED_AT_MAX_AGE_MS;
+	});

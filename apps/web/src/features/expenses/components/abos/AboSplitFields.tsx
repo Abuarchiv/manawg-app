@@ -19,6 +19,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { parseEuroAmount } from '@/core/utils/amount';
 import { CENTS_PER_EURO, formatEuroCents } from '@/core/utils/money';
 import type { AboSplit, MemberOption } from '@/features/expenses/components/abos/abos-types';
+import { EqualParticipantsPicker } from '@/features/expenses/components/ausgaben/EqualParticipantsPicker';
 import { SplitReview } from '@/features/expenses/components/ausgaben/SplitReview';
 import type { AboSplitBuildError, SplitMode } from './abo-form-model';
 
@@ -29,6 +30,9 @@ interface AboSplitFieldsProps {
 	totalCents: number | null;
 	onSplitModeChange: (mode: SplitMode) => void;
 	splitCandidates: MemberOption[];
+	/** Who shares an equal split; null means every active member. */
+	participantIds: string[] | null;
+	onParticipantsChange: (ids: string[] | null) => void;
 	manualSplits: Record<string, string>;
 	onManualSplitChange: (memberId: string, value: string) => void;
 	splitError: string | null;
@@ -65,6 +69,8 @@ export function AboSplitFields({
 	totalCents,
 	onSplitModeChange,
 	splitCandidates,
+	participantIds,
+	onParticipantsChange,
 	manualSplits,
 	onManualSplitChange,
 	splitError,
@@ -136,6 +142,15 @@ export function AboSplitFields({
 				<FieldError id="abo-splits-error" className="scroll-mb-32">
 					{splitError}
 				</FieldError>
+			)}
+			{splitMode !== 'manual' && (
+				<EqualParticipantsPicker
+					candidates={splitCandidates}
+					participantIds={participantIds}
+					onChange={onParticipantsChange}
+					idPrefix="abo-participant"
+					disabled={submitting}
+				/>
 			)}
 			{splitMode !== 'manual' &&
 				(typeof splitPreview === 'string' ? (
