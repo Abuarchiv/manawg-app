@@ -14,6 +14,8 @@ export interface ActivityItem {
 	memberId?: string | null;
 	memberName: string;
 	text: string;
+	/** True when `text` is a server-built sentence ("hat …"), not user content. */
+	sentence?: boolean;
 	completed: boolean;
 	detail?: string;
 	amountCents?: number;

@@ -1,4 +1,5 @@
 import { getAbsentMemberIds } from '@/features/chores/absence';
+import { getChoreStatus } from '@/features/chores/chore-status';
 import { getDueRecurringExpenses } from '@/features/expenses/recurring-expenses';
 import { computeMemberBalances } from './dashboard-balances';
 import type { MemberBalance } from './dashboard-balances';
@@ -106,7 +107,7 @@ function getCurrentAbsenceRowsByMember<
 	return currentByMember;
 }
 
-function buildDueChores(
+export function buildDueChores(
 	choreRows: Array<{
 		id: string;
 		title: string;
@@ -126,7 +127,8 @@ function buildDueChores(
 				assignedMemberName: assigned?.name ?? null,
 				assignedColor: assigned?.color ?? null,
 				nextDueAt: c.nextDueAt.toISOString(),
-				overdue: c.nextDueAt.getTime() <= now.getTime(),
+				// Calendar-day based like the chore pages: due earlier today is not a gap yet.
+				overdue: getChoreStatus(c.nextDueAt.toISOString(), now.getTime()).state === 'overdue',
 			};
 		})
 		.sort((a, b) => a.nextDueAt.localeCompare(b.nextDueAt));

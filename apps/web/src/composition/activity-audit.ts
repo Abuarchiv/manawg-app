@@ -5,6 +5,33 @@ import {
 } from '@/core/utils/time';
 import { KIND_LABELS } from '@/features/pinnwand/components/constants';
 
+/** Announcement sources a member wrote by hand; the rest are system notices. */
+export const MEMBER_ANNOUNCEMENT_SOURCES = ['manual', 'chore_swap'] as const;
+
+/** Chat audits carry no content worth a feed row and would crowd out real events. */
+export const CHAT_AUDIT_EVENT_TYPES = [
+	'chat.message.created',
+	'chat.message.edited',
+	'chat.message.deleted',
+] as const;
+
+/**
+ * Audit events the chronicle never shows: chat noise, plus events whose raw
+ * row (expense, shopping item, completion, ...) is already a timeline entry.
+ */
+export const ACTIVITY_HIDDEN_AUDIT_EVENT_TYPES = [
+	...CHAT_AUDIT_EVENT_TYPES,
+	'expense.created',
+	'recurring.charged',
+	'recurring.created',
+	'recurring.advanced',
+	'shopping.created',
+	'shopping.bought',
+	'chore.completed',
+	'announcement.created',
+	'absence.created',
+] as const;
+
 function parseAuditMetadata(metadataJson?: string | null): Record<string, unknown> | null {
 	if (!metadataJson) return null;
 	try {

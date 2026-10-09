@@ -29,7 +29,7 @@ export default async function PasswordResetPage() {
 			backHref="/neu"
 			backLabel="ManaWG, zurück zur Anmeldung"
 		>
-			<PasswordResetForm recoveryRequested={recoveryRequested} />
+			<PasswordResetForm recoveryRequested={recoveryRequested} signedIn={Boolean(user)} />
 		</EntryFrame>
 	);
 }

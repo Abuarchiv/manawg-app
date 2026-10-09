@@ -12,7 +12,7 @@ import {
 import { captureException } from '@/core/infra/capture-client';
 import { TriangleAlert } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface WgErrorProps {
 	error: Error & { digest?: string };
@@ -20,9 +20,14 @@ interface WgErrorProps {
 }
 
 export default function WgError({ error, reset }: WgErrorProps) {
+	const headingRef = useRef<HTMLHeadingElement>(null);
 	useEffect(() => {
 		captureException(error, { boundary: 'wg-code' });
 	}, [error]);
+	// Focus was on the element that disappeared; move it here so the error is announced.
+	useEffect(() => {
+		headingRef.current?.focus();
+	}, []);
 
 	return (
 		<div className="flex items-center justify-center bg-background px-4 py-8">
@@ -34,8 +39,10 @@ export default function WgError({ error, reset }: WgErrorProps) {
 								<TriangleAlert aria-hidden />
 							</EmptyMedia>
 							<h1
+								ref={headingRef}
+								tabIndex={-1}
 								data-slot="empty-title"
-								className="min-w-0 max-w-full text-base font-semibold [overflow-wrap:anywhere]"
+								className="min-w-0 max-w-full text-base font-semibold [overflow-wrap:anywhere] focus:outline-none"
 							>
 								Etwas ist schiefgelaufen
 							</h1>

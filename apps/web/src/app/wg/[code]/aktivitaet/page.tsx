@@ -41,6 +41,9 @@ interface ActivityResponse {
 	reminders: ActivityReminder[];
 }
 
+const PAGE_SIZE = 80;
+const MAX_ITEMS = 320;
+
 function formatVisibleActivityCount(count: number): string {
 	if (count === 0) return 'Keine sichtbaren Einträge.';
 	if (count === 1) return '1 Eintrag sichtbar.';
@@ -51,12 +54,14 @@ export default function AktivitaetPage() {
 	const { wg, identity } = useWg();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const wgBaseHref = `/wg/${encodedShareCode}`;
+	// The server returns the newest N entries; "load more" raises N (see the activity route).
+	const [limit, setLimit] = useState(PAGE_SIZE);
 	const {
 		data: cachedActivity,
 		error: activityError,
 		isLoading: activityLoading,
 		refresh: refreshActivity,
-	} = useCachedFetch<ActivityResponse>(`/api/wg/${encodedShareCode}/activity`, {
+	} = useCachedFetch<ActivityResponse>(`/api/wg/${encodedShareCode}/activity?limit=${limit}`, {
 		memberId: identity.memberId,
 	});
 	const [data, setData] = useState<ActivityResponse | null>(cachedActivity ?? null);
@@ -121,7 +126,9 @@ export default function AktivitaetPage() {
 		setFilter((current) => ({ ...current, kind }));
 	}
 
-	const hasActiveFilter = filter.kind !== 'all' || filter.query.trim().length > 0;
+	const hasActiveFilter =
+		filter.kind !== 'all' || filter.mineOnly || filter.query.trim().length > 0;
+	const canLoadMore = data !== null && data.items.length >= limit && limit < MAX_ITEMS;
 
 	function resetFilters(): void {
 		setFilter({ kind: 'all', mineOnly: false, query: '' });
@@ -167,7 +174,7 @@ export default function AktivitaetPage() {
 								className="min-h-11 text-base"
 							/>
 						</InputGroup>
-						<div className="grid grid-cols-1 gap-2">
+						<div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2">
 							<label htmlFor="activity-kind" className="grid min-w-0 gap-1 text-xs font-medium">
 								Bereich
 								<NativeSelect
@@ -184,6 +191,21 @@ export default function AktivitaetPage() {
 									<NativeSelectOption value="recurring">Fixkosten</NativeSelectOption>
 									<NativeSelectOption value="absence">Abwesenheiten</NativeSelectOption>
 									<NativeSelectOption value="audit">WG-Änderungen</NativeSelectOption>
+								</NativeSelect>
+							</label>
+							<label htmlFor="activity-who" className="grid min-w-0 gap-1 text-xs font-medium">
+								Wer
+								<NativeSelect
+									id="activity-who"
+									value={filter.mineOnly ? 'mine' : 'all'}
+									onChange={(event) => {
+										const mineOnly = event.target.value === 'mine';
+										setFilter((current) => ({ ...current, mineOnly }));
+									}}
+									className="w-full"
+								>
+									<NativeSelectOption value="all">Alle</NativeSelectOption>
+									<NativeSelectOption value="mine">Nur ich</NativeSelectOption>
 								</NativeSelect>
 							</label>
 						</div>
@@ -287,6 +309,23 @@ export default function AktivitaetPage() {
 										</EmptyDescription>
 									</EmptyHeader>
 								</Empty>
+							)}
+							{data.items.length > 0 && hasActiveFilter && canLoadMore && (
+								<p className="text-[12px] text-muted-foreground">
+									Gefiltert wird in den neuesten {data.items.length} Einträgen.
+								</p>
+							)}
+							{canLoadMore && (
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="w-full"
+									disabled={loading}
+									onClick={() => setLimit((current) => current + PAGE_SIZE)}
+								>
+									Ältere Einträge laden
+								</Button>
 							)}
 						</div>
 					) : loading ? (

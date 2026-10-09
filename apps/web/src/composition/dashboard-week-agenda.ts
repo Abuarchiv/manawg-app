@@ -1,7 +1,7 @@
 import { berlinDayKey, endOfBerlinDay, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { parseTimestamp } from '@/core/utils/time';
 import type { EventOccurrence } from '@/features/events/events';
-import { type TodayImportantInput, dueLabel } from './dashboard-today';
+import { type TodayImportantInput, choreUrgency, dueLabel } from './dashboard-today';
 
 export interface BerlinWeekWindow {
 	todayKey: string;
@@ -72,12 +72,14 @@ export function getWeekAgenda(input: {
 	const upcoming: WeekAgendaItem[] = [];
 
 	for (const chore of input.dueChores) {
-		if (chore.assignedMemberId === input.currentMemberId) continue;
+		const isOwn = chore.assignedMemberId === input.currentMemberId;
+		// Own chores live in "Für dich" — except those 4+ days out, which it drops.
+		if (isOwn && choreUrgency(chore.nextDueAt, now) !== 3) continue;
 		const at = parseTimestamp(chore.nextDueAt);
 		if (at === null) continue;
 		const dayKey = berlinDayKey(new Date(at));
 		if (dayKey > window.sundayKey) continue;
-		const who = chore.assignedMemberName ?? 'Noch nicht zugewiesen';
+		const who = isOwn ? 'Du' : (chore.assignedMemberName ?? 'Noch nicht zugewiesen');
 		const item: WeekAgendaItem = {
 			key: `chore:${chore.id}`,
 			kind: 'chore',

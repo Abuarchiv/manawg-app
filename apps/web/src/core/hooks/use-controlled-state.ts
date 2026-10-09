@@ -12,17 +12,14 @@ export function useControlledState<T, Rest extends unknown[] = []>(
 ): readonly [T | undefined, (next: T, ...args: Rest) => void] {
 	const { value, defaultValue, onChange } = props;
 
-	// `defaultValue` is optional, so the initial state really can be
-	// `undefined` when neither prop is supplied. The state is typed
-	// `T | undefined` instead of being cast with `defaultValue as T`, which
-	// would give callers a runtime `undefined` their prop types do not allow for.
-	const [state, setInternalState] = React.useState<T | undefined>(
-		value !== undefined ? value : defaultValue,
-	);
-
-	React.useEffect(() => {
-		if (value !== undefined) setInternalState(value);
-	}, [value]);
+	// `defaultValue` is optional, so the uncontrolled state really can be
+	// `undefined` when neither prop is supplied. It is typed `T | undefined`
+	// instead of being cast with `defaultValue as T`, which would give callers
+	// a runtime `undefined` their prop types do not allow for.
+	const [internal, setInternalState] = React.useState<T | undefined>(defaultValue);
+	// A controlled value always wins: when the parent rejects a change and keeps
+	// the prop, the UI must keep showing the prop rather than the attempted value.
+	const state = value !== undefined ? value : internal;
 
 	const setState = React.useCallback(
 		(next: T, ...args: Rest) => {

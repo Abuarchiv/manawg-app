@@ -102,9 +102,12 @@ export async function fetchExpensePaymentRows(wgId: string, page: ExportPage) {
 }
 export function mapExpensePaymentRows(
 	paymentRows: Awaited<ReturnType<typeof fetchExpensePaymentRows>>,
+	memberById: Map<string, string>,
 ) {
 	return paymentRows.map((payment) => ({
 		id: payment.id,
+		fromName: memberById.get(payment.fromMemberId) ?? '',
+		toName: memberById.get(payment.toMemberId) ?? '',
 		fromMemberId: payment.fromMemberId,
 		toMemberId: payment.toMemberId,
 		amountCents: payment.amountCents,
@@ -123,6 +126,7 @@ export async function fetchRecurringRows(wgId: string, page: ExportPage) {
 			intervalMonths: recurringExpenses.intervalMonths,
 			nextDueAt: recurringExpenses.nextDueAt,
 			lastCreatedAt: recurringExpenses.lastCreatedAt,
+			pausedAt: recurringExpenses.pausedAt,
 			createdAt: recurringExpenses.createdAt,
 			splitsJson: recurringExpenses.splitsJson,
 		})
@@ -145,6 +149,7 @@ export function mapRecurringRows(
 		intervalMonths: item.intervalMonths,
 		nextDueAt: item.nextDueAt.toISOString(),
 		lastCreatedAt: item.lastCreatedAt?.toISOString() ?? '',
+		pausedAt: item.pausedAt?.toISOString() ?? '',
 		createdAt: item.createdAt.toISOString(),
 		splits: parseRecurringSplitsForExport(item.splitsJson, memberById),
 	}));

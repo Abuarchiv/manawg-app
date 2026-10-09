@@ -88,7 +88,7 @@ export function dueLabel(iso: string, now: number): string {
 	return `in ${days} Tagen`;
 }
 
-function choreUrgency(iso: string, now: number): number {
+export function choreUrgency(iso: string, now: number): number {
 	const days = calendarDayDistance(iso, now);
 	if (days === null) return 4;
 	if (days < 0) return 0;

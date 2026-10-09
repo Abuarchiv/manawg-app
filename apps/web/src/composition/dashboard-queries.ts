@@ -13,7 +13,9 @@ import {
 	wgMembers,
 } from '@/core/db';
 import { captureException } from '@/core/infra/observability';
-import { and, count, desc, eq, isNull } from 'drizzle-orm';
+import { and, count, desc, eq, isNull, notInArray, sql } from 'drizzle-orm';
+
+import { CHAT_AUDIT_EVENT_TYPES } from './activity-audit';
 
 export const ACTIVITY_LIMIT = 6;
 
@@ -76,12 +78,14 @@ export function loadPrimaryRows(wgId: string) {
 				id: shoppingItems.id,
 				name: shoppingItems.name,
 				addedByMemberId: shoppingItems.addedByMemberId,
+				boughtByMemberId: shoppingItems.boughtByMemberId,
 				createdAt: shoppingItems.createdAt,
 				boughtAt: shoppingItems.boughtAt,
 			})
 			.from(shoppingItems)
 			.where(eq(shoppingItems.wgId, wgId))
-			.orderBy(desc(shoppingItems.createdAt))
+			// Same instant the feed uses, so a long-open item bought just now is not cut off.
+			.orderBy(desc(sql`coalesce(${shoppingItems.boughtAt}, ${shoppingItems.createdAt})`))
 			.limit(ACTIVITY_LIMIT),
 		db
 			.select({
@@ -163,6 +167,7 @@ export function loadSecondaryRows(wgId: string, currentMemberId: string | null |
 					memberId: memberAbsences.memberId,
 					startDate: memberAbsences.startDate,
 					endDate: memberAbsences.endDate,
+					createdAt: memberAbsences.createdAt,
 				})
 				.from(memberAbsences)
 				.where(eq(memberAbsences.wgId, wgId)),
@@ -194,7 +199,13 @@ export function loadSecondaryRows(wgId: string, currentMemberId: string | null |
 					createdAt: auditEvents.createdAt,
 				})
 				.from(auditEvents)
-				.where(eq(auditEvents.wgId, wgId))
+				// Chat audits carry no content worth a feed row and would crowd out real events.
+				.where(
+					and(
+						eq(auditEvents.wgId, wgId),
+						notInArray(auditEvents.eventType, [...CHAT_AUDIT_EVENT_TYPES]),
+					),
+				)
 				.orderBy(desc(auditEvents.createdAt))
 				.limit(ACTIVITY_LIMIT),
 			() => [],

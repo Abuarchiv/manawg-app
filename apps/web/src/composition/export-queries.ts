@@ -2,6 +2,7 @@ import {
 	announcementComments,
 	announcements,
 	auditEvents,
+	choreCompletions,
 	chores,
 	db,
 	expensePayments,
@@ -11,6 +12,7 @@ import {
 	shoppingItems,
 	wgChatMessages,
 	wgEvents,
+	wgInventoryItems,
 	wgMembers,
 } from '@/core/db';
 import { type SQL, count, eq } from 'drizzle-orm';
@@ -40,11 +42,15 @@ import {
 } from './export-queries-finance';
 import {
 	fetchAbsenceRows,
+	fetchChoreCompletionRows,
 	fetchChoreRows,
+	fetchInventoryRows,
 	fetchMemberRows,
 	fetchShoppingRows,
 	mapAbsenceRows,
+	mapChoreCompletionRows,
 	mapChoreRows,
+	mapInventoryRows,
 	mapMemberRows,
 	mapShoppingRows,
 } from './export-queries-household';
@@ -67,8 +73,11 @@ export type MemberDirectory = () => Promise<Map<string, string>>;
  */
 export const MEMBER_NAME_SECTIONS: Exclude<ExportSectionKey, 'members'>[] = [
 	'expenses',
+	'expensePayments',
 	'recurringExpenses',
+	'shoppingItems',
 	'chores',
+	'choreCompletions',
 	'absences',
 	'announcements',
 	'announcementComments',
@@ -107,10 +116,12 @@ export function buildSectionLoaders(
 			const splitsByExpense = await loadSplitsByExpense(expenseRows.map((expense) => expense.id));
 			return mapExpenseRows(expenseRows, memberById, splitsByExpense);
 		},
-		expensePayments: async () => mapExpensePaymentRows(await fetchExpensePaymentRows(wgId, page)),
+		expensePayments: withNames(() => fetchExpensePaymentRows(wgId, page), mapExpensePaymentRows),
 		recurringExpenses: withNames(() => fetchRecurringRows(wgId, page), mapRecurringRows),
-		shoppingItems: async () => mapShoppingRows(await fetchShoppingRows(wgId, page)),
+		shoppingItems: withNames(() => fetchShoppingRows(wgId, page), mapShoppingRows),
 		chores: withNames(() => fetchChoreRows(wgId, page), mapChoreRows),
+		choreCompletions: withNames(() => fetchChoreCompletionRows(wgId, page), mapChoreCompletionRows),
+		inventory: async () => mapInventoryRows(await fetchInventoryRows(wgId, page)),
 		absences: withNames(() => fetchAbsenceRows(wgId, page), mapAbsenceRows),
 		announcements: withNames(() => fetchAnnouncementRows(wgId, page), mapAnnouncementRows),
 		announcementComments: withNames(
@@ -141,6 +152,8 @@ export async function countExportSections(wgId: string): Promise<ExportSectionCo
 		recurringExpenseCount,
 		shoppingItemCount,
 		choreCount,
+		choreCompletionCount,
+		inventoryCount,
 		absenceCount,
 		announcementCount,
 		announcementCommentCount,
@@ -154,6 +167,13 @@ export async function countExportSections(wgId: string): Promise<ExportSectionCo
 		countRows(recurringExpenses, eq(recurringExpenses.wgId, wgId)),
 		countRows(shoppingItems, eq(shoppingItems.wgId, wgId)),
 		countRows(chores, eq(chores.wgId, wgId)),
+		db
+			.select({ value: count() })
+			.from(choreCompletions)
+			.innerJoin(chores, eq(choreCompletions.choreId, chores.id))
+			.where(eq(chores.wgId, wgId))
+			.then(([row]) => row?.value ?? 0),
+		countRows(wgInventoryItems, eq(wgInventoryItems.wgId, wgId)),
 		countRows(memberAbsences, eq(memberAbsences.wgId, wgId)),
 		countRows(announcements, eq(announcements.wgId, wgId)),
 		db
@@ -173,6 +193,8 @@ export async function countExportSections(wgId: string): Promise<ExportSectionCo
 		recurringExpenses: recurringExpenseCount,
 		shoppingItems: shoppingItemCount,
 		chores: choreCount,
+		choreCompletions: choreCompletionCount,
+		inventory: inventoryCount,
 		absences: absenceCount,
 		announcements: announcementCount,
 		announcementComments: announcementCommentCount,

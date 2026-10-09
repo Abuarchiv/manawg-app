@@ -1,4 +1,6 @@
 import {
+	ACTIVITY_HIDDEN_AUDIT_EVENT_TYPES,
+	MEMBER_ANNOUNCEMENT_SOURCES,
 	REMINDER_ANNOUNCEMENT_KINDS,
 	buildActivityTimeline,
 	getActivityReminders,
@@ -17,13 +19,22 @@ import {
 } from '@/core/db';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
-import { and, asc, desc, eq, inArray, isNull, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, lte, notInArray, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
+
+const DEFAULT_LIMIT = 80;
+const MAX_LIMIT = 320;
 
 export const GET = withWgRoute('activity GET', async (req, { code }) => {
 	const auth = await requireWgMember(req, code);
 	if (!auth.ok) return auth.response;
 	const wg = auth.wg;
+	// Every source query is capped at the same N: an item in the overall top N
+	// is always in the top N of its own source, so "load more" stays exact.
+	const requested = Number.parseInt(new URL(req.url).searchParams.get('limit') ?? '', 10);
+	const limit = Number.isFinite(requested)
+		? Math.min(Math.max(requested, DEFAULT_LIMIT), MAX_LIMIT)
+		: DEFAULT_LIMIT;
 
 	const [
 		members,
@@ -53,19 +64,21 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 			.from(expenses)
 			.where(eq(expenses.wgId, wg.id))
 			.orderBy(desc(expenses.occurredAt))
-			.limit(120),
+			.limit(limit),
 		db
 			.select({
 				id: shoppingItems.id,
 				addedByMemberId: shoppingItems.addedByMemberId,
+				boughtByMemberId: shoppingItems.boughtByMemberId,
 				name: shoppingItems.name,
 				createdAt: shoppingItems.createdAt,
 				boughtAt: shoppingItems.boughtAt,
 			})
 			.from(shoppingItems)
 			.where(eq(shoppingItems.wgId, wg.id))
-			.orderBy(desc(shoppingItems.createdAt))
-			.limit(120),
+			// Same instant the timeline uses, so a long-open item bought just now is not cut off.
+			.orderBy(desc(sql`coalesce(${shoppingItems.boughtAt}, ${shoppingItems.createdAt})`))
+			.limit(limit),
 		db
 			.select({
 				id: announcements.id,
@@ -77,9 +90,15 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 				source: announcements.source,
 			})
 			.from(announcements)
-			.where(eq(announcements.wgId, wg.id))
+			// System notices (expense/shopping) duplicate their raw rows.
+			.where(
+				and(
+					eq(announcements.wgId, wg.id),
+					inArray(announcements.source, [...MEMBER_ANNOUNCEMENT_SOURCES]),
+				),
+			)
 			.orderBy(desc(announcements.createdAt))
-			.limit(120),
+			.limit(limit),
 		db
 			.select({
 				id: chores.id,
@@ -105,7 +124,7 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 			.from(recurringExpenses)
 			.where(eq(recurringExpenses.wgId, wg.id))
 			.orderBy(desc(recurringExpenses.createdAt))
-			.limit(120),
+			.limit(limit),
 		db
 			.select({
 				id: memberAbsences.id,
@@ -118,7 +137,7 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 			.from(memberAbsences)
 			.where(eq(memberAbsences.wgId, wg.id))
 			.orderBy(desc(memberAbsences.createdAt))
-			.limit(120),
+			.limit(limit),
 		db
 			.select({
 				id: auditEvents.id,
@@ -131,9 +150,15 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 				createdAt: auditEvents.createdAt,
 			})
 			.from(auditEvents)
-			.where(eq(auditEvents.wgId, wg.id))
+			// Filtered in SQL so chat noise never eats the row limit.
+			.where(
+				and(
+					eq(auditEvents.wgId, wg.id),
+					notInArray(auditEvents.eventType, [...ACTIVITY_HIDDEN_AUDIT_EVENT_TYPES]),
+				),
+			)
 			.orderBy(desc(auditEvents.createdAt))
-			.limit(120),
+			.limit(limit),
 		// Reminders read their own open rows, oldest first, so bought items
 		// and system notices in the newest timeline rows never hide them.
 		db
@@ -159,6 +184,8 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 					eq(announcements.wgId, wg.id),
 					eq(announcements.status, 'open'),
 					inArray(announcements.kind, [...REMINDER_ANNOUNCEMENT_KINDS]),
+					// Shopping notices are already covered by the shopping reminder.
+					inArray(announcements.source, [...MEMBER_ANNOUNCEMENT_SOURCES]),
 				),
 			)
 			.orderBy(asc(announcements.createdAt))
@@ -177,7 +204,7 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 		.innerJoin(chores, eq(choreCompletions.choreId, chores.id))
 		.where(eq(chores.wgId, wg.id))
 		.orderBy(desc(choreCompletions.completedAt))
-		.limit(120);
+		.limit(limit);
 	const memberById = new Map(members.map((member) => [member.id, member]));
 
 	return NextResponse.json({
@@ -216,7 +243,7 @@ export const GET = withWgRoute('activity GET', async (req, { code }) => {
 				...item,
 				createdAt: item.createdAt.toISOString(),
 			})),
-			limit: 80,
+			limit,
 		}),
 		reminders: getActivityReminders({
 			openShoppingItems: openShoppingRows.map((item) => ({

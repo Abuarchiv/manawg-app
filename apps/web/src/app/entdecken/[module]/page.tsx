@@ -18,15 +18,20 @@ const PUBLIC_MODULES: Record<string, { title: string; description: string }> = {
 	chat: { title: 'Chat', description: 'Kurz etwas klären.' },
 };
 
+// Own-property lookup: `in` / bare indexing would match Object.prototype keys like "constructor".
+const publicModule = (slug: string) =>
+	Object.hasOwn(PUBLIC_MODULES, slug) ? PUBLIC_MODULES[slug] : undefined;
+
 export async function generateMetadata({
 	params,
 }: { params: Promise<{ module: string }> }): Promise<Metadata> {
 	const { module } = await params;
-	const entry = PUBLIC_MODULES[module];
+	const entry = publicModule(module);
 	if (!entry) return {};
 	return {
 		title: `${entry.title} — ManaWG`,
 		description: `${entry.description} Die WG-App für Ausgaben, Putzplan, Einkauf und Pinnwand.`,
+		alternates: { canonical: `/entdecken/${module}` },
 	};
 }
 
@@ -36,6 +41,6 @@ export default async function PublicModulePage({
 	params: Promise<{ module: string }>;
 }) {
 	const { module } = await params;
-	if (!(module in PUBLIC_MODULES)) notFound();
+	if (!publicModule(module)) notFound();
 	return <PublicApp activeModule={module} />;
 }

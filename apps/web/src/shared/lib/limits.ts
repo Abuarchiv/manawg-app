@@ -8,3 +8,5 @@
  */
 export const WG_NAME_MAX_LENGTH = 100;
 export const MEMBER_NAME_MAX_LENGTH = 80;
+/** Active members a WG can hold; moved-out members do not count. */
+export const MAX_MEMBERS_PER_WG = 20;

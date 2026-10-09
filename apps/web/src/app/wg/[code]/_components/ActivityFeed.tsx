@@ -22,6 +22,8 @@ interface ActivityItem {
 	memberId?: string | null;
 	memberName: string;
 	text: string;
+	/** Server-built sentence starting with a verb; user content never sets this. */
+	sentence?: boolean;
 	detail?: string;
 	amountCents?: number;
 	currency?: string;
@@ -37,10 +39,6 @@ const kindIcon: Record<ActivityItem['kind'], typeof Receipt> = {
 	absence: CalendarOff,
 	audit: History,
 };
-
-// Log texts start with a verb („hat … geändert“) and need the person in front;
-// all others are keywords („Brot gekauft“) shown as the title with the person below.
-const VERB_START = /^(hat|ist)\b/;
 
 export function ActivityFeed({ items, inset }: { items: ActivityItem[]; inset?: boolean }) {
 	const { identity } = useWg();
@@ -64,7 +62,8 @@ export function ActivityFeed({ items, inset }: { items: ActivityItem[]; inset?: 
 				const Icon = kindIcon[item.kind];
 				const isMe = Boolean(item.memberId) && item.memberId === identity.memberId;
 				const who = isMe ? 'Du' : item.memberName;
-				const sentence = VERB_START.test(item.text);
+				// Sentences („hat … geändert“) need the person in front; keywords („Brot gekauft“) are the title.
+				const sentence = item.sentence === true;
 				const text =
 					sentence && isMe
 						? item.text.replace(/^hat\b/, 'hast').replace(/^ist\b/, 'bist')

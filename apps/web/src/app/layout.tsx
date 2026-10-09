@@ -68,9 +68,6 @@ export const metadata: Metadata = {
 	keywords: ['WG', 'Wohngemeinschaft', 'Ausgaben teilen', 'Putzplan', 'WG App', 'DSGVO'],
 	authors: [{ name: 'ManaWG' }],
 	applicationName: 'ManaWG',
-	alternates: {
-		canonical: '/',
-	},
 	robots: {
 		index: true,
 		follow: true,

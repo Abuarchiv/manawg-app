@@ -21,6 +21,8 @@ export interface ActivityItem {
 	memberId?: string | null;
 	memberName: string;
 	text: string;
+	/** True when `text` is a server-built sentence ("hat …"), not user content. */
+	sentence?: boolean;
 	amountCents?: number;
 	currency?: string;
 	href?: string;
@@ -60,16 +62,13 @@ export function buildPrimaryActivity(
 		rawActivityByKey.set(`expense:${e.id}`, new Date(e.occurredAt).getTime());
 	}
 	for (const s of recentShopping) {
+		// A purchase belongs to the buyer, not to whoever added the item.
+		const actorId = s.boughtAt ? (s.boughtByMemberId ?? s.addedByMemberId) : s.addedByMemberId;
 		activity.push({
 			kind: 'shopping',
 			timestamp: (s.boughtAt ?? s.createdAt).toISOString(),
-			memberId: s.addedByMemberId,
-			memberName: memberById.get(s.addedByMemberId)?.name ?? '—',
-			// Matches activity.ts's buildActivityTimeline wording for the same
-			// event — these two feed builders are independently maintained
-			// (dashboard-feed.ts assembles a bounded per-category preview,
-			// activity.ts the full chronicle), so their text must stay in sync
-			// by hand until they're consolidated.
+			memberId: actorId,
+			memberName: memberById.get(actorId)?.name ?? '—',
 			text: s.boughtAt ? `${s.name} gekauft` : s.name,
 			href: getDashboardActivityHref(shareCode, 'shopping', s.id),
 		});
@@ -99,18 +98,27 @@ export function appendSecondaryActivity(
 	memberById: Map<string, { name: string }>,
 	shareCode: string,
 ): void {
-	for (const absence of absenceRows.slice(0, ACTIVITY_LIMIT)) {
+	// Rows are unordered (they also feed absentMembers), so pick the newest here.
+	// Entry time, not start date: a future absence must not stick to the top.
+	const newestAbsences = [...absenceRows]
+		.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+		.slice(0, ACTIVITY_LIMIT);
+	for (const absence of newestAbsences) {
 		activity.push({
 			kind: 'absence',
-			timestamp: absence.startDate.toISOString(),
+			timestamp: absence.createdAt.toISOString(),
 			memberId: absence.memberId,
 			memberName: memberById.get(absence.memberId)?.name ?? '—',
 			text: 'Abwesenheit eingetragen',
 			href: getDashboardActivityHref(shareCode, 'absence', absence.id),
 		});
-		rawActivityByKey.set(`absence:${absence.id}`, absence.startDate.getTime());
+		rawActivityByKey.set(`absence:${absence.id}`, absence.createdAt.getTime());
 	}
-	for (const recurring of recurringRows.slice(0, ACTIVITY_LIMIT)) {
+	const recurringTime = (r: SecondaryRows[2][number]) => (r.lastCreatedAt ?? r.createdAt).getTime();
+	const newestRecurring = [...recurringRows]
+		.sort((a, b) => recurringTime(b) - recurringTime(a))
+		.slice(0, ACTIVITY_LIMIT);
+	for (const recurring of newestRecurring) {
 		const recurringTs = (recurring.lastCreatedAt ?? recurring.createdAt).getTime();
 		activity.push({
 			kind: 'recurring',
@@ -137,6 +145,7 @@ export function appendSecondaryActivity(
 			memberId: audit.memberId ?? null,
 			memberName: actorName,
 			text: formatAuditActivityText(audit.summary, actorName),
+			sentence: true,
 			...(href ? { href } : {}),
 		});
 	}
