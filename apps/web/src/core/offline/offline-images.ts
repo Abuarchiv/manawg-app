@@ -1,5 +1,6 @@
 'use client';
 
+import { REQUEST_TIMEOUT_MS, anySignal } from '@/core/infra/api-client';
 import { EXPECTED_MEMBER_ID_HEADER } from '@/shared/lib/member-header';
 import { createOfflineIdempotencyKey } from './offline-queue';
 
@@ -7,6 +8,8 @@ const DB_NAME = 'manawg-offline-images';
 const STORE_NAME = 'images';
 const DB_VERSION = 1;
 const TOKEN_PREFIX = 'manawg-pending-image:';
+// A stalled PUT on a bad mobile connection would otherwise block the uploader indefinitely.
+export const UPLOAD_TIMEOUT_MS = 60_000;
 
 interface PendingImageRecord {
 	id: string;
@@ -16,7 +19,7 @@ interface PendingImageRecord {
 	size: number;
 	shareCode: string;
 	memberId: string;
-	purpose: 'expense' | 'announcement';
+	purpose: 'expense' | 'announcement' | 'chat';
 	createdAt: string;
 	publicUrl?: string;
 }
@@ -103,7 +106,7 @@ export async function storePendingImage(input: {
 	file: File;
 	shareCode: string;
 	memberId: string;
-	purpose: 'expense' | 'announcement';
+	purpose: 'expense' | 'announcement' | 'chat';
 }): Promise<string> {
 	const now = Date.now();
 	// Local IndexedDB key only: prefer UUID, but keep browsers without Web Crypto usable.
@@ -148,13 +151,16 @@ export async function uploadPendingImageToken(
 	const record = await readPendingImage(token, memberId);
 	if (!record) throw new Error('pending-image-missing');
 	if (record.publicUrl) return record.publicUrl;
+	// A stalled request must not block the offline sync forever.
+	const withTimeout = (ms: number) =>
+		signal ? anySignal([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
 	const sigRes = await fetch('/api/upload/sign', {
 		method: 'POST',
 		headers: {
 			'content-type': 'application/json',
 			[EXPECTED_MEMBER_ID_HEADER]: memberId,
 		},
-		...(signal ? { signal } : {}),
+		signal: withTimeout(REQUEST_TIMEOUT_MS),
 		body: JSON.stringify({
 			shareCode: record.shareCode,
 			purpose: record.purpose,
@@ -173,7 +179,7 @@ export async function uploadPendingImageToken(
 		method: 'PUT',
 		body: record.file,
 		headers: { ...sig.uploadHeaders, 'Content-Type': record.type },
-		...(signal ? { signal } : {}),
+		signal: withTimeout(UPLOAD_TIMEOUT_MS),
 	});
 	if (!uploadRes.ok) throw new Error(`upload-failed:${uploadRes.status}`);
 	await withStore('readwrite', (store) =>

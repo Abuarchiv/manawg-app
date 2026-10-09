@@ -24,7 +24,7 @@ export function OfflineQueueCard({
 	primaryWg,
 	status,
 }: { queue: OfflineAction[]; primaryWg: KnownWg | null; status: OfflineStatus }) {
-	const recentQueue = queue.slice(0, RECENT_VISIBLE);
+	const recentQueue = queue.slice(-RECENT_VISIBLE).reverse();
 	const hiddenQueueCount = Math.max(0, queue.length - recentQueue.length);
 	return (
 		<section

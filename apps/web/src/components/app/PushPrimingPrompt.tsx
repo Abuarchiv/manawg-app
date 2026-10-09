@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import {
 	PUSH_PRIMING_DISMISS_KEY,
+	isPushOptedOut,
 	isPushPrimingDismissed,
 	shouldAutoResubscribePush,
 	shouldShowPushPriming,
@@ -107,7 +108,15 @@ export function PushPrimingPrompt({
 			} catch {
 				return;
 			}
-			if (!shouldAutoResubscribePush({ supported, configured, permission, hasSubscription })) {
+			if (
+				!shouldAutoResubscribePush({
+					supported,
+					configured,
+					permission,
+					hasSubscription,
+					optedOut: isPushOptedOut(memberId),
+				})
+			) {
 				return;
 			}
 			try {

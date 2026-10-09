@@ -405,11 +405,12 @@ test.describe('offline page', () => {
 
 			await expect(page.getByRole('heading', { name: 'Du bist gerade offline.' })).toBeVisible();
 			await expect(page.getByText('Noch keine WG auf diesem Gerät gemerkt')).toHaveCount(0);
-			await expect(page.locator('a', { hasText: 'Zurück zu Fixture WG' })).toHaveAttribute(
-				'href',
-				`/wg/${FIXTURE_WG.shareCode}`,
-			);
-			await expect(page.getByRole('link', { name: 'Fixture WG öffnen' })).toBeVisible();
+			// WG pages are not cached: offline there is no link into a dead end, only a hint.
+			await expect(page.getByRole('button', { name: 'Zurück zu Fixture WG' })).toBeDisabled();
+			await expect(page.getByRole('link', { name: 'Fixture WG öffnen' })).toHaveCount(0);
+			await expect(
+				page.getByText('Deine WG öffnet sich erst, sobald du wieder online bist.'),
+			).toBeVisible();
 		});
 
 		test('keeps queued actions visible when the server is unreachable', async ({ page }) => {

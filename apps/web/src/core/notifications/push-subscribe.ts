@@ -1,6 +1,7 @@
 'use client';
 
 import { apiFetch } from '@/core/infra/api-client';
+import { setPushOptOut } from '@/core/notifications/push-priming';
 
 function isStaleMembershipError(error: string): boolean {
 	return (
@@ -59,6 +60,12 @@ export async function retireWebPushEndpoint(
 	return saveServerPushOptOut(code, memberId, endpoint);
 }
 
+/** The browser endpoint is registered for a member of another account. */
+class EndpointOwnedError extends Error {}
+
+const ENDPOINT_OWNED_MESSAGE =
+	'Push-Abo konnte nicht gespeichert werden: Dieser Browser ist mit einem anderen Konto verbunden. Versuche es erneut.';
+
 async function saveServerPushOptIn(
 	code: string,
 	memberId: string,
@@ -87,6 +94,7 @@ async function saveServerPushOptIn(
 	});
 	if (!saved.ok) {
 		if (createdSubscription) await subscription.unsubscribe().catch(() => undefined);
+		if (saved.error === 'endpoint_owned') throw new EndpointOwnedError(ENDPOINT_OWNED_MESSAGE);
 		if (saved.error === 'push_subscription_invalid') {
 			throw new Error('Push-Abo konnte nicht gespeichert werden: Aktiviere Web Push neu.');
 		}
@@ -118,6 +126,25 @@ export function isPushSupported(): boolean {
 		'serviceWorker' in navigator &&
 		'PushManager' in window
 	);
+}
+
+export interface PushDeviceState {
+	supported: boolean;
+	permission: NotificationPermission | null;
+	/** This browser holds a live PushSubscription (the server flag is per member, not per device). */
+	hasSubscription: boolean;
+}
+
+export async function readPushDeviceState(): Promise<PushDeviceState> {
+	if (!isPushSupported()) return { supported: false, permission: null, hasSubscription: false };
+	const permission = Notification.permission;
+	try {
+		const registration = await navigator.serviceWorker.getRegistration();
+		const subscription = await registration?.pushManager.getSubscription();
+		return { supported: true, permission, hasSubscription: !!subscription };
+	} catch {
+		return { supported: true, permission, hasSubscription: false };
+	}
 }
 
 export async function persistExistingWebPushSubscription(
@@ -152,10 +179,30 @@ export async function subscribeWebPush(code: string, memberId: string): Promise<
 		});
 		createdSubscription = true;
 	}
-	await saveServerPushOptIn(code, memberId, subscription, createdSubscription);
+	try {
+		await saveServerPushOptIn(code, memberId, subscription, createdSubscription);
+	} catch (err) {
+		// A reused subscription may belong to another account on this browser;
+		// a fresh endpoint proves ownership, so retry once with a new one.
+		if (!(err instanceof EndpointOwnedError) || createdSubscription) throw err;
+		await subscription.unsubscribe().catch(() => undefined);
+		const fresh = await registration.pushManager.subscribe({
+			userVisibleOnly: true,
+			applicationServerKey: urlBase64ToArrayBuffer(vapidKey),
+		});
+		await saveServerPushOptIn(code, memberId, fresh, true);
+	}
+	setPushOptOut(memberId, false);
 }
 
 export async function unsubscribeWebPush(code: string, memberId: string): Promise<void> {
+	await removeWebPush(code, memberId);
+	// Remember the choice so neither the silent resubscribe nor the settings
+	// reconcile turns Web Push back on (the browser permission stays granted).
+	setPushOptOut(memberId, true);
+}
+
+async function removeWebPush(code: string, memberId: string): Promise<void> {
 	if (!('serviceWorker' in navigator) || !navigator.serviceWorker) {
 		await saveServerPushOptOut(code, memberId, undefined);
 		return;
@@ -164,7 +211,9 @@ export async function unsubscribeWebPush(code: string, memberId: string): Promis
 	const subscription = await registration.pushManager.getSubscription();
 	const endpoint = subscription?.endpoint;
 	if (!endpoint) {
-		await saveServerPushOptOut(code, memberId, undefined);
+		// Without a PATCH: it wipes the subscriptions of this member's other devices.
+		// Only browsers that cannot subscribe at all have nothing else to clean up.
+		if (!isPushSupported()) await saveServerPushOptOut(code, memberId, undefined);
 		return;
 	}
 

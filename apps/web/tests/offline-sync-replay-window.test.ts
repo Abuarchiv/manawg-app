@@ -272,7 +272,7 @@ test('failed final queue read marks a successful action for review after storage
 	assert.equal(requests, 1);
 });
 
-test('failed final save keeps an expense when its recurring follow-up was not persisted', async () => {
+test('failed final save does not resend a synced recurring expense', async () => {
 	const storage = makeStorage();
 	let primaryRequestDone = false;
 	storage.setItem = (key, value) => {
@@ -304,9 +304,10 @@ test('failed final save keeps an expense when its recurring follow-up was not pe
 		}),
 	]);
 	await module.syncOfflineActions('TEST1234', { force: true, memberId: 'member-a' });
-	assert.equal(calls, 2);
-	assert.equal(module.readOfflineQueue().length, 1);
-	assert.equal(module.readOfflineQueue()[0].type, 'expense.create');
+	assert.equal(calls, 1);
+	assert.equal(module.readOfflineQueue().length, 0);
+	await module.syncOfflineActions('TEST1234', { force: true, memberId: 'member-a' });
+	assert.equal(calls, 1);
 });
 
 test('a recurring advance action is not followed by a second advance request', async () => {
@@ -353,4 +354,44 @@ test('queued PATCH keeps its idempotency key and expected member in the request'
 	await module.syncOfflineActions('TEST1234', { force: true, memberId: 'member-a' });
 	assert.equal(request?.headers['Idempotency-Key'], VALID_KEY);
 	assert.equal(request?.memberId, 'member-a');
+});
+
+test('connection failures keep no backoff while server errors do', async () => {
+	for (const [status, backedOff] of [
+		[0, false],
+		[500, true],
+	] as const) {
+		let requests = 0;
+		const { module } = await makeQueueModule({
+			apiFetch: async () => {
+				requests += 1;
+				return { ok: false, status, error: status === 0 ? 'Netzwerkfehler' : 'boom' };
+			},
+		});
+		await setQueue(module, [createAction()]);
+		await module.syncOfflineActions('TEST1234', { memberId: 'member-a' });
+		const retained = module.readOfflineQueue()[0];
+		assert.equal(retained.attempts, backedOff ? 1 : undefined, String(status));
+		assert.equal(retained.lastAttemptAt === undefined, !backedOff, String(status));
+		// The harness stubs shouldRetryOfflineAction, so the backoff itself is read from the fields.
+		await module.syncOfflineActions('TEST1234', { memberId: 'member-a' });
+		assert.equal(requests, 2, String(status));
+	}
+});
+
+test('upload network errors keep no backoff', async () => {
+	const { module } = await makeQueueModule({
+		images: {
+			uploadPendingImageToken: async () => {
+				throw new TypeError('Failed to fetch');
+			},
+		},
+	});
+	await setQueue(module, [
+		createAction({
+			payload: { content: 'receipt', kind: 'info', imageUrl: 'manawg-pending-image:receipt' },
+		}),
+	]);
+	await module.syncOfflineActions('TEST1234', { memberId: 'member-a' });
+	assert.equal(module.readOfflineQueue()[0].attempts, undefined);
 });

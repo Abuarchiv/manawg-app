@@ -1,6 +1,7 @@
 'use client';
 
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useKeyboardOpen } from '@/shared/lib/use-keyboard-open';
+import { type ReactNode, useLayoutEffect, useRef } from 'react';
 
 /**
  * One floating bottom navigation for the public shell and the WG shell: same
@@ -9,43 +10,11 @@ import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 're
  */
 export function AppBottomNav({ label, children }: { label: string; children: ReactNode }) {
 	const ref = useRef<HTMLElement>(null);
-	const [keyboardOpen, setKeyboardOpen] = useState(false);
 	// iOS keeps fixed bars at the layout viewport, so with the keyboard open the bar floats mid-screen.
 	// Hidden by collapsing to zero height at the viewport bottom (not display:none): a display:none
 	// element reports an all-zero rect, and the chat frame fit would then reserve the whole
 	// visible height for it and collapse to 0px. A zero-height rect at the bottom reserves nothing.
-	useEffect(() => {
-		const vv = window.visualViewport;
-		if (!vv) return;
-		// The keyboard is open when the visual viewport is much shorter than the page height seen
-		// before typing began. innerHeight alone is unreliable: Android (resizes-content) and iOS 27
-		// shrink it together with the keyboard, so the difference stays near 0 or depends on event order.
-		const pageHeight = () => Math.max(document.documentElement.clientHeight, vv.height);
-		let base = pageHeight();
-		const sync = (event?: Event) => {
-			const el = document.activeElement;
-			const typing =
-				el instanceof HTMLElement && el.matches('input, textarea, [contenteditable="true"]');
-			// Moving focus between fields blurs first while the keyboard is still up: keep the old base.
-			if (!typing && event?.type !== 'focusout') base = pageHeight();
-			setKeyboardOpen(typing && base - vv.height > 100);
-		};
-		sync();
-		vv.addEventListener('resize', sync);
-		vv.addEventListener('scroll', sync);
-		window.addEventListener('resize', sync);
-		window.addEventListener('orientationchange', sync);
-		document.addEventListener('focusin', sync);
-		document.addEventListener('focusout', sync);
-		return () => {
-			vv.removeEventListener('resize', sync);
-			vv.removeEventListener('scroll', sync);
-			window.removeEventListener('resize', sync);
-			window.removeEventListener('orientationchange', sync);
-			document.removeEventListener('focusin', sync);
-			document.removeEventListener('focusout', sync);
-		};
-	}, []);
+	const keyboardOpen = useKeyboardOpen();
 	useLayoutEffect(() => {
 		const nav = ref.current;
 		const frame = nav?.parentElement;

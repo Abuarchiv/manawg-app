@@ -13,7 +13,7 @@ import { useImageUpload } from './use-image-upload';
 
 interface Props {
 	shareCode: string;
-	purpose: 'expense' | 'announcement';
+	purpose: 'expense' | 'announcement' | 'chat';
 	value: string | null;
 	onChange: (url: string | null) => void;
 	disabled?: boolean;

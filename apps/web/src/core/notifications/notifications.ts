@@ -5,6 +5,7 @@ export type NotificationEvent =
 	| 'expense.created'
 	| 'expense.recurring_charged'
 	| 'expense.reminder'
+	| 'expense.debt_settled'
 	| 'import.completed'
 	| 'notification.test'
 	| 'announcement.posted'
@@ -194,6 +195,18 @@ export function formatNotificationMessage(
 				title: 'Erinnerung',
 				body: `Du schuldest ${creditor} noch ${money(payload.amountCents, payload.currency)}${dayClause} — bitte zeitnah ausgleichen.`,
 				urlPath: '/mahnungen',
+			};
+		}
+		case 'expense.debt_settled': {
+			const actorName = text(payload.actorName, 'Jemand');
+			const amount = money(payload.amountCents, payload.currency);
+			return {
+				title: 'Ausgleich eingetragen',
+				body:
+					payload.direction === 'received'
+						? `${actorName} hat den Eingang von ${amount} von dir bestätigt.`
+						: `${actorName} hat ${amount} an dich beglichen. Stimmt das nicht, öffne die Ausgaben und widersprich dort.`,
+				urlPath: '/ausgaben',
 			};
 		}
 		case 'import.completed': {

@@ -28,6 +28,8 @@ export function useOfflineAutoSync({
 			!accountReady ||
 			!identity ||
 			syncingRef.current ||
+			// Offline attempts would only fail (and start image uploads); the online event syncs.
+			(typeof navigator !== 'undefined' && navigator.onLine === false) ||
 			countOfflineActions(shareCode, { memberId: identity.memberId }) === 0
 		) {
 			return;

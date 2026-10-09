@@ -7,6 +7,7 @@ const PUSH_ACTIVATION_ERROR_MESSAGES = new Set([
 	'Push-Abo konnte nicht gespeichert werden: Aktiviere Web Push neu.',
 	'Push-Abo konnte nicht gespeichert werden: Tritt der WG erneut bei.',
 	'Push-Abo konnte nicht gespeichert werden: Versuche es gleich erneut.',
+	'Push-Abo konnte nicht gespeichert werden: Dieser Browser ist mit einem anderen Konto verbunden. Versuche es erneut.',
 ]);
 
 const PUSH_DEACTIVATION_ERROR_MESSAGES = new Set([

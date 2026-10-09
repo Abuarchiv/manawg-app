@@ -23,6 +23,8 @@ export function KnownWgsCard({
 	queueCounts,
 	primaryWg,
 }: KnownWgsCardProps) {
+	// WG pages are never cached, so offline a link would only reload the offline page.
+	const offline = status === 'browser-offline';
 	return (
 		<section
 			aria-labelledby="known-wgs-heading"
@@ -34,6 +36,13 @@ export function KnownWgsCard({
 				</h2>
 			</div>
 			<div className="space-y-2">
+				{offline && knownWgs.length > 0 && (
+					<p className="text-xs text-muted-foreground">
+						{knownWgs.length === 1
+							? 'Deine WG öffnet sich erst, sobald du wieder online bist.'
+							: 'Deine WGs öffnen sich erst, sobald du wieder online bist.'}
+					</p>
+				)}
 				{knownWgs.length === 0 ? (
 					<p className="text-sm leading-relaxed text-muted-foreground">
 						{status === 'checking'
@@ -55,7 +64,11 @@ export function KnownWgsCard({
 							<div key={wg.code} role="listitem" className="w-full min-w-0">
 								<Item
 									variant="outline"
-									render={<Link href={wgHref(wg.code)} aria-label={`${wg.name} öffnen`} />}
+									render={
+										offline ? undefined : (
+											<Link href={wgHref(wg.code)} aria-label={`${wg.name} öffnen`} />
+										)
+									}
 								>
 									<ItemContent className="basis-40">
 										<ItemTitle className="line-clamp-none [overflow-wrap:break-word]">
@@ -65,7 +78,9 @@ export function KnownWgsCard({
 											{formatWgQueuedActionCount(queueCounts.get(wg.code) ?? 0)}
 										</ItemDescription>
 									</ItemContent>
-									<ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+									{!offline && (
+										<ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+									)}
 								</Item>
 							</div>
 						))}

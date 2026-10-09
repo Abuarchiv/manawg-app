@@ -17,26 +17,8 @@ type Loose = any;
 
 afterEach(restoreGlobals);
 
-test('resolved upload URL is persisted to the queue before its IndexedDB blob is deleted', async () => {
-	const pendingToken = 'manawg-pending-image:pic';
-	const publicUrl = 'https://app.invalid/api/upload/read?key=uploaded';
-	const records = new Map([
-		[
-			'pic',
-			{
-				id: 'pic',
-				file: new Blob(['abc'], { type: 'image/png' }),
-				name: 'pic.png',
-				type: 'image/png',
-				size: 3,
-				shareCode: 'TEST1234',
-				memberId: 'member-a',
-				purpose: 'announcement',
-				createdAt: '2026-09-27T10:00:00.000Z',
-			},
-		],
-	]);
-	const indexedDB = {
+function fakeIndexedDb(records: Map<string, Loose>) {
+	return {
 		open() {
 			const request: Loose = {
 				result: null,
@@ -82,6 +64,28 @@ test('resolved upload URL is persisted to the queue before its IndexedDB blob is
 			return request;
 		},
 	};
+}
+
+test('resolved upload URL is persisted to the queue before its IndexedDB blob is deleted', async () => {
+	const pendingToken = 'manawg-pending-image:pic';
+	const publicUrl = 'https://app.invalid/api/upload/read?key=uploaded';
+	const records = new Map([
+		[
+			'pic',
+			{
+				id: 'pic',
+				file: new Blob(['abc'], { type: 'image/png' }),
+				name: 'pic.png',
+				type: 'image/png',
+				size: 3,
+				shareCode: 'TEST1234',
+				memberId: 'member-a',
+				purpose: 'announcement',
+				createdAt: '2026-09-27T10:00:00.000Z',
+			},
+		],
+	]);
+	const indexedDB = fakeIndexedDb(records);
 	setGlobal('indexedDB', indexedDB);
 	setGlobal('fetch', async (url: string) =>
 		url === '/api/upload/sign'
@@ -446,4 +450,48 @@ test('a synced queue entry no longer counts as queued for an open queue edit', a
 	assert.equal(module.isOfflineActionQueued('action-1'), true);
 	await module.syncOfflineActions('TEST1234', { force: true, memberId: 'member-a' });
 	assert.equal(module.isOfflineActionQueued('action-1'), false);
+});
+
+test('a stalled image upload times out so the next sync is not blocked', async () => {
+	const records = new Map([
+		[
+			'pic',
+			{
+				id: 'pic',
+				file: new Blob(['abc'], { type: 'image/png' }),
+				name: 'pic.png',
+				type: 'image/png',
+				size: 3,
+				shareCode: 'TEST1234',
+				memberId: 'member-a',
+				purpose: 'announcement',
+				createdAt: '2026-09-27T10:00:00.000Z',
+			},
+		],
+	]);
+	setGlobal('indexedDB', fakeIndexedDb(records));
+	let sawSignal = false;
+	setGlobal('fetch', async (url: string, init: { signal?: AbortSignal }) => {
+		if (url === '/api/upload/sign') {
+			return Response.json({ presignedUrl: 'https://storage.invalid/upload', publicUrl: 'x' });
+		}
+		sawSignal = init.signal instanceof AbortSignal;
+		// The PUT never resolves on its own; only the timeout signal ends it.
+		return new Promise((_resolve, reject) => {
+			init.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+		});
+	});
+	const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+	const timeoutMock = mock.method(AbortSignal, 'timeout', () => realTimeout(20));
+	const { module } = await makeQueueModule({ images: null });
+	await setQueue(module, [
+		createAction({
+			payload: { content: 'x', kind: 'info', imageUrl: 'manawg-pending-image:pic' },
+		}),
+	]);
+	const sync = module.syncOfflineActions('TEST1234', { force: true, memberId: 'member-a' });
+	await sync;
+	timeoutMock.mock.restore();
+	assert.equal(sawSignal, true);
+	assert.equal(module.readOfflineQueue().length, 1);
 });

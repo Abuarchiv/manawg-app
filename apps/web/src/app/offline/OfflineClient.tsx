@@ -270,8 +270,10 @@ export function OfflineClient({ sessionless = false }: { sessionless?: boolean }
 					{lastWg && status !== 'unauthenticated' && (
 						<Button
 							size="lg"
-							render={<Link href={wgHref(lastWg.code)} />}
-							nativeButton={false}
+							// WG pages are never cached, so offline a link would only reload this page.
+							{...(status === 'browser-offline'
+								? { disabled: true }
+								: { render: <Link href={wgHref(lastWg.code)} />, nativeButton: false })}
 							className="w-full"
 						>
 							Zurück zu {lastWg.name}

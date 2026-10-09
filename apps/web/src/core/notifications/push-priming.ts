@@ -1,4 +1,31 @@
+import { safeLocalStorage } from '@/core/utils/browser';
+
 export const PUSH_PRIMING_DISMISS_KEY = 'manawg:push-priming-dismissed';
+
+// Deliberately not `manawg:`/`manawg_`: clearLocalAccountData wipes those on
+// sign-out, which would turn a member's explicit opt-out back into "no
+// subscription yet" and let the silent resubscribe undo it on the next login.
+const PUSH_OPTOUT_KEY_PREFIX = 'manawg-push-optout:';
+
+/** True when this member switched Web Push off on this device on purpose. */
+export function isPushOptedOut(memberId: string): boolean {
+	try {
+		return safeLocalStorage()?.getItem(PUSH_OPTOUT_KEY_PREFIX + memberId) === '1';
+	} catch {
+		return false;
+	}
+}
+
+export function setPushOptOut(memberId: string, optedOut: boolean): void {
+	try {
+		const ls = safeLocalStorage();
+		if (!ls) return;
+		if (optedOut) ls.setItem(PUSH_OPTOUT_KEY_PREFIX + memberId, '1');
+		else ls.removeItem(PUSH_OPTOUT_KEY_PREFIX + memberId);
+	} catch {
+		// Storage blocked — the opt-out then only lives on the server this session.
+	}
+}
 
 /**
  * Unlike the install-prompt's 14-day cooldown, the push priming offer is a
@@ -45,6 +72,8 @@ export interface AutoResubscribeState {
 	permission: NotificationPermission | null;
 	/** This device already has a live `PushSubscription` for our service worker. */
 	hasSubscription: boolean;
+	/** The member switched Web Push off on purpose; a lost subscription is then not a bug. */
+	optedOut: boolean;
 }
 
 /**
@@ -61,5 +90,6 @@ export function shouldAutoResubscribePush(state: AutoResubscribeState): boolean 
 	if (!state.supported || !state.configured) return false;
 	if (state.permission !== 'granted') return false;
 	if (state.hasSubscription) return false;
+	if (state.optedOut) return false;
 	return true;
 }

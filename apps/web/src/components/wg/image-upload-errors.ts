@@ -22,7 +22,7 @@ export function uploadSignErrorMessage(status: number, error: string): string {
 		return 'Bild konnte nicht hochgeladen werden: Datei oder Dateityp ist ungültig.';
 	}
 	if (error === 'invalid_mime_type') {
-		return 'Bild konnte nicht hochgeladen werden: Bitte JPG, PNG, WebP oder HEIC wählen.';
+		return 'Bild konnte nicht hochgeladen werden: Bitte JPG, PNG oder WebP wählen.';
 	}
 	if (error === 'file_too_large') {
 		return 'Bild konnte nicht hochgeladen werden: Das Bild ist zu groß.';
@@ -42,10 +42,22 @@ export function uploadSignErrorMessage(status: number, error: string): string {
 /** Copy for a failed background upload of a pending image; null means retry silently. */
 export function pendingUploadErrorMessage(error: unknown): string | null {
 	if (!(error instanceof Error)) return null;
+	if (isRejectedPendingUpload(error)) {
+		return 'Bild konnte nicht hochgeladen werden: Die Datei wird abgelehnt. Entferne das Bild und wähle es erneut aus.';
+	}
 	const match = /^sign-failed:(\d+)(?::(.+))?$/.exec(error.message);
 	if (!match) return null;
 	const status = Number(match[1]);
 	const message = uploadSignErrorMessage(status, match[2] ?? '');
 	if (status >= 500 && message === GENERIC_SIGN_ERROR) return null;
 	return message;
+}
+
+/** The storage answered the PUT with a 4xx that a retry cannot fix (not a timeout or rate limit). */
+export function isRejectedPendingUpload(error: unknown): boolean {
+	if (!(error instanceof Error)) return false;
+	const match = /^upload-failed:(\d+)$/.exec(error.message);
+	if (!match) return false;
+	const status = Number(match[1]);
+	return status >= 400 && status < 500 && status !== 408 && status !== 429;
 }

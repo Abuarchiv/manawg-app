@@ -4,6 +4,7 @@ import { useWg } from '@/components/wg/WgContextProvider';
 import { subscribeOnline } from '@/core/hooks/use-online-status';
 import { REQUEST_TIMEOUT_MS } from '@/core/infra/api-client';
 import {
+	UPLOAD_TIMEOUT_MS,
 	isPendingImageToken,
 	readPendingImage,
 	readUploadSignError,
@@ -14,9 +15,11 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import {
 	MISSING_PENDING_IMAGE_MESSAGE,
+	isRejectedPendingUpload,
 	pendingUploadErrorMessage,
 	uploadSignErrorMessage,
 } from './image-upload-errors';
+import { prepareUploadImage } from './prepare-upload-image';
 
 interface SignResponse {
 	presignedUrl: string;
@@ -36,7 +39,7 @@ const ALLOWED_IMAGE_TYPES = new Set([
 
 interface ImageUploadInput {
 	shareCode: string;
-	purpose: 'expense' | 'announcement';
+	purpose: 'expense' | 'announcement' | 'chat';
 	value: string | null;
 	onChange: (url: string | null) => void;
 	disabled: boolean;
@@ -61,6 +64,9 @@ export function useImageUpload({
 	const [localPreview, setLocalPreview] = useState<string | null>(null);
 	const uploadPendingRef = useRef(false);
 	const syncPendingRef = useRef<string | null>(null);
+	// Callers pass a fresh onChange on every render (the chat composer); effects must not restart for that.
+	const onChangeRef = useRef(onChange);
+	onChangeRef.current = onChange;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -78,7 +84,7 @@ export function useImageUpload({
 					setLocalPreview(null);
 					setNotice(null);
 					setError(MISSING_PENDING_IMAGE_MESSAGE);
-					onChange(null);
+					onChangeRef.current(null);
 					return;
 				}
 				objectUrl = URL.createObjectURL(record.file);
@@ -88,7 +94,7 @@ export function useImageUpload({
 					setLocalPreview(null);
 					setNotice(null);
 					setError(MISSING_PENDING_IMAGE_MESSAGE);
-					onChange(null);
+					onChangeRef.current(null);
 				}
 			}
 		}
@@ -98,7 +104,7 @@ export function useImageUpload({
 			cancelled = true;
 			if (objectUrl) URL.revokeObjectURL(objectUrl);
 		};
-	}, [identity.memberId, onChange, value]);
+	}, [identity.memberId, value]);
 
 	useEffect(() => {
 		if (!isPendingImageToken(value)) return;
@@ -112,18 +118,23 @@ export function useImageUpload({
 			setNotice(null);
 			try {
 				const publicUrl = await uploadPendingImageToken(value, identity.memberId);
-				onChange(publicUrl);
+				onChangeRef.current(publicUrl);
 			} catch (err) {
 				if (err instanceof Error && err.message === 'pending-image-missing') {
 					setNotice(null);
 					setError(MISSING_PENDING_IMAGE_MESSAGE);
-					onChange(null);
+					onChangeRef.current(null);
 					return;
 				}
 				const actionableMessage = pendingUploadErrorMessage(err);
 				if (actionableMessage) {
 					setNotice(null);
 					setError(actionableMessage);
+					// The storage refused the file for good; retrying would only burn upload signatures.
+					if (isRejectedPendingUpload(err)) {
+						void removePendingImage(value, identity.memberId).catch(() => undefined);
+						onChangeRef.current(null);
+					}
 					return;
 				}
 				setNotice('Bild ist vorbereitet und wird erneut hochgeladen, sobald das Netz stabil ist.');
@@ -135,27 +146,40 @@ export function useImageUpload({
 
 		void syncPending();
 		return subscribeOnline(() => void syncPending());
-	}, [identity.memberId, onChange, value]);
+	}, [identity.memberId, value]);
 
-	async function handleFile(file: File): Promise<void> {
+	async function handleFile(original: File): Promise<void> {
 		if (disabled) return;
 		if (uploadPendingRef.current) return;
-		if (!file.type.startsWith('image/')) {
+		if (!original.type.startsWith('image/')) {
 			setNotice(null);
 			setError('Bitte ein Bild auswählen.');
 			return;
 		}
-		if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+		if (!ALLOWED_IMAGE_TYPES.has(original.type)) {
 			setNotice(null);
 			setError('Bitte JPG, PNG, WebP oder HEIC wählen.');
 			return;
 		}
-		if (file.size > MAX_FILE_BYTES) {
-			setNotice(null);
-			setError('Bild zu groß (max. 8 MB). Wähle ein kleineres Bild.');
+		uploadPendingRef.current = true;
+		setUploading(true);
+		setError(null);
+		setNotice(null);
+		let file = original;
+		try {
+			file = await prepareUploadImage(original);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Bild konnte nicht verarbeitet werden.');
+			uploadPendingRef.current = false;
+			setUploading(false);
 			return;
 		}
-		uploadPendingRef.current = true;
+		if (file.size > MAX_FILE_BYTES) {
+			setError('Bild zu groß (max. 8 MB). Wähle ein kleineres Bild.');
+			uploadPendingRef.current = false;
+			setUploading(false);
+			return;
+		}
 		async function keepPending(message: string): Promise<boolean> {
 			try {
 				const token = await storePendingImage({
@@ -181,12 +205,10 @@ export function useImageUpload({
 				);
 			} finally {
 				uploadPendingRef.current = false;
+				setUploading(false);
 			}
 			return;
 		}
-		setUploading(true);
-		setError(null);
-		setNotice(null);
 		try {
 			const sigRes = await fetch('/api/upload/sign', {
 				method: 'POST',
@@ -224,6 +246,7 @@ export function useImageUpload({
 				method: 'PUT',
 				body: file,
 				headers: { ...sig.uploadHeaders, 'Content-Type': file.type },
+				signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
 			});
 			if (!uploadRes.ok) {
 				await keepPending(
