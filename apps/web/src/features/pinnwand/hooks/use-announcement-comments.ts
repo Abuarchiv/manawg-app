@@ -24,12 +24,12 @@ export function useAnnouncementComments(
 	const {
 		identity,
 		members,
+		toast,
 		encodedShareCode,
 		isPending,
 		start,
 		end,
 		setActionError,
-		setNotice,
 		load,
 	} = ctx;
 	const commentIdempotencyKeysRef = useRef(new Map<string, string>());
@@ -96,7 +96,7 @@ export function useAnnouncementComments(
 			),
 		}));
 		const warningMessage = notificationWarningMessage(res.data.warning);
-		if (warningMessage) setNotice(warningMessage);
+		if (warningMessage) toast.info(warningMessage);
 		void load('background');
 		return true;
 	}

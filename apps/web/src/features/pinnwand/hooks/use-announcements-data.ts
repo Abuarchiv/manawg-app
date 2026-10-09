@@ -16,6 +16,8 @@ interface AnnouncementsDataParams {
 	wg: { shareCode: string };
 	identity: { memberId: string };
 	encodedShareCode: string;
+	/** Queued offline posts were sent: "saved offline" notices are obsolete. */
+	onQueueSynced: () => void;
 }
 
 interface AnnouncementsResponse {
@@ -28,7 +30,12 @@ type LoadMode = 'replace' | 'background';
  * Pinnwand posts, synced. Background refreshes update visible posts in place; new posts wait
  * behind the "N new posts" banner so the board never jumps under the reader.
  */
-export function useAnnouncementsData({ wg, identity, encodedShareCode }: AnnouncementsDataParams) {
+export function useAnnouncementsData({
+	wg,
+	identity,
+	encodedShareCode,
+	onQueueSynced,
+}: AnnouncementsDataParams) {
 	const commentOverridesRef = useRef<CommentOverrides>(new Map());
 	const applyCommentOverrides = (item: Announcement): Announcement =>
 		applyOverrides(commentOverridesRef.current, item);
@@ -52,7 +59,7 @@ export function useAnnouncementsData({ wg, identity, encodedShareCode }: Announc
 		describeError: (error) => getWgLoadErrorMessage('Pinnwand', error.status, error.error),
 		pollIntervalMs: REFRESH_INTERVAL_MS,
 		reload: (reason) => void load(reason === 'poll' ? 'background' : 'replace'),
-		offline: { shareCode: wg.shareCode, page: 'pinnwand' },
+		offline: { shareCode: wg.shareCode, page: 'pinnwand', onReplayed: onQueueSynced },
 	});
 	const { itemsRef, serverData, serverRevision } = board;
 	const processedRevisionRef = useRef(serverRevision);

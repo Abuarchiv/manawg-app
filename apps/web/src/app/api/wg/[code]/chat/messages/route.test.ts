@@ -19,6 +19,12 @@ const wgChatMessages = pgTable('wg_chat_messages', {
 	id: uuid('id'),
 	wgId: uuid('wg_id'),
 	deletedAt: timestamp('deleted_at', { withTimezone: true }),
+	createdAt: timestamp('created_at', { withTimezone: true }),
+});
+const wgChatReads = pgTable('wg_chat_reads', {
+	wgId: uuid('wg_id'),
+	memberId: uuid('member_id'),
+	lastReadMessageId: uuid('last_read_message_id'),
 });
 const wgChatMentions = pgTable('wg_chat_mentions', {
 	mentionedMemberId: uuid('mentioned_member_id'),
@@ -44,6 +50,8 @@ const state = {
 	errors: [] as string[],
 	locks: 0,
 	rejectImageAttachment: false,
+	readMarkerRows: [] as Json[],
+	readMarkerQueries: 0,
 };
 
 function reset(): void {
@@ -63,10 +71,27 @@ function reset(): void {
 	state.errors = [];
 	state.locks = 0;
 	state.rejectImageAttachment = false;
+	state.readMarkerRows = [];
+	state.readMarkerQueries = 0;
 }
 
 let prior = Promise.resolve();
 const db = {
+	select: () => ({
+		from: (table: unknown) =>
+			table === wgChatReads
+				? {
+						innerJoin: () => ({
+							where: () => ({
+								limit: async () => {
+									state.readMarkerQueries++;
+									return state.readMarkerRows;
+								},
+							}),
+						}),
+					}
+				: { where: () => ({ orderBy: () => ({ limit: async () => [] }) }) },
+	}),
 	delete: () => ({
 		where: (condition: never) => ({
 			returning: async () => {
@@ -168,6 +193,7 @@ mock.module('@/core/db', {
 		wgChatMentions,
 		wgChatMessages,
 		wgChatReactions: {},
+		wgChatReads,
 		wgMembers,
 	},
 });
@@ -252,7 +278,7 @@ mock.module('@/core/validators/image-url', {
 	},
 });
 
-const { POST } = await import('./route');
+const { GET, POST } = await import('./route');
 
 function harness() {
 	reset();
@@ -350,4 +376,25 @@ test('revoked private image attachment returns 409 and creates no chat row', asy
 	assert.equal(state.messages.length, 0);
 	assert.equal(state.notifications, 0);
 	assert.ok(state.locks > 0);
+});
+
+test('GET returns the read marker only when the bootstrap asks for it', async () => {
+	reset();
+	const marker = { messageId: 'message-1', createdAt: new Date('2026-09-23T10:00:00.000Z') };
+	state.readMarkerRows = [marker];
+	const get = async (query: string) => {
+		const response = await GET(
+			new Request(`https://example.invalid/?${query}`) as never,
+			{ params: Promise.resolve({ code: 'MTE8PZAT' }) } as never,
+		);
+		return (await response.json()) as { readMarker?: unknown };
+	};
+	assert.equal('readMarker' in (await get('limit=50')), false);
+	assert.equal(state.readMarkerQueries, 0);
+	assert.deepEqual((await get('limit=50&includeReadMarker=1')).readMarker, {
+		...marker,
+		createdAt: marker.createdAt.toISOString(),
+	});
+	state.readMarkerRows = [];
+	assert.equal((await get('includeReadMarker=1')).readMarker, null);
 });

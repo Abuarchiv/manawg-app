@@ -261,7 +261,7 @@ export function useAnnouncementComposer(
 			removeDraft(draftKey);
 			setComposerOpen(false);
 			const warningMessage = notificationWarningMessage(res.data.warning);
-			if (warningMessage) setNotice(warningMessage);
+			if (warningMessage) toast.info(warningMessage);
 			else toast.success('Beitrag veröffentlicht.');
 			void load().then(() => scrollToAnnouncement(createdAnnouncementId));
 		} finally {

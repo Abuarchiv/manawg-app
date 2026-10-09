@@ -30,7 +30,7 @@ import { getPrivateImageUrl } from '@/core/validators/image-url';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
-const ALLOWED_PURPOSES = ['expense', 'announcement'] as const;
+const ALLOWED_PURPOSES = ['expense', 'announcement', 'chat'] as const;
 const MAX_SIGN_BODY_BYTES = 16 * 1024;
 
 const signSchema = z.object({

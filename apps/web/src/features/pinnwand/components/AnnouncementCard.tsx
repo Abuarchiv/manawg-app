@@ -23,9 +23,10 @@ import { type ReactElement, memo, useState } from 'react';
 import { AnnouncementActionsMenu } from './AnnouncementActionsMenu';
 import { AnnouncementBody } from './AnnouncementBody';
 import { AnnouncementDeleteDialog } from './AnnouncementDeleteDialog';
+import { AnnouncementEditDrawer } from './AnnouncementEditDrawer';
 import { AnnouncementFooter } from './AnnouncementFooter';
 import { actionLabelSubject } from './CommentRow';
-import type { Announcement, ReactionKey } from './announcement-types';
+import type { Announcement, AnnouncementKind, ReactionKey } from './announcement-types';
 import { KIND_LABELS } from './constants';
 
 interface AnnouncementCardProps {
@@ -39,6 +40,10 @@ interface AnnouncementCardProps {
 	onDelete: (announcement: Announcement) => Promise<string | null>;
 	onTogglePinned: (announcement: Announcement) => void;
 	onToggleStatus: (announcement: Announcement) => void;
+	onEdit: (
+		announcement: Announcement,
+		next: { content: string; kind: AnnouncementKind },
+	) => Promise<boolean>;
 	onToggleReaction: (announcement: Announcement, reaction: ReactionKey) => void;
 	onAddComment: (announcement: Announcement, content: string) => Promise<boolean>;
 	onUpdateComment: (
@@ -63,6 +68,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 	onDelete,
 	onTogglePinned,
 	onToggleStatus,
+	onEdit,
 	onToggleReaction,
 	onAddComment,
 	onUpdateComment,
@@ -75,6 +81,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 	const reactionPending = (key: ReactionKey): boolean => pendingReactions.includes(key);
 	const bodyText = announcement.content.trim();
 	const [deleteOpen, setDeleteOpen] = useState(false);
+	const [editOpen, setEditOpen] = useState(false);
 	const [touchedReactions, setTouchedReactions] = useState<ReactionKey[]>([]);
 	const draftKey = `manawg:draft:${shareCode}:${currentMemberId}:announcement:${announcement.id}`;
 
@@ -82,7 +89,9 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 	const isPinned = Boolean(announcement.pinnedAt);
 	const isAuthor = announcement.authorMemberId === currentMemberId;
 	const canModerate = isAuthor || isAdmin;
-	const canResolve = isAuthor || announcement.myReactions.includes('take');
+	// Only the author rewrites a post, and only one they typed themselves (not system posts).
+	const canEdit = isAuthor && announcement.source === 'manual';
+	const canResolve = isAuthor || isAdmin || announcement.myReactions.includes('take');
 	const sourceLabel = SOURCE_LABELS[announcement.source];
 	const sourceHref = announcement.sourcePath
 		? `/wg/${encodeURIComponent(shareCode)}${announcement.sourcePath}`
@@ -143,6 +152,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 							isPinned={isPinned}
 							isResolved={isResolved}
 							canModerate={canModerate}
+							canEdit={canEdit}
 							canResolve={canResolve}
 							deletePending={deletePending}
 							pinPending={pinPending}
@@ -150,6 +160,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 							onReact={react}
 							onTogglePinned={() => onTogglePinned(announcement)}
 							onToggleStatus={() => onToggleStatus(announcement)}
+							onEdit={() => setEditOpen(true)}
 							onDelete={() => setDeleteOpen(true)}
 						/>
 					</CardAction>
@@ -167,6 +178,7 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 						announcement={announcement}
 						actionSubject={actionSubject}
 						currentMemberId={currentMemberId}
+						isAdmin={isAdmin}
 						draftKey={draftKey}
 						visibleReactions={reactions.visible}
 						reactionPending={reactionPending}
@@ -182,6 +194,14 @@ export const AnnouncementCard = memo(function AnnouncementCard({
 					/>
 				</CardFooter>
 			</Card>
+			{editOpen && (
+				<AnnouncementEditDrawer
+					open
+					onOpenChange={setEditOpen}
+					announcement={announcement}
+					onSave={(next) => onEdit(announcement, next)}
+				/>
+			)}
 			<AnnouncementDeleteDialog
 				open={deleteOpen}
 				onOpenChange={setDeleteOpen}

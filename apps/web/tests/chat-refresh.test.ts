@@ -137,3 +137,51 @@ test('a full latest page signals older history, a short one never clears it', as
 	await refresher.refresh();
 	assert.equal(state.hasMore, true);
 });
+
+test('a failed first load is followed by a successful poll that reports true', async () => {
+	let requests = 0;
+	const message = { id: 'm1', createdAt: '2026-09-24T10:00:00.000Z' };
+	const { state, refresher } = refreshHarness(async () =>
+		++requests === 1
+			? { ok: false, status: 0, error: 'Netzwerkfehler' }
+			: { ok: true, data: { messages: [message], reactions: [] } },
+	);
+	// useChatRoom clears its bootstrap error screen on the first `true`.
+	assert.equal(await refresher.refresh(), false);
+	assert.equal(state.error, true);
+	assert.equal(await refresher.refresh(), true);
+	assert.equal(state.error, false);
+	assert.deepEqual(state.messages, [message]);
+});
+
+test('the read marker is requested until the first successful refresh reports it', async () => {
+	const urls: string[] = [];
+	const seen: unknown[] = [];
+	const marker = { messageId: 'm1', createdAt: '2026-09-24T10:00:00.000Z' };
+	let requests = 0;
+	const refresher = createChatRefresher({
+		messagesUrl: '/api/wg/test/chat/messages',
+		memberId: 'member',
+		fetchJson: (async (url: string) => {
+			urls.push(url);
+			return ++requests === 1
+				? { ok: false, status: 0, error: 'Netzwerkfehler' }
+				: { ok: true, data: { messages: [{ id: 'm1' }], reactions: [], readMarker: marker } };
+		}) as never,
+		getMessages: () => [],
+		reactions: { versions: new Map(), pending: new Set() },
+		setRefreshError: () => undefined,
+		setMessages: () => undefined,
+		setReactionRows: () => undefined,
+		setHasMoreOlder: () => undefined,
+		onReadMarker: (...args) => seen.push(args),
+	});
+	await refresher.refresh();
+	await refresher.refresh();
+	await refresher.refresh();
+	assert.deepEqual(
+		urls.map((url) => url.includes('includeReadMarker=1')),
+		[true, true, false],
+	);
+	assert.deepEqual(seen, [[marker, [{ id: 'm1' }]]]);
+});

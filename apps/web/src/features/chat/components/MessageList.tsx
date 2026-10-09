@@ -7,6 +7,7 @@ import { MessageScrollerItem } from '@/components/ui/message-scroller';
 import { Spinner } from '@/components/ui/spinner';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
 import { groupMessagesByDay } from '../chat-pure';
+import { formatChatDayLabel } from '../chat-text';
 import { type BubbleMessage, MessageBubble, type ReactionSummary } from './MessageBubble';
 import { SystemMessage } from './SystemMessage';
 
@@ -15,6 +16,8 @@ interface MessageListProps {
 	members: { id: string; name: string; color: string | null }[];
 	currentMemberId: string;
 	shareCode: string;
+	/** The divider "Neue Nachrichten" goes before this message. */
+	firstUnreadId?: string | null;
 	isAdmin: boolean;
 	reactionsByMessage: Map<string, ReactionSummary[]>;
 	hasMoreOlder: boolean;
@@ -28,11 +31,6 @@ interface MessageListProps {
 	onDelete: (messageId: string) => Promise<string | null>;
 	onReply: (messageId: string) => void;
 }
-const DAY_FORMAT = new Intl.DateTimeFormat('de-DE', {
-	weekday: 'long',
-	day: 'numeric',
-	month: 'long',
-});
 const NO_REACTIONS: ReactionSummary[] = [];
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -60,6 +58,7 @@ export function MessageList({
 	members,
 	currentMemberId,
 	shareCode,
+	firstUnreadId = null,
 	isAdmin,
 	reactionsByMessage,
 	hasMoreOlder,
@@ -148,11 +147,17 @@ export function MessageList({
 					)}
 					{index === 0 && (
 						<Marker variant="separator" className="py-2 text-xs">
-							<MarkerContent>{DAY_FORMAT.format(group.day)}</MarkerContent>
+							<MarkerContent>{formatChatDayLabel(group.day)}</MarkerContent>
+						</Marker>
+					)}
+					{message.id === firstUnreadId && (
+						<Marker variant="separator" className="py-2 text-xs text-primary">
+							<MarkerContent>Neue Nachrichten</MarkerContent>
 						</Marker>
 					)}
 					{message.kind === 'system' && !message.deletedAt ? (
 						<SystemMessage
+							shareCode={shareCode}
 							systemKind={(message as BubbleMessage & { systemKind?: string }).systemKind ?? null}
 							payload={
 								(message as BubbleMessage & { systemPayload?: Record<string, unknown> })

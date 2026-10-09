@@ -1,5 +1,6 @@
 import { recordAuditEvent } from '@/core/audit';
 import { announcementComments, announcements, db } from '@/core/db';
+import { isWgAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
@@ -19,7 +20,10 @@ async function assertCommentOwner(
 	announcementId: string,
 	commentId: string,
 	memberId: string,
-): Promise<{ status: 'ok'; content: string } | { status: 'not_found' | 'forbidden' }> {
+	allowAdmin = false,
+): Promise<
+	{ status: 'ok'; content: string; moderated: boolean } | { status: 'not_found' | 'forbidden' }
+> {
 	const rows = await db
 		.select({
 			content: announcementComments.content,
@@ -37,9 +41,12 @@ async function assertCommentOwner(
 		.limit(1);
 	const row = rows[0];
 	if (!row) return { status: 'not_found' };
-	return row.memberId === memberId
-		? { status: 'ok', content: row.content }
-		: { status: 'forbidden' };
+	if (row.memberId === memberId) return { status: 'ok', content: row.content, moderated: false };
+	// Editing stays with the author; only removal may be moderated by the WG admin.
+	if (allowAdmin && (await isWgAdmin(wgId, memberId))) {
+		return { status: 'ok', content: row.content, moderated: true };
+	}
+	return { status: 'forbidden' };
 }
 
 function auditCommentSnippet(content: string): string {
@@ -105,7 +112,7 @@ export const DELETE = withWgRoute<{ id: string; commentId: string }>(
 		);
 		if (!limited.success) return tooMany();
 
-		const owner = await assertCommentOwner(wgId, id, commentId, auth.member.memberId);
+		const owner = await assertCommentOwner(wgId, id, commentId, auth.member.memberId, true);
 		if (owner.status !== 'ok') {
 			return owner.status === 'not_found'
 				? notFound('comment_not_found')
@@ -123,8 +130,14 @@ export const DELETE = withWgRoute<{ id: string; commentId: string }>(
 			eventType: 'announcement.comment.deleted',
 			entityType: 'announcement_comment',
 			entityId: commentId,
-			summary: `${auth.member.name} hat einen Kommentar entfernt.`,
-			metadata: { announcementId: id, content: owner.content.slice(0, 160) },
+			summary: owner.moderated
+				? `${auth.member.name} hat als Admin einen Kommentar entfernt.`
+				: `${auth.member.name} hat einen Kommentar entfernt.`,
+			metadata: {
+				announcementId: id,
+				content: owner.content.slice(0, 160),
+				moderated: owner.moderated,
+			},
 		});
 		return NextResponse.json({ deleted: true });
 	},

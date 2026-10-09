@@ -4,7 +4,7 @@ const URL_MAX = 2048;
 const PRIVATE_IMAGE_PATH = '/api/upload/read';
 const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 const PRIVATE_IMAGE_KEY_PATTERN =
-	/^manawg\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\/(?:expense|announcement)\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(?:jpg|png|webp|heic|heif)$/;
+	/^manawg\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\/(?:expense|announcement|chat)\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(?:jpg|png|webp|heic|heif)$/;
 
 interface PrivateImageKey {
 	wgId: string;
@@ -167,7 +167,7 @@ export function isAllowedImageUrlForWg(url: string | null | undefined, wgId: str
 }
 
 /**
- * Zod schema for user-supplied image URLs stored in expenses/announcements.
+ * Zod schema for user-supplied image URLs stored in expenses, announcements and chat messages.
  *
  * Empty string is treated as "no image" (legacy clients send '' instead of null).
  * Non-empty strings must be https:// and point at our S3 bucket — blocks

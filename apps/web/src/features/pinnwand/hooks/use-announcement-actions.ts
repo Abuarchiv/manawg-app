@@ -1,3 +1,4 @@
+import { mutationErrorMessage } from '@/core/http/error-codes';
 import { apiFetch } from '@/core/infra/api-client';
 import { notificationWarningMessage } from '@/core/notifications/notification-warning';
 import { createOfflineIdempotencyKey } from '@/core/offline/offline-queue';
@@ -33,7 +34,6 @@ export function useAnnouncementActions(
 		start,
 		end,
 		setActionError,
-		setNotice,
 		itemsRef,
 		commitItems,
 		load,
@@ -47,12 +47,17 @@ export function useAnnouncementActions(
 
 	async function patchAnnouncement(
 		id: string,
-		body: { pinned?: boolean; status?: AnnouncementStatus; kind?: AnnouncementKind },
+		body: {
+			pinned?: boolean;
+			status?: AnnouncementStatus;
+			kind?: AnnouncementKind;
+			content?: string;
+		},
 		pendingKey: string,
 		rollback: () => void,
 		onSuccess?: () => void,
-	): Promise<void> {
-		if (isPending(pendingKey)) return;
+	): Promise<boolean> {
+		if (isPending(pendingKey)) return false;
 		start(pendingKey);
 		const res = await apiFetch<AnnouncementWriteResponse>(
 			`/api/wg/${encodedShareCode}/announcements/${encodeURIComponent(id)}`,
@@ -70,12 +75,14 @@ export function useAnnouncementActions(
 				rollback();
 				setActionError(announcementActionErrorMessage(res.error));
 			}
-			return;
+			return false;
 		}
 		const warningMessage = notificationWarningMessage(res.data.warning);
-		if (warningMessage) setNotice(warningMessage);
+		if (warningMessage) toast.info(warningMessage);
 		onSuccess?.();
-		void load();
+		// Background merge: a tap must not shove new posts of others into the list under the reader.
+		void load('background');
+		return true;
 	}
 
 	function togglePinned(announcement: Announcement): void {
@@ -114,6 +121,23 @@ export function useAnnouncementActions(
 			nextStatus === 'resolved'
 				? () => toast.success('Geklärt – liegt jetzt unter „Geklärt & älter“.')
 				: undefined,
+		);
+	}
+
+	/** Text and type of an own post; resolves true once saved so the editor can close. */
+	function editAnnouncement(
+		announcement: Announcement,
+		next: { content: string; kind: AnnouncementKind },
+	): Promise<boolean> {
+		const body: { content?: string; kind?: AnnouncementKind } = {};
+		if (next.content !== announcement.content) body.content = next.content;
+		if (next.kind !== announcement.kind) body.kind = next.kind;
+		return patchAnnouncement(
+			announcement.id,
+			body,
+			`${announcement.id}:edit`,
+			() => undefined,
+			() => updateItem(announcement.id, (item) => ({ ...item, ...body })),
 		);
 	}
 
@@ -165,13 +189,15 @@ export function useAnnouncementActions(
 			} else {
 				rollback();
 				setActionError(announcementActionErrorMessage(res.error));
+				// Someone else resolved the post meanwhile: show the real state right away.
+				if (res.error === 'announcement_resolved') void load('background');
 			}
 			return;
 		}
 		reactionIdempotencyKeysRef.current.delete(reactionRequestKey);
 		const warningMessage = notificationWarningMessage(res.data.warning);
-		if (warningMessage) setNotice(warningMessage);
-		void load();
+		if (warningMessage) toast.info(warningMessage);
+		void load('background');
 	}
 
 	/** The dialog shows the error itself: null = removed (or already gone), otherwise the message. */
@@ -192,18 +218,20 @@ export function useAnnouncementActions(
 				dropVanishedAnnouncement(id);
 				return null;
 			}
-			return res.status === 403
-				? 'Nur wer den Beitrag geschrieben hat oder WG-Admins können ihn entfernen.'
-				: failed;
+			if (res.status === 403) {
+				return 'Nur wer den Beitrag geschrieben hat oder WG-Admins können ihn entfernen.';
+			}
+			return mutationErrorMessage('Beitrag konnte nicht entfernt werden', res.error, {}, failed);
 		}
 		commitItems(itemsRef.current.filter((item) => item.id !== id));
-		void load();
+		void load('background');
 		return null;
 	}
 
 	return {
 		togglePinned,
 		toggleStatus,
+		editAnnouncement,
 		toggleReaction,
 		addComment: comments.addComment,
 		updateComment: comments.updateComment,

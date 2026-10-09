@@ -88,7 +88,9 @@ export const DELETE = withWgRoute<{ id: string }>(
 
 		const url = new URL(req.url);
 		const emoji = url.searchParams.get('emoji');
-		if (!isSingleEmoji(emoji)) return badRequest('emoji_invalid');
+		// Lenient on purpose: reactions stored before the strict emoji check must stay removable.
+		if (!emoji || emoji.trim().length === 0 || emoji.length > 16)
+			return badRequest('emoji_invalid');
 		const auth = await requireWgMember(req, code);
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;

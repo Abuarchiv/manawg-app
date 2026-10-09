@@ -159,6 +159,7 @@ export const MessageBubble = memo(function MessageBubble({
 									message={message}
 									senderName={senderName}
 									isOwn={isOwn}
+									reactions={reactions}
 									replyTo={replyTo}
 									replyToSender={replyToSender}
 									timeStamp={timeStamp}

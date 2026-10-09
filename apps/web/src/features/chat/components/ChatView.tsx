@@ -115,6 +115,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 									members={listMembers}
 									currentMemberId={identity.memberId}
 									shareCode={shareCode}
+									firstUnreadId={chat.firstUnreadId}
 									isAdmin={isAdmin}
 									reactionsByMessage={chat.reactionsByMessage}
 									hasMoreOlder={chat.hasMoreOlder}
@@ -147,6 +148,7 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 			</MessageScrollerProvider>
 			<ChatComposer
 				key={`${shareCode}:${identity.memberId}`}
+				shareCode={shareCode}
 				draftKey={`manawg:draft:${shareCode}:${identity.memberId}:chat`}
 				error={chat.sendError}
 				members={members.filter((m) => m.active).map((m) => ({ id: m.id, name: m.name }))}

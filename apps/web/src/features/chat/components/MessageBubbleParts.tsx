@@ -24,7 +24,9 @@ import { Button } from '@/components/ui/button';
 import { Field, FieldGroup } from '@/components/ui/field';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
+import { useWg } from '@/components/wg/WgContextProvider';
 import type { RefObject } from 'react';
+import { reactorNames } from '../chat-reactions';
 import type { ReactionSummary } from '../chat-types';
 
 interface MessageEditFormProps {
@@ -105,26 +107,31 @@ export function MessageReactions({
 	pendingEmoji,
 	onToggle,
 }: MessageReactionsProps) {
+	const { members, identity } = useWg();
 	return (
 		<BubbleReactions
 			align={align}
 			className="static max-w-full flex-wrap translate-y-0 gap-1 bg-transparent p-0 ring-0 group-data-[align=end]/bubble:self-end has-[button]:p-0"
 		>
-			{reactions.map((reaction) => (
-				<Button
-					key={reaction.emoji}
-					variant={reaction.mine ? 'secondary' : 'outline'}
-					size="xs"
-					className="rounded-full"
-					onClick={() => onToggle(reaction.emoji, reaction.mine)}
-					disabled={disabled}
-					aria-pressed={reaction.mine}
-					aria-label={`Reaktion ${reaction.emoji} (${reaction.count}) ${reaction.mine ? 'entfernen' : 'hinzufügen'} — Nachricht von ${senderName}`}
-				>
-					{pendingEmoji === reaction.emoji ? <Spinner /> : <span>{reaction.emoji}</span>}
-					<span className="tabular-nums">{reaction.count}</span>
-				</Button>
-			))}
+			{reactions.map((reaction) => {
+				const who = reactorNames(reaction.memberIds, members, identity.memberId);
+				return (
+					<Button
+						key={reaction.emoji}
+						variant={reaction.mine ? 'secondary' : 'outline'}
+						size="xs"
+						className="rounded-full"
+						onClick={() => onToggle(reaction.emoji, reaction.mine)}
+						disabled={disabled}
+						aria-pressed={reaction.mine}
+						title={who}
+						aria-label={`Reaktion ${reaction.emoji} (${reaction.count}) von ${who}: ${reaction.mine ? 'entfernen' : 'hinzufügen'} — Nachricht von ${senderName}`}
+					>
+						{pendingEmoji === reaction.emoji ? <Spinner /> : <span>{reaction.emoji}</span>}
+						<span className="tabular-nums">{reaction.count}</span>
+					</Button>
+				);
+			})}
 		</BubbleReactions>
 	);
 }

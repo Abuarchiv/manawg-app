@@ -78,6 +78,7 @@ describe('private image URL contract', () => {
 		assert.deepEqual(parsePrivateImageKey(`manawg/${WG_A}/announcement/${IMAGE_ID}.heif`), {
 			wgId: WG_A,
 		});
+		assert.deepEqual(parsePrivateImageKey(`manawg/${WG_A}/chat/${IMAGE_ID}.jpg`), { wgId: WG_A });
 		assert.equal(parsePrivateImageKey(`manawg/${WG_A}/expense/${IMAGE_ID}.jpg/extra`), null);
 		assert.equal(parsePrivateImageKey(`manawg/${WG_A}/expense/../${IMAGE_ID}.jpg`), null);
 		assert.equal(parsePrivateImageKey(`manawg/${WG_A}/other/${IMAGE_ID}.jpg`), null);

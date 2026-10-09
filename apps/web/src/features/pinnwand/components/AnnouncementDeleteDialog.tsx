@@ -53,9 +53,7 @@ export function AnnouncementDeleteDialog({
 				</AlertDialogHeader>
 				{deleteError && (
 					<Alert variant="destructive">
-						<AlertDescription>
-							Beitrag konnte nicht entfernt werden. Versuche es erneut.
-						</AlertDescription>
+						<AlertDescription>{deleteError}</AlertDescription>
 					</Alert>
 				)}
 				<AlertDialogFooter>

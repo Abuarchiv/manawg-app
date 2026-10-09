@@ -91,7 +91,10 @@ export const POST = withWgRoute<{ id: string }>(
 				.limit(1);
 			const wantActive = parsed.data.active ?? !existingReaction[0];
 			if (wantActive && parsed.data.reaction === 'take' && announcement.status === 'resolved') {
-				return { response: { status: 400, body: { error: 'reaction_invalid' } }, effect: null };
+				return {
+					response: { status: 409, body: { error: 'announcement_resolved' } },
+					effect: null,
+				};
 			}
 			const response = (active: boolean) => ({
 				status: 200,

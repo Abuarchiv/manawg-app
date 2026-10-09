@@ -6,7 +6,7 @@ import { requireOwnerOrAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
-import { badRequest, forbidden, notFound, tooMany } from '@/core/http/api-errors';
+import { badRequest, conflict, forbidden, notFound, tooMany } from '@/core/http/api-errors';
 import { parseBody } from '@/core/http/parse-body';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
 import { canEditMessage, sanitizeMessageBody } from '@/features/chat/chat-pure';
@@ -56,9 +56,19 @@ export const PATCH = withWgRoute<{ id: string }>(
 		const [updated] = await db
 			.update(wgChatMessages)
 			.set({ body: cleanBody, editedAt: now })
-			.where(and(eq(wgChatMessages.id, id), eq(wgChatMessages.wgId, wgId)))
+			// Author, kind and deletedAt guard against a DELETE that landed after the read above.
+			.where(
+				and(
+					eq(wgChatMessages.id, id),
+					eq(wgChatMessages.wgId, wgId),
+					eq(wgChatMessages.senderMemberId, auth.member.memberId),
+					eq(wgChatMessages.kind, 'text'),
+					isNull(wgChatMessages.deletedAt),
+				),
+			)
 			.returning();
-		if (!updated) return notFound('message_not_found');
+		// Row, author and kind are fixed after the check, so no row means a parallel delete.
+		if (!updated) return conflict('message_deleted', 'message_deleted');
 
 		await recordAuditEvent({
 			wgId,

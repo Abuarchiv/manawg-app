@@ -61,3 +61,9 @@ export function withRestoredFields<K extends keyof Announcement>(
 	for (const key of keys) restored[key] = before[key];
 	return restored;
 }
+
+/** A saved draft is only worth restoring when it holds text that differs from the starting text. */
+export function isRestorableDraft(saved: unknown, initial: string): saved is { content: string } {
+	const content = (saved as { content?: unknown } | null | undefined)?.content;
+	return typeof content === 'string' && content.length > 0 && content !== initial;
+}

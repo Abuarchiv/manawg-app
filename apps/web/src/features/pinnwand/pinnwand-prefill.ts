@@ -1,5 +1,9 @@
-const AMOUNT_PATTERN =
-	/(?:^|\s)(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{1,5}(?:[,.]\d{1,2})?)\s*(?:€|eur)(?=[\s.,;:!?)]|$)/i;
+const AMOUNT_NUMBER = String.raw`\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d{1,5}(?:[,.]\d{1,2})?`;
+// Currency either before ("€ 35,50") or after ("35 Euro", "12,5 EUR", "35€") the number.
+const AMOUNT_PATTERN = new RegExp(
+	String.raw`(?:^|\s)(?:€\s*(${AMOUNT_NUMBER})|(${AMOUNT_NUMBER})\s*(?:€|eur(?:o)?))(?=[\s.,;:!?)]|$)`,
+	'i',
+);
 
 function normalizeAmountStr(raw: string): string {
 	if (raw.includes(',')) return raw.replace(/\./g, '');
@@ -19,7 +23,8 @@ export function buildPinnwandPrefill(content: string): PinnwandPrefill {
 		.filter(Boolean)
 		.join(' ')
 		.slice(0, 120);
-	const amount = compact.match(AMOUNT_PATTERN)?.[1];
+	const match = compact.match(AMOUNT_PATTERN);
+	const amount = match?.[1] ?? match?.[2];
 	const amountStr = amount ? normalizeAmountStr(amount) : null;
 	const title = compact
 		.replace(AMOUNT_PATTERN, ' ')

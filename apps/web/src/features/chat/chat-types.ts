@@ -16,6 +16,8 @@ export interface ReactionSummary {
 	emoji: string;
 	count: number;
 	mine: boolean;
+	/** Who reacted, the viewer first. */
+	memberIds: string[];
 }
 
 export interface ChatMessageDto extends BubbleMessage {

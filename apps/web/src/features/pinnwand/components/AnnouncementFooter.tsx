@@ -26,6 +26,7 @@ interface AnnouncementFooterProps {
 	announcement: Announcement;
 	actionSubject: string;
 	currentMemberId: string;
+	isAdmin: boolean;
 	draftKey: string;
 	visibleReactions: ReactionKey[];
 	reactionPending: (key: ReactionKey) => boolean;
@@ -43,6 +44,7 @@ export function AnnouncementFooter({
 	announcement,
 	actionSubject,
 	currentMemberId,
+	isAdmin,
 	draftKey,
 	visibleReactions,
 	reactionPending,
@@ -108,9 +110,7 @@ export function AnnouncementFooter({
 							}}
 							aria-disabled={reactionPending(key) || undefined}
 							aria-pressed={active}
-							aria-label={
-								label + (active ? '-Reaktion entfernen: ' : '-Reaktion setzen: ') + actionSubject
-							}
+							aria-label={`${label}-Reaktion: ${actionSubject}`}
 						>
 							{reactionPending(key) ? (
 								<Spinner data-icon="inline-start" />
@@ -168,6 +168,10 @@ export function AnnouncementFooter({
 									key={comment.id}
 									comment={comment}
 									canEdit={comment.memberId === currentMemberId && !comment.id.startsWith('temp-')}
+									canDelete={
+										(comment.memberId === currentMemberId || isAdmin) &&
+										!comment.id.startsWith('temp-')
+									}
 									draftKey={`${draftKey}:edit:${comment.id}`}
 									onUpdate={(text) => onUpdateComment(comment.id, text)}
 									onDelete={() => onDeleteComment(comment.id)}

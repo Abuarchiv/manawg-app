@@ -2,7 +2,7 @@ import { recordAuditEvent } from '@/core/audit';
 import { announcementReactions, announcements, db } from '@/core/db';
 import { revokePrivateImageIfUnreferenced } from '@/core/db/private-image-deletions';
 import { lockExpensePayments, withTransaction } from '@/core/db/transaction';
-import { requireOwnerOrAdmin } from '@/core/guards/admin';
+import { isWgAdmin, requireOwnerOrAdmin } from '@/core/guards/admin';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
@@ -13,16 +13,9 @@ import {
 	dispatchNotificationSafely,
 } from '@/core/notifications/notification-dispatch';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
-import { ANNOUNCEMENT_KINDS } from '@/features/pinnwand/announcement-workflow';
+import { patchAnnouncementSchema } from '@/features/pinnwand/server/announcement-patch-schema';
 import { and, eq } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import { z } from 'zod';
-
-const patchAnnouncementSchema = z.object({
-	status: z.enum(['open', 'resolved']).optional(),
-	pinned: z.boolean().optional(),
-	kind: z.enum(ANNOUNCEMENT_KINDS).optional(),
-});
 
 export const PATCH = withWgRoute<{ id: string }>(
 	'announcement PATCH',
@@ -34,6 +27,7 @@ export const PATCH = withWgRoute<{ id: string }>(
 				status: 'status_invalid',
 				pinned: 'pinned_invalid',
 				kind: 'kind_invalid',
+				content: 'content_invalid',
 			},
 		});
 		if (!parsed.ok) return parsed.response;
@@ -52,6 +46,7 @@ export const PATCH = withWgRoute<{ id: string }>(
 				authorMemberId: announcements.authorMemberId,
 				content: announcements.content,
 				status: announcements.status,
+				source: announcements.source,
 			})
 			.from(announcements)
 			.where(and(eq(announcements.id, id), eq(announcements.wgId, wg.id)))
@@ -67,8 +62,14 @@ export const PATCH = withWgRoute<{ id: string }>(
 			if (denied) return denied;
 		}
 
+		// Only the author rewrites the text, and only of posts they typed themselves.
+		if (parsed.data.content !== undefined && (!isAuthor || row.source !== 'manual')) {
+			return forbidden('not_owner', 'not_owner');
+		}
+
 		const now = new Date();
 		const patch: {
+			content?: string;
 			kind?: string;
 			pinnedAt?: Date | null;
 			status?: string;
@@ -78,6 +79,7 @@ export const PATCH = withWgRoute<{ id: string }>(
 		} = {};
 		patch.updatedAt = now;
 		if (parsed.data.kind) patch.kind = parsed.data.kind;
+		if (parsed.data.content !== undefined) patch.content = parsed.data.content;
 		if (typeof parsed.data.pinned === 'boolean') {
 			patch.pinnedAt = parsed.data.pinned ? now : null;
 		}
@@ -93,7 +95,8 @@ export const PATCH = withWgRoute<{ id: string }>(
 					),
 				)
 				.limit(1);
-			if (!isAuthor && hasTaken.length === 0) {
+			// Admins close posts nobody owns anymore, e.g. open asks of members who moved out.
+			if (!isAuthor && hasTaken.length === 0 && !(await isWgAdmin(wg.id, auth.member.memberId))) {
 				return forbidden('status_change_not_allowed', 'status_change_not_allowed');
 			}
 			patch.status = parsed.data.status;
@@ -118,6 +121,10 @@ export const PATCH = withWgRoute<{ id: string }>(
 				status: updated.status,
 				kind: updated.kind,
 				pinned: updated.pinnedAt !== null,
+				...(parsed.data.content !== undefined && {
+					contentBefore: row.content.slice(0, 160),
+					contentAfter: updated.content.slice(0, 160),
+				}),
 			},
 		});
 		let warning: NotificationDispatchWarning = null;

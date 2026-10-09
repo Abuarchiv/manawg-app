@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { readDraft, removeDraft, writeDraft } from '@/core/offline/drafts';
 import { formatRelativeTime, formatTimeFull } from '@/core/utils/time';
+import { isRestorableDraft } from '@/features/pinnwand/announcement-edits';
 import { Pencil, Trash2 } from 'lucide-react';
 import { type ReactElement, useEffect, useRef, useState } from 'react';
 import type { AnnouncementComment } from './announcement-types';
@@ -35,11 +36,11 @@ export function useCommentDraft(key: string, initial = '') {
 	const [restored, setRestored] = useState(false);
 	useEffect(() => {
 		const saved = readDraft<{ content?: string }>(key);
-		if (typeof saved?.content === 'string' && saved.content.length > 0) {
+		if (isRestorableDraft(saved, initial)) {
 			setDraft(saved.content);
 			setRestored(true);
-		}
-	}, [key]);
+		} else if (saved) removeDraft(key);
+	}, [key, initial]);
 	function change(value: string) {
 		setDraft(value);
 		setRestored(Boolean(value));
@@ -57,12 +58,15 @@ export function useCommentDraft(key: string, initial = '') {
 export function CommentRow({
 	comment,
 	canEdit,
+	canDelete,
 	draftKey,
 	onUpdate,
 	onDelete,
 }: {
 	comment: AnnouncementComment;
 	canEdit: boolean;
+	/** Own replies, or any reply for the WG admin. */
+	canDelete: boolean;
 	draftKey: string;
 	onUpdate: (content: string) => Promise<boolean>;
 	onDelete: () => Promise<boolean>;
@@ -144,34 +148,38 @@ export function CommentRow({
 							<Spinner /> Wird gesendet…
 						</output>
 					)}
-					{canEdit && !editing && (
+					{(canEdit || canDelete) && !editing && (
 						<span className="ml-auto flex gap-1">
-							<Button
-								ref={editButtonRef}
-								variant="ghost"
-								size="icon-sm"
-								disabled={pending}
-								aria-label={`Antwort bearbeiten: ${actionSubject}`}
-								onClick={() => {
-									if (!draft.restored) draft.change(comment.content);
-									focusEditorOnEditRef.current = true;
-									setEditing(true);
-								}}
-							>
-								<Pencil aria-hidden />
-							</Button>
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								disabled={pending}
-								aria-label={`Antwort entfernen: ${actionSubject}`}
-								onClick={() => {
-									setError(false);
-									setConfirmOpen(true);
-								}}
-							>
-								<Trash2 aria-hidden />
-							</Button>
+							{canEdit && (
+								<Button
+									ref={editButtonRef}
+									variant="ghost"
+									size="icon-sm"
+									disabled={pending}
+									aria-label={`Antwort bearbeiten: ${actionSubject}`}
+									onClick={() => {
+										if (!draft.restored) draft.change(comment.content);
+										focusEditorOnEditRef.current = true;
+										setEditing(true);
+									}}
+								>
+									<Pencil aria-hidden />
+								</Button>
+							)}
+							{canDelete && (
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									disabled={pending}
+									aria-label={`Antwort entfernen: ${actionSubject}`}
+									onClick={() => {
+										setError(false);
+										setConfirmOpen(true);
+									}}
+								>
+									<Trash2 aria-hidden />
+								</Button>
+							)}
 						</span>
 					)}
 				</div>
@@ -197,6 +205,8 @@ export function CommentRow({
 								variant="ghost"
 								disabled={pending}
 								onClick={() => {
+									// Drop the draft so the next edit starts from the current comment text.
+									draft.clear();
 									focusEditButtonRef.current = true;
 									setEditing(false);
 								}}
@@ -236,7 +246,10 @@ export function CommentRow({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle>Antwort entfernen?</AlertDialogTitle>
-						<AlertDialogDescription>„{actionSubject}“ wird entfernt.</AlertDialogDescription>
+						<AlertDialogDescription>
+							{canEdit ? '' : `Antwort von ${comment.authorName || 'Unbekannt'}: `}„{actionSubject}“
+							wird entfernt.
+						</AlertDialogDescription>
 					</AlertDialogHeader>
 					{error && (
 						<Alert variant="destructive">

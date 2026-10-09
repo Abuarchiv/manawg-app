@@ -24,6 +24,7 @@ import {
 	ListChecks,
 	type LucideIcon,
 	MoreHorizontal,
+	Pencil,
 	Pin,
 	PinOff,
 	Receipt,
@@ -61,6 +62,7 @@ interface AnnouncementActionsMenuProps {
 	isPinned: boolean;
 	isResolved: boolean;
 	canModerate: boolean;
+	canEdit: boolean;
 	canResolve: boolean;
 	deletePending: boolean;
 	pinPending: boolean;
@@ -68,6 +70,7 @@ interface AnnouncementActionsMenuProps {
 	onReact: (key: ReactionKey) => void;
 	onTogglePinned: () => void;
 	onToggleStatus: () => void;
+	onEdit: () => void;
 	onDelete: () => void;
 }
 
@@ -82,6 +85,7 @@ export function AnnouncementActionsMenu({
 	isPinned,
 	isResolved,
 	canModerate,
+	canEdit,
 	canResolve,
 	deletePending,
 	pinPending,
@@ -89,6 +93,7 @@ export function AnnouncementActionsMenu({
 	onReact,
 	onTogglePinned,
 	onToggleStatus,
+	onEdit,
 	onDelete,
 }: AnnouncementActionsMenuProps) {
 	return (
@@ -141,8 +146,17 @@ export function AnnouncementActionsMenu({
 						);
 					})}
 				</DropdownMenuGroup>
-				{(canModerate || canResolve) && <DropdownMenuSeparator />}
+				{(canEdit || canModerate || canResolve) && <DropdownMenuSeparator />}
 				<DropdownMenuGroup>
+					{canEdit && (
+						<DropdownMenuItem
+							onClick={onEdit}
+							className="min-h-11"
+							aria-label={`Beitrag bearbeiten: ${actionSubject}`}
+						>
+							<Pencil /> Bearbeiten
+						</DropdownMenuItem>
+					)}
 					{canModerate && (
 						<DropdownMenuItem
 							onClick={onTogglePinned}

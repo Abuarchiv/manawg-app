@@ -7,6 +7,8 @@ export interface ChatMessageInput {
 	body: string;
 	mentionMemberIds: string[];
 	replyToMessageId: string | null;
+	/** Set for photo messages; the text may then be empty. */
+	imageUrl?: string;
 }
 
 /** The key of a send whose outcome is unknown; a retry of the same input reuses it. */

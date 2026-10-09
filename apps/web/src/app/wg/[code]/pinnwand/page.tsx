@@ -50,6 +50,7 @@ export default function PinnwandPage(): React.ReactElement {
 		stableDelete,
 		stableTogglePinned,
 		stableToggleStatus,
+		stableEdit,
 		stableToggleReaction,
 		stableAddComment,
 		stableUpdateComment,
@@ -72,6 +73,7 @@ export default function PinnwandPage(): React.ReactElement {
 				onDelete={stableDelete}
 				onTogglePinned={stableTogglePinned}
 				onToggleStatus={stableToggleStatus}
+				onEdit={stableEdit}
 				onToggleReaction={stableToggleReaction}
 				onAddComment={stableAddComment}
 				onUpdateComment={stableUpdateComment}

@@ -1,5 +1,6 @@
 import {
 	CHAT_REFRESH_BATCH_SIZE,
+	type ChatReadMarker,
 	advanceChatRefreshSequence,
 	isLatestChatRefreshResponse,
 	nextChatRefreshBatch,
@@ -17,6 +18,8 @@ type Update<T> = (current: T) => T;
 interface ChatRefreshResponse {
 	messages: ChatMessageDto[];
 	refreshedMessages?: ChatMessageDto[];
+	/** Only present when requested with `includeReadMarker`; null when never read. */
+	readMarker?: ChatReadMarker | null;
 	reactions: ChatReactionRow[];
 }
 
@@ -37,6 +40,11 @@ export interface ChatRefreshDeps {
 	setMessages: (update: Update<ChatMessageDto[]>) => void;
 	setReactionRows: (update: Update<ChatReactionRow[]>) => void;
 	setHasMoreOlder: (update: Update<boolean>) => void;
+	/**
+	 * Asks the server for the viewer's read marker with the first successful refresh and reports it
+	 * together with that response's latest page, so the unread divider can be placed once.
+	 */
+	onReadMarker?: (marker: ChatReadMarker | null, messages: ChatMessageDto[]) => void;
 }
 
 export interface ChatRefresher {
@@ -61,6 +69,7 @@ export function createChatRefresher(deps: ChatRefreshDeps): ChatRefresher {
 	// Set when a mutation invalidates the refresh in flight: its result is then dropped, so the
 	// next refresh() must fetch again instead of reusing it.
 	let superseded = false;
+	let readMarkerPending = deps.onReadMarker !== undefined;
 
 	async function fetchMessages(): Promise<boolean> {
 		const requestSequence = advanceChatRefreshSequence(sequence);
@@ -75,6 +84,8 @@ export function createChatRefresher(deps: ChatRefreshDeps): ChatRefresher {
 		olderOffset = refreshBatch.nextOffset;
 		const params = new URLSearchParams({ limit: `${CHAT_PAGE_SIZE}` });
 		for (const id of refreshBatch.ids) params.append('refreshId', id);
+		const askedForReadMarker = readMarkerPending;
+		if (askedForReadMarker) params.set('includeReadMarker', '1');
 		const mutationVersionsAtRequest = new Map(
 			[...deps.reactions.versions].map(([key, mutation]) => [key, mutation.version]),
 		);
@@ -87,6 +98,10 @@ export function createChatRefresher(deps: ChatRefreshDeps): ChatRefresher {
 			return false;
 		}
 		deps.setRefreshError((prev) => (isLatest() ? false : prev));
+		if (askedForReadMarker && res.data.readMarker !== undefined) {
+			readMarkerPending = false;
+			deps.onReadMarker?.(res.data.readMarker, res.data.messages);
+		}
 		const refreshedLoadedMessages = res.data.refreshedMessages ?? [];
 		const refreshedMessageIds = new Set(
 			[...res.data.messages, ...refreshedLoadedMessages].map((message) => message.id),
