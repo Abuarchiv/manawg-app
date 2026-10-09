@@ -7,6 +7,13 @@ export function getInitialJoinCode(search: string): string {
 	return isValidShareCode(code) ? code : '';
 }
 
+/** Pulls a share code out of pasted invite text or a link; '' when none is found. */
+export function extractInviteCode(text: string): string {
+	const match = /[?&]code=([A-Za-z0-9]+)/.exec(text) ?? /\bCode\s+([A-Za-z0-9]{8})\b/.exec(text);
+	const code = normalizeShareCode(match?.[1] ?? '');
+	return isValidShareCode(code) ? code : '';
+}
+
 export const RATE_LIMITED_MESSAGE =
 	'Zu viele Versuche. Bitte warte einige Minuten und versuche es dann erneut.';
 export const DELETION_PENDING_MESSAGE =

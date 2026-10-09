@@ -112,7 +112,6 @@ export async function PATCH(
 		if (rotateShareCode) {
 			updates.shareCode = await generateUniqueShareCode();
 			updates.shareCodeRotatedAt = new Date();
-			updates.joiningEnabled = true;
 		}
 
 		const result = await withTransaction(async (tx) => {

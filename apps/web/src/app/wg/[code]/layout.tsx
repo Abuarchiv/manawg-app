@@ -11,7 +11,7 @@ import { getAuthenticatedUserFromCookies } from '@/core/auth/server';
 import { db, wgMembers, wgs } from '@/core/db';
 import { isValidShareCode, normalizeShareCode } from '@/core/utils/share-code';
 import { loadFixtureWgView } from '@/fixtures/pages';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull } from 'drizzle-orm';
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { type ReactNode, cache } from 'react';
@@ -95,7 +95,21 @@ export default async function WgLayout({ children, params }: Props) {
 	if (!viewer) redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
 	const { user, access } = viewer;
 	if (!access) {
-		redirect(`/neu?next=${encodeURIComponent(`/wg/${encodeURIComponent(code)}`)}`);
+		const next = encodeURIComponent(`/wg/${encodeURIComponent(code)}`);
+		// Tell moved-out members why the WG is gone instead of suggesting to join again.
+		const [movedOut] = await db
+			.select({ id: wgMembers.id })
+			.from(wgMembers)
+			.innerJoin(wgs, eq(wgMembers.wgId, wgs.id))
+			.where(
+				and(
+					eq(wgs.shareCode, code),
+					eq(wgMembers.authUserId, user.id),
+					isNotNull(wgMembers.deactivatedAt),
+				),
+			)
+			.limit(1);
+		redirect(`/neu?next=${next}${movedOut ? '&reason=moved_out' : ''}`);
 	}
 	const { memberId, memberName, ...wg } = access;
 	const initialIdentity: StoredIdentity = { memberId, name: memberName, authUserId: user.id };
@@ -110,6 +124,7 @@ export default async function WgLayout({ children, params }: Props) {
 			color: wgMembers.color,
 			role: wgMembers.role,
 			paypalMerchantId: wgMembers.paypalMerchantId,
+			authUserId: wgMembers.authUserId,
 			deactivatedAt: wgMembers.deactivatedAt,
 		})
 		.from(wgMembers)
@@ -117,9 +132,11 @@ export default async function WgLayout({ children, params }: Props) {
 	// Same rule as isWgAdmin: the first active admin row. Session is server-verified.
 	const initialIsAdmin =
 		memberRows.find((row) => row.role === 'admin' && row.deactivatedAt === null)?.id === memberId;
-	const members = memberRows.map(({ deactivatedAt, role: _role, ...member }) => ({
+	const members = memberRows.map(({ deactivatedAt, role, authUserId, ...member }) => ({
 		...member,
 		active: deactivatedAt === null,
+		isAdmin: role === 'admin' && deactivatedAt === null,
+		hasAccount: authUserId !== null,
 	}));
 
 	return (
@@ -158,6 +175,8 @@ function WgShell({
 		color?: string | null;
 		paypalMerchantId?: string | null;
 		active: boolean;
+		isAdmin?: boolean;
+		hasAccount?: boolean;
 	}>;
 	initialIdentity?: StoredIdentity;
 	initialIsAdmin?: boolean;

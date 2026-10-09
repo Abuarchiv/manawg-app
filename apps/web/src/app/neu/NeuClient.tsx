@@ -28,6 +28,7 @@ import {
 } from './start-flow';
 import { useAccountWgs } from './use-account-wgs';
 import { useBusyLock } from './use-busy-lock';
+import { useClearCallbackError } from './use-clear-callback-error';
 import { useCreateWg } from './use-create-wg';
 import { useJoinWg } from './use-join-wg';
 import { useSaveStartDraft, useStartDraft } from './use-start-draft';
@@ -198,7 +199,10 @@ export function NeuClient({ sessionless = false }: { sessionless?: boolean }) {
 		};
 	}, [showsSignIn]);
 
+	useClearCallbackError(authState === 'authenticated');
+
 	const callbackError = searchParams.get('error') === 'auth_callback';
+	const movedOut = searchParams.get('reason') === 'moved_out';
 	const deniedWgCode = (() => {
 		const code = getWgCodeFromPath(safeNextPath(searchParams.get('next')));
 		return code && !accountWgs.some((accountWg) => accountWg.code === code) ? code : null;
@@ -315,12 +319,12 @@ export function NeuClient({ sessionless = false }: { sessionless?: boolean }) {
 			}
 			backHref={explorationHref()}
 		>
-			{callbackError && <ErrorBox>{AUTH_CALLBACK_ERROR}</ErrorBox>}
 			{accountSwitchError && <ErrorBox>{accountSwitchError}</ErrorBox>}
 			{deniedWgCode && step === 'choose' && (
 				<ErrorBox>
-					Auf die WG {deniedWgCode} hast du mit diesem Konto keinen Zugriff. Wähle eine deiner WGs
-					oder tritt mit dem WG-Code bei.
+					{movedOut
+						? `Du bist in der WG ${deniedWgCode} als ausgezogen markiert. Eine Admin-Person kann dich wieder aktivieren.`
+						: `Auf die WG ${deniedWgCode} hast du mit diesem Konto keinen Zugriff. Wähle eine deiner WGs oder tritt mit dem WG-Code bei.`}
 				</ErrorBox>
 			)}
 			{step === 'choose' && (

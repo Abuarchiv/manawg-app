@@ -1,5 +1,16 @@
 'use client';
 
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogMedia,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { ItemGroup } from '@/components/ui/item';
 import { Spinner } from '@/components/ui/spinner';
@@ -20,11 +31,22 @@ import {
 	updateOfflineQueue,
 } from '@/core/offline/offline-client';
 import { formatOfflineQueueCount } from '@/core/offline/offline-copy';
-import { type OfflineAction, explainOfflineActionFailure } from '@/core/offline/offline-queue';
+import { isPendingImageToken, removePendingImage } from '@/core/offline/offline-images';
+import {
+	type OfflineAction,
+	explainOfflineActionFailure,
+	getOfflineActionSummary,
+} from '@/core/offline/offline-queue';
 import { cn } from '@/shared/lib/cn';
+import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { OfflineQueueItem } from './OfflineQueueItem';
 import { SERVER_CHECKS, offlineActionInspectHref } from './offline-queue-server-checks';
+
+function discardSummary(item: OfflineAction): string {
+	const summary = getOfflineActionSummary(item);
+	return summary.detail || summary.title;
+}
 
 export function OfflineQueueSection({
 	shareCode,
@@ -37,6 +59,7 @@ export function OfflineQueueSection({
 	const [syncing, setSyncing] = useState(false);
 	const [conflictNotes, setConflictNotes] = useState<Record<string, string>>({});
 	const [checkingServerIds, setCheckingServerIds] = useState<Set<string>>(new Set());
+	const [itemToDiscard, setItemToDiscard] = useState<OfflineAction | null>(null);
 	const syncingRef = useRef(false);
 	const checkingServerIdsRef = useRef<Set<string>>(new Set());
 	const encodedShareCode = encodeURIComponent(shareCode);
@@ -56,7 +79,8 @@ export function OfflineQueueSection({
 		return () => window.removeEventListener('manawg:offline-queue', refresh);
 	}, [refresh]);
 
-	async function remove(id: string): Promise<void> {
+	async function remove(item: OfflineAction): Promise<void> {
+		const id = item.id;
 		const saved = await updateOfflineQueue((actions) =>
 			actions.filter((item) => item.id !== id || !isActiveMemberItem(item)),
 		);
@@ -67,10 +91,19 @@ export function OfflineQueueSection({
 			}));
 			return;
 		}
+		// The queued photo only lives in IndexedDB; drop it with its action.
+		dropPendingImage(item.payload.imageUrl);
 		refresh();
 	}
 
+	function dropPendingImage(imageUrl: unknown): void {
+		if (typeof imageUrl === 'string' && isPendingImageToken(imageUrl)) {
+			void removePendingImage(imageUrl, memberId).catch(() => undefined);
+		}
+	}
+
 	async function removeAttachment(id: string): Promise<void> {
+		const imageUrl = items.find((item) => item.id === id)?.payload.imageUrl;
 		const saved = await updateOfflineQueue((actions) =>
 			actions.map((item) =>
 				item.id === id && isActiveMemberItem(item)
@@ -85,6 +118,7 @@ export function OfflineQueueSection({
 			}));
 			return;
 		}
+		dropPendingImage(imageUrl);
 		setConflictNotes((current) => ({
 			...current,
 			[id]: 'Anhang entfernt. Die Offline-Aktion kann wieder synchronisiert werden.',
@@ -235,12 +269,43 @@ export function OfflineQueueSection({
 								onCheckServer={() => void checkServer(item)}
 								onEdit={(draft) => edit(item, draft)}
 								onRemoveAttachment={() => void removeAttachment(item.id)}
-								onRemove={() => void remove(item.id)}
+								onRemove={() => setItemToDiscard(item)}
 							/>
 						))}
 					</ItemGroup>
 				)}
 			</div>
+			<AlertDialog
+				open={itemToDiscard !== null}
+				onOpenChange={(open) => {
+					if (!open) setItemToDiscard(null);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia>
+							<Trash2 aria-hidden />
+						</AlertDialogMedia>
+						<AlertDialogTitle>Offline-Aktion verwerfen?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{itemToDiscard &&
+								`„${discardSummary(itemToDiscard)}“ wurde noch nicht gesendet und lässt sich nach dem Verwerfen nicht wiederherstellen.`}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel autoFocus>Behalten</AlertDialogCancel>
+						<AlertDialogAction
+							variant="destructive"
+							onClick={() => {
+								if (itemToDiscard) void remove(itemToDiscard);
+								setItemToDiscard(null);
+							}}
+						>
+							Verwerfen
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
 		</Section>
 	);
 }

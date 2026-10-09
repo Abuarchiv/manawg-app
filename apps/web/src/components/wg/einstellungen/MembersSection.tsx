@@ -28,11 +28,13 @@ import { MemberDeactivateDialog } from '@/components/wg/MemberDeactivateDialog';
 import type { Member, WgSummary } from '@/components/wg/WgContextProvider';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { Section } from '@/components/wg/einstellungen/Section';
+import { PAYPAL_PAYMENT_PENDING_MESSAGE } from '@/components/wg/einstellungen/settings-errors';
 import type { StoredIdentity } from '@/core/auth/identity';
 import { RATE_LIMITED_MESSAGE, isRateLimited } from '@/core/http/error-codes';
 import { apiFetch } from '@/core/infra/api-client';
+import { MAX_MEMBERS_PER_WG } from '@/shared/lib/limits';
 import { Crown, UserPlus } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface MembersSectionProps {
 	wg: WgSummary;
@@ -53,8 +55,16 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 	const [reactivatingId, setReactivatingId] = useState<string | null>(null);
 	const [memberActionMessage, setMemberActionMessage] = useState<string | null>(null);
 	const [memberActionError, setMemberActionError] = useState<string | null>(null);
+	const [memberToReactivate, setMemberToReactivate] = useState<{ id: string; name: string } | null>(
+		null,
+	);
 	const activeMembers = members.filter((m) => m.active);
 	const inactiveMembers = members.filter((m) => !m.active);
+
+	// The layout's roster has no roles; load them so the Admin badge is right from the start.
+	useEffect(() => {
+		void refreshMembers(identity.memberId);
+	}, [refreshMembers, identity.memberId]);
 
 	function handleMemberDeactivated(name: string): void {
 		setMemberActionError(null);
@@ -115,7 +125,11 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 			setMemberActionError(
 				isRateLimited(res.error, res.status)
 					? RATE_LIMITED_MESSAGE
-					: 'Aktivierung konnte nicht gespeichert werden. Bitte versuche es erneut.',
+					: res.error === 'member_limit_reached'
+						? `Die WG hat schon ${MAX_MEMBERS_PER_WG} aktive Mitglieder. Lass zuerst jemanden ausziehen.`
+						: res.error === 'paypal_payment_pending'
+							? PAYPAL_PAYMENT_PENDING_MESSAGE
+							: 'Aktivierung konnte nicht gespeichert werden. Bitte versuche es erneut.',
 			);
 		}
 		setReactivatingId(null);
@@ -133,6 +147,7 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 							<ItemContent className="min-w-[8ch] basis-[8ch]">
 								<ItemTitle className="line-clamp-none [overflow-wrap:break-word]">
 									{member.name}
+									{member.isAdmin && <Badge variant="outline">Admin</Badge>}
 								</ItemTitle>
 							</ItemContent>
 							<ItemActions>
@@ -183,7 +198,9 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 											{member.name}
 										</ItemTitle>
 										<ItemDescription className="line-clamp-none [overflow-wrap:break-word]">
-											Ausgezogen, Verlauf bleibt erhalten
+											{member.hasAccount === false
+												? 'Ausgezogen, kein Konto verknüpft'
+												: 'Ausgezogen, Verlauf bleibt erhalten'}
 										</ItemDescription>
 									</ItemContent>
 									<ItemActions>
@@ -192,7 +209,11 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 												type="button"
 												variant="outline"
 												size="sm"
-												onClick={() => void handleReactivate({ id: member.id, name: member.name })}
+												onClick={() => {
+													const target = { id: member.id, name: member.name };
+													if (member.hasAccount === false) setMemberToReactivate(target);
+													else void handleReactivate(target);
+												}}
 												disabled={reactivatingId === member.id}
 												aria-label={`Aktivieren: ${member.name}`}
 											>
@@ -259,6 +280,39 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 						>
 							{promoting && <Spinner aria-hidden />}
 							Übergeben
+						</Button>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={memberToReactivate !== null}
+				onOpenChange={(open) => {
+					if (!open) setMemberToReactivate(null);
+				}}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogMedia>
+							<UserPlus aria-hidden />
+						</AlertDialogMedia>
+						<AlertDialogTitle>{memberToReactivate?.name} trotzdem aktivieren?</AlertDialogTitle>
+						<AlertDialogDescription>
+							{memberToReactivate?.name} hat kein verknüpftes Konto (zum Beispiel weil das Konto
+							gelöscht wurde) und kann sich nicht anmelden. Die Person erscheint dann wieder in
+							Aufteilungen und im Putzplan.
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>Abbrechen</AlertDialogCancel>
+						<Button
+							onClick={() => {
+								const target = memberToReactivate;
+								setMemberToReactivate(null);
+								if (target) void handleReactivate(target);
+							}}
+						>
+							Aktivieren
 						</Button>
 					</AlertDialogFooter>
 				</AlertDialogContent>

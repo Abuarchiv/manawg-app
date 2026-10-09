@@ -63,6 +63,8 @@ export function NotificationSection({
 }) {
 	const {
 		status,
+		pushActive,
+		pushBlocked,
 		pending,
 		pushTarget,
 		message,
@@ -74,7 +76,6 @@ export function NotificationSection({
 		saveQuietHours,
 		sendTestNotification,
 	} = useNotificationSettings({ code, memberId });
-	const pushActive = !!status?.pushOptIn;
 	const notificationBusy = pending !== null || loadingStatus;
 	const notificationControlsDisabled = !status || notificationBusy;
 	const pushConfigured = status?.pushConfigured !== false;
@@ -114,6 +115,15 @@ export function NotificationSection({
 									{pushActive && <Bell className="text-muted-foreground h-3.5 w-3.5" aria-hidden />}
 								</FieldTitle>
 								{!pushConfigured && <FieldDescription>Nicht konfiguriert</FieldDescription>}
+								{pushConfigured && !pushActive && pushBlocked && (
+									<FieldDescription>
+										Benachrichtigungen sind im Browser blockiert. Erlaube sie in den
+										Website-Einstellungen.
+									</FieldDescription>
+								)}
+								{pushConfigured && !pushActive && !pushBlocked && status.pushOptIn && (
+									<FieldDescription>Auf diesem Gerät noch nicht aktiv</FieldDescription>
+								)}
 								{pushActive && (
 									<Button
 										type="button"
@@ -135,9 +145,11 @@ export function NotificationSection({
 							</FieldContent>
 							<Switch
 								checked={pushTarget ?? pushActive}
-								disabled={notificationControlsDisabled || !pushConfigured}
+								disabled={
+									notificationControlsDisabled || !pushConfigured || (pushBlocked && !pushActive)
+								}
 								aria-busy={pending === 'push'}
-								aria-label={pushActive ? 'Web Push deaktivieren' : 'Web Push aktivieren'}
+								aria-label="Web Push"
 								onCheckedChange={setPushEnabled}
 							/>
 						</Field>
@@ -179,6 +191,9 @@ export function NotificationSection({
 									</Button>
 								)}
 							</div>
+							<FieldDescription>
+								Zeiten in Berlin-Zeit. Fällige Aufgaben und Termine kommen trotzdem durch.
+							</FieldDescription>
 							<div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,8rem),1fr))] gap-2">
 								<HourSelect
 									label="Von"
@@ -188,7 +203,7 @@ export function NotificationSection({
 									onChange={(value) =>
 										void (value === null
 											? saveQuietHours(null, null)
-											: saveQuietHours(value, status?.quietEndHour ?? 7))
+											: saveQuietHours(value, status?.quietEndHour ?? (value + 8) % 24))
 									}
 								/>
 								<HourSelect
@@ -199,7 +214,7 @@ export function NotificationSection({
 									onChange={(value) =>
 										void (value === null
 											? saveQuietHours(null, null)
-											: saveQuietHours(status?.quietStartHour ?? 22, value))
+											: saveQuietHours(status?.quietStartHour ?? (value + 16) % 24, value))
 									}
 								/>
 							</div>

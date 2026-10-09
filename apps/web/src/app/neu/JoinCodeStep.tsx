@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { FieldDescription, FieldGroup, FieldLabel, Field as UiField } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { extractInviteCode } from '@/core/infra/join-flow';
 import { normalizeShareCode } from '@/core/utils/share-code';
 import { ArrowRight } from 'lucide-react';
 import type { StartField } from './start-flow';
@@ -54,6 +55,14 @@ export function JoinCodeStep({
 							onJoinCodeChange(
 								normalizeShareCode(event.target.value.replace(/[^a-z0-9]/gi, '')).slice(0, 8),
 							);
+							if (error) clearError();
+						}}
+						onPaste={(event) => {
+							// maxLength cuts long pasted invites before onChange, so read the clipboard here.
+							const code = extractInviteCode(event.clipboardData.getData('text'));
+							if (!code) return;
+							event.preventDefault();
+							onJoinCodeChange(code);
 							if (error) clearError();
 						}}
 						maxLength={16}

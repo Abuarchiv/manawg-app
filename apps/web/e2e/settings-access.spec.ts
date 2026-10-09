@@ -381,7 +381,7 @@ test.describe('settings pending switches', () => {
 		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/einstellungen#benachrichtigungen`);
 		const chores = page.getByRole('switch', { name: 'Putzplan', exact: true });
 		const expenses = page.getByRole('switch', { name: 'Ausgaben', exact: true });
-		const push = page.getByRole('switch', { name: 'Web Push aktivieren', exact: true });
+		const push = page.getByRole('switch', { name: 'Web Push', exact: true });
 		await expect(chores).toBeEnabled();
 		// Regression: the switch's <button> must declare type="button" (via nativeButton),
 		// otherwise it defaults to type="submit" and submits any enclosing <form>.

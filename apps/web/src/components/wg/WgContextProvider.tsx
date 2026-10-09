@@ -43,6 +43,10 @@ export interface Member {
 	// the full roster so history and balances keep resolving names; choice UIs
 	// (identity picker, dropdowns, chore rotation) filter to active members.
 	active: boolean;
+	// Optional: E2E fixtures and older responses omit them.
+	isAdmin?: boolean;
+	// false when the account behind the member is gone (e.g. deleted account).
+	hasAccount?: boolean;
 }
 
 interface WgContextValue {
@@ -133,7 +137,11 @@ export function WgContextProvider({
 
 	const value = useMemo<WgContextValue | null>(() => {
 		if (!identity) return null;
-		return { wg, members, identity, refreshMembers, isAdmin, accountReady };
+		// The roster is the source of truth for names, so a rename shows up in the identity too.
+		const rosterName = members.find((m) => m.id === identity.memberId)?.name;
+		const current =
+			rosterName && rosterName !== identity.name ? { ...identity, name: rosterName } : identity;
+		return { wg, members, identity: current, refreshMembers, isAdmin, accountReady };
 	}, [wg, members, identity, refreshMembers, isAdmin, accountReady]);
 
 	// Hook order is effect order: the sync interval, the members poll, then the

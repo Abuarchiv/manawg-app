@@ -4,11 +4,7 @@
  */
 import type { SocialProvider } from '@/components/auth/SocialLoginButtons';
 import { safeNextPath } from '@/core/auth/next-path';
-import {
-	DELETION_PENDING_MESSAGE,
-	RATE_LIMITED_MESSAGE,
-	getInitialJoinCode,
-} from '@/core/infra/join-flow';
+import { DELETION_PENDING_MESSAGE, getInitialJoinCode } from '@/core/infra/join-flow';
 import { isValidShareCode, normalizeShareCode } from '@/core/utils/share-code';
 
 import { MEMBER_NAME_MAX_LENGTH, WG_NAME_MAX_LENGTH } from '@/shared/lib/limits';
@@ -125,7 +121,9 @@ export async function readStartError(response: Response): Promise<string> {
 }
 
 export function createWgErrorMessage(status: number, error: string): string {
-	if (status === 429) return RATE_LIMITED_MESSAGE;
+	if (status === 429) {
+		return 'Du hast gerade mehrere WGs erstellt. Bitte versuche es in etwa einer Stunde erneut.';
+	}
 	if (error === 'account_deletion_pending') return DELETION_PENDING_MESSAGE;
 	if (status === 401 && error === 'auth_required') {
 		return 'Melde dich zuerst mit deinem Konto an.';

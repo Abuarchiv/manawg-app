@@ -208,6 +208,13 @@ test.describe('ManaWG launch smoke', () => {
 		await expect(page.locator('main#main')).toHaveCount(1);
 	});
 
+	test('prototype keys are not public modules', async ({ page }) => {
+		for (const slug of ['constructor', '__proto__']) {
+			await gotoWithRetry(page, `/entdecken/${slug}`);
+			await expect(page.getByRole('heading', { name: 'Seite nicht gefunden' })).toBeVisible();
+		}
+	});
+
 	test('create WG → redirect to /wg/<code> → Start overview retains primary navigation', async ({
 		page,
 	}) => {

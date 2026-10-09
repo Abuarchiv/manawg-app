@@ -6,8 +6,11 @@ import {
 } from '@/components/wg/einstellungen/settings-errors';
 import { getWgLoadErrorMessage } from '@/core/guards/load-errors';
 import { apiFetch } from '@/core/infra/api-client';
+import { isPushOptedOut } from '@/core/notifications/push-priming';
 import {
+	type PushDeviceState,
 	persistExistingWebPushSubscription,
+	readPushDeviceState,
 	subscribeWebPush,
 	unsubscribeWebPush,
 } from '@/core/notifications/push-subscribe';
@@ -75,6 +78,7 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 	const [message, setMessage] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loadingStatus, setLoadingStatus] = useState(true);
+	const [device, setDevice] = useState<PushDeviceState | null>(null);
 	const pendingRef = useRef(false);
 	const notificationRequestKeysRef = useRef(new Map<string, string>());
 	const loadStatusRequestIdRef = useRef(0);
@@ -108,11 +112,21 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		void loadStatus();
 	}, [loadStatus]);
 
+	const refreshDevice = useCallback(async (): Promise<void> => {
+		setDevice(await readPushDeviceState());
+	}, []);
+
+	useEffect(() => {
+		void refreshDevice();
+	}, [refreshDevice]);
+
 	// Reconcile server opt-in when the browser still has a live push subscription.
 	useEffect(() => {
 		let cancelled = false;
 		async function syncPushSubscriptionState(): Promise<void> {
 			if (status?.pushOptIn !== false) return;
+			// An explicit "off" on this device must not be undone by a subscription another WG keeps.
+			if (isPushOptedOut(memberId)) return;
 			const resyncKey = `${code}:${memberId}`;
 			if (pushResyncAttemptedKeyRef.current === resyncKey) return;
 			pushResyncAttemptedKeyRef.current = resyncKey;
@@ -161,6 +175,7 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		} finally {
 			pendingRef.current = false;
 			setPending(null);
+			void refreshDevice();
 		}
 	}
 
@@ -169,8 +184,10 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		pendingRef.current = true;
 		setPending('push');
 		setError(null);
+		setMessage(null);
 		try {
 			await unsubscribeWebPush(code, memberId);
+			pushResyncAttemptedKeyRef.current = `${code}:${memberId}`;
 			setStatus((prev) => (prev ? { ...prev, pushOptIn: false } : prev));
 			setMessage('Web Push ist deaktiviert.');
 		} catch (err) {
@@ -178,6 +195,7 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		} finally {
 			pendingRef.current = false;
 			setPending(null);
+			void refreshDevice();
 		}
 	}
 
@@ -190,6 +208,7 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		pendingRef.current = true;
 		setPending('save');
 		setError(null);
+		setMessage(null);
 		const requestKeyId = `patch:${JSON.stringify(body)}`;
 		const idempotencyKey =
 			notificationRequestKeysRef.current.get(requestKeyId) ?? createOfflineIdempotencyKey();
@@ -235,6 +254,10 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 
 	async function saveQuietHours(startHour: number | null, endHour: number | null): Promise<void> {
 		if (!status || pendingRef.current) return;
+		if (startHour !== null && startHour === endHour) {
+			setError('Start und Ende der Ruhezeit dürfen nicht gleich sein.');
+			return;
+		}
 		await patchPreferences(
 			{ quietStartHour: startHour, quietEndHour: endHour },
 			status,
@@ -267,7 +290,7 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 			});
 			if (res.ok) {
 				notificationRequestKeysRef.current.delete(requestKeyId);
-				setMessage('Test wurde ausgelöst. Prüfe Push und WG-Chat.');
+				setMessage('Test wurde ausgelöst. Prüfe, ob die Push-Nachricht ankommt.');
 			} else {
 				if (res.status > 0 && res.status < 500) {
 					notificationRequestKeysRef.current.delete(requestKeyId);
@@ -289,8 +312,14 @@ export function useNotificationSettings({ code, memberId }: NotificationSettings
 		void (checked ? activatePush() : deactivatePush()).finally(() => setPushTarget(null));
 	}
 
+	// The server flag belongs to the member; only a live subscription means this device gets pushes.
+	const pushActive = !!status?.pushOptIn && (device === null || device.hasSubscription);
+	const pushBlocked = device?.permission === 'denied';
+
 	return {
 		status,
+		pushActive,
+		pushBlocked,
 		pending,
 		pushTarget,
 		message,

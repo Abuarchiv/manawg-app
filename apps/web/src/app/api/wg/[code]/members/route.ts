@@ -23,17 +23,19 @@ import { parseBody } from '@/core/http/parse-body';
 import { readIdempotencyKey } from '@/core/idempotency-store';
 import { logApiError } from '@/core/infra/observability';
 import { checkRateLimit, clientIpKey, wgWriteLimiter } from '@/core/rate-limit';
+import { MAX_MEMBERS_PER_WG } from '@/shared/lib/limits';
 import { and, asc, count, eq, sql } from 'drizzle-orm';
 import { type NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isUniqueMemberNameViolation } from './unique-name-violation';
 
-const MAX_MEMBERS_PER_WG = 20;
-// GET pagination: WG member counts are small, but the listing must never
-// degenerate into an unbounded SELECT. Default high enough that existing
-// clients keep receiving the full roster; explicit limit/offset enables
-// paging for WGs that predate the join cap.
-const MEMBERS_PAGE_LIMIT_DEFAULT = 100;
-const MEMBERS_PAGE_LIMIT_MAX = 500;
+// GET pagination: the listing must never degenerate into an unbounded SELECT.
+// Moved-out rows are never deleted, so joins stop at MAX_MEMBER_ROWS_PER_WG rows
+// in total; the default page covers that, so clients that send no limit always
+// receive the full roster (payer/split pickers would silently drop people otherwise).
+const MAX_MEMBER_ROWS_PER_WG = 500;
+const MEMBERS_PAGE_LIMIT_DEFAULT = MAX_MEMBER_ROWS_PER_WG;
+const MEMBERS_PAGE_LIMIT_MAX = MAX_MEMBER_ROWS_PER_WG;
 
 function readPageParams(req: NextRequest): { limit: number; offset: number } {
 	const params = req.nextUrl.searchParams;
@@ -65,6 +67,8 @@ export const GET = withWgRoute('members GET', async (req, { code }) => {
 				color: wgMembers.color,
 				paypalMerchantId: wgMembers.paypalMerchantId,
 				deactivatedAt: wgMembers.deactivatedAt,
+				role: wgMembers.role,
+				authUserId: wgMembers.authUserId,
 			})
 			.from(wgMembers)
 			.where(eq(wgMembers.wgId, wgId))
@@ -74,9 +78,12 @@ export const GET = withWgRoute('members GET', async (req, { code }) => {
 		db.select({ total: count() }).from(wgMembers).where(eq(wgMembers.wgId, wgId)),
 	]);
 
-	const members = rows.map(({ deactivatedAt, ...member }) => ({
+	// Role and account link are exposed as flags only; ids of accounts stay server-side.
+	const members = rows.map(({ deactivatedAt, role, authUserId, ...member }) => ({
 		...member,
 		active: deactivatedAt === null,
+		isAdmin: role === 'admin' && deactivatedAt === null,
+		hasAccount: authUserId !== null,
 	}));
 	// Client-side UI gating only (deactivate/reactivate buttons, chat
 	// admin-delete) — every actual mutation re-checks the admin role
@@ -104,13 +111,6 @@ type JoinRejection =
 	| 'joining_disabled';
 
 const joinCodec = responseCodec();
-
-function isUniqueMemberNameViolation(err: unknown): boolean {
-	if (!err || typeof err !== 'object' || !('code' in err)) return false;
-	if ((err as { code?: unknown }).code !== '23505') return false;
-	const constraint = (err as { constraint?: unknown }).constraint;
-	return constraint === undefined || constraint === 'wg_members_unique_name_per_wg';
-}
 
 function joinRejectionResponse(reason: JoinRejection): NextResponse {
 	if (reason === 'not_found') return notFound('wg_not_found');
@@ -154,11 +154,19 @@ async function insertJoiningMember(
 	if (existingForUser[0]?.deactivatedAt) return reject('member_deactivated');
 	if (existingForUser.length > 0) return reject('already_joined');
 	if (!lockedWg.joiningEnabled) return reject('joining_disabled');
-	const memberCount = await tx
-		.select({ id: wgMembers.id })
+	// The cap counts active members only (moved-out rows are soft-deleted and never removed),
+	// plus a hard ceiling on all rows so the roster always fits one GET page.
+	const [counts] = await tx
+		.select({
+			total: count(),
+			active: sql<number>`count(*) filter (where ${wgMembers.deactivatedAt} is null)`.mapWith(
+				Number,
+			),
+		})
 		.from(wgMembers)
 		.where(eq(wgMembers.wgId, input.wgId));
-	if (memberCount.length >= MAX_MEMBERS_PER_WG) return reject('limit');
+	if ((counts?.active ?? 0) >= MAX_MEMBERS_PER_WG || (counts?.total ?? 0) >= MAX_MEMBER_ROWS_PER_WG)
+		return reject('limit');
 
 	const existing = await tx
 		.select({ id: wgMembers.id, name: wgMembers.name, color: wgMembers.color })

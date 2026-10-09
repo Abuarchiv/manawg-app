@@ -7,6 +7,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { type AuthFailure, classifyAuthError } from '@/core/auth/password-errors';
+import { normalizePhoneInput } from '@/core/auth/phone';
 import { useState } from 'react';
 import { type AuthFormProps, type BusyAction, GenericAuthError } from './auth-form-shared';
 
@@ -33,7 +34,7 @@ export function usePhoneAuth({ busy, setBusy, onAuthenticated }: AuthFormProps) 
 	async function sendPhoneOtp(): Promise<void> {
 		if (busy) return;
 		resetPhoneFeedback();
-		const normalizedPhone = phone.trim();
+		const normalizedPhone = normalizePhoneInput(phone);
 		if (!E164_PATTERN.test(normalizedPhone)) {
 			setPhoneError('invalid-phone');
 			return;
@@ -169,7 +170,7 @@ export function PhoneAuthForm({
 					/>
 				</Field>
 				<p id="auth-phone-hint" className="text-xs text-muted-foreground">
-					Beginnt mit + und der Landesvorwahl.
+					Beginne mit + oder 00 und der Landesvorwahl.
 				</p>
 				{otpRequested && (
 					<Field data-invalid={otpFieldInvalid}>
@@ -197,7 +198,9 @@ export function PhoneAuthForm({
 				)}
 				{phoneError === 'invalid-phone' && (
 					<div id="auth-phone-error">
-						<ErrorBox>Gib die Nummer mit Landesvorwahl ein, zum Beispiel +491701234567.</ErrorBox>
+						<ErrorBox>
+							Beginne mit + oder 00 und der Landesvorwahl, zum Beispiel +49 170 1234567.
+						</ErrorBox>
 					</div>
 				)}
 				{phoneError === 'invalid-otp' && (

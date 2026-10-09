@@ -1,6 +1,7 @@
 'use client';
 
 import { Switch } from '@/components/animate-ui/components/base/switch';
+import { useToast } from '@/components/ui/Toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Field, FieldContent, FieldDescription, FieldTitle } from '@/components/ui/field';
@@ -32,6 +33,7 @@ export function ShareAccessSection({
 }: ShareAccessSectionProps) {
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const router = useRouter();
+	const toast = useToast();
 	const { isAdmin } = useWg();
 	const [accessPending, setAccessPending] = useState<'join' | 'rotate' | null>(null);
 	const [accessMessage, setAccessMessage] = useState<string | null>(null);
@@ -75,6 +77,8 @@ export function ShareAccessSection({
 				return;
 			}
 			setJoiningEnabled(data.wg.joiningEnabled);
+			// The layout hands out `wg`; refresh it so a remounted tab does not show the old value.
+			router.refresh();
 		} finally {
 			accessPendingRef.current = false;
 			setAccessPending(null);
@@ -97,6 +101,9 @@ export function ShareAccessSection({
 			if (!data) return;
 			setRotateConfirm(false);
 			setJoiningEnabled(data.wg.joiningEnabled);
+			if (!data.wg.joiningEnabled) {
+				toast.info('Neuer WG-Code ist aktiv. Beitritte sind weiterhin gesperrt.');
+			}
 			// Old code is dead after rotation; drop it so the WG list doesn't show a stale duplicate.
 			forgetWg(wg.shareCode);
 			// Go to #zugang; otherwise the user lands in the profile tab again after renewing.
@@ -142,7 +149,7 @@ export function ShareAccessSection({
 							checked={joiningEnabled}
 							disabled={!isAdmin || accessPending !== null}
 							aria-busy={accessPending === 'join'}
-							aria-label={joiningEnabled ? 'Neue Beitritte sperren' : 'Neue Beitritte erlauben'}
+							aria-label="Neue Beitritte erlauben"
 							onCheckedChange={() => void toggleJoining()}
 						/>
 					</Field>
@@ -151,7 +158,8 @@ export function ShareAccessSection({
 							<div className="min-w-0 flex-1 basis-40">
 								<div className="text-foreground text-sm font-medium">WG-Code erneuern</div>
 								<div className="text-muted-foreground mt-0.5 text-xs">
-									Alte Links funktionieren danach nicht mehr.
+									Alte Links funktionieren danach nicht mehr. Beitritte bleiben so, wie sie jetzt
+									sind.
 								</div>
 							</div>
 							{rotateConfirm ? (

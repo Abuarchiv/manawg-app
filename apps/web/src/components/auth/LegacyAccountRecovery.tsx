@@ -11,6 +11,7 @@ import {
 	getLegacyIdentityCandidates,
 	legacyClaimHeaders,
 } from '@/core/auth/identity';
+import { REQUEST_TIMEOUT_MS } from '@/core/infra/api-client';
 import { isValidShareCode, normalizeShareCode } from '@/core/utils/share-code';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useRef, useState } from 'react';
@@ -52,6 +53,10 @@ export function LegacyAccountRecovery() {
 		setSubmitting(true);
 		try {
 			const candidates = getLegacyIdentityCandidates();
+			if (candidates.length === 0) {
+				setError('Auf diesem Gerät ist kein altes Profil gespeichert.');
+				return;
+			}
 			for (const candidate of candidates) {
 				try {
 					const response = await fetch(
@@ -59,6 +64,7 @@ export function LegacyAccountRecovery() {
 						{
 							method: 'POST',
 							headers: legacyClaimHeaders(candidate),
+							signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
 						},
 					);
 					if (!response.ok) continue;

@@ -1,7 +1,8 @@
 import { recordAuditEvent } from '@/core/audit';
-import { db, pushSubscriptions, wgMembers } from '@/core/db';
+import { db, pushSubscriptions, wgMembers, wgs } from '@/core/db';
 import { hasCapturingMemberPayment, lockActiveAccountMember } from '@/core/db/account-deletion';
 import { releaseMemberChores } from '@/core/db/member-departure';
+import { LIMITS } from '@/core/db/schema';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
@@ -21,9 +22,11 @@ import {
 	withExpensePaymentLock,
 } from '@/features/expenses/server/expense-payments';
 import { loadOpenExpenses } from '@/features/expenses/server/open-expenses';
-import { and, eq } from 'drizzle-orm';
+import { MAX_MEMBERS_PER_WG } from '@/shared/lib/limits';
+import { and, count, eq, isNull, ne, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { isUniqueMemberNameViolation } from '../unique-name-violation';
 
 /** One open debt of the member being viewed, from their own perspective. */
 interface OpenBalanceDto {
@@ -109,15 +112,17 @@ export const GET = withWgRoute<{ id: string }>('members/[id] GET', async (req, {
 const patchSchema = z
 	.object({
 		active: z.boolean().optional(),
+		name: z.string().trim().min(1).max(LIMITS.NAME_MAX).optional(),
 	})
 	.strict()
-	.refine((value) => value.active !== undefined);
+	.refine((value) => value.active !== undefined || value.name !== undefined);
 
 /**
  * PATCH toggles a member between active and deactivated ("Auszug"). Deactivation
  * is a reversible soft-delete: it sets `deactivated_at` so the member drops out
  * of every active roster while all their history and balances stay intact.
- * `{ active: true }` clears the timestamp and brings them back.
+ * `{ active: true }` clears the timestamp and brings them back (while the WG has
+ * room). `{ name }` renames the member; only the member themselves may do that.
  */
 export const PATCH = withWgRoute<{ id: string }>(
 	'members/[id] PATCH',
@@ -127,7 +132,7 @@ export const PATCH = withWgRoute<{ id: string }>(
 			invalid: 'active_invalid',
 		});
 		if (!parsed.ok) return parsed.response;
-		const { active } = parsed.data;
+		const { active, name } = parsed.data;
 		const auth = await requireWgMember(req, code);
 		if (!auth.ok) return auth.response;
 		const wgId = auth.wg.id;
@@ -158,6 +163,9 @@ export const PATCH = withWgRoute<{ id: string }>(
 			if (active !== undefined && !isOwner && !isAdmin) {
 				return { ok: false as const, response: forbidden('not_owner', 'not_owner') };
 			}
+			if (name !== undefined && !isOwner) {
+				return { ok: false as const, response: forbidden('not_owner', 'not_owner') };
+			}
 			if (active === false && target.role === 'admin') {
 				return { ok: false as const, response: forbidden('admin_required', 'admin_required') };
 			}
@@ -169,24 +177,70 @@ export const PATCH = withWgRoute<{ id: string }>(
 			) {
 				return { ok: false as const, response: conflict('paypal_payment_pending') };
 			}
-			const activeUnchanged = active === undefined || active === (target.deactivatedAt === null);
-			if (activeUnchanged) {
-				return { ok: true as const, changedActive: false, member: target };
+			const activeChanged = active !== undefined && active !== (target.deactivatedAt === null);
+			const nameChanged = name !== undefined && name !== target.name;
+			if (!activeChanged && !nameChanged) {
+				return { ok: true as const, changedActive: false, renamedFrom: null, member: target };
+			}
+			// Same row lock as a join, so a join/reactivation and a rename cannot race each other.
+			if (nameChanged || (active === true && activeChanged)) {
+				await tx.select({ id: wgs.id }).from(wgs).where(eq(wgs.id, wgId)).for('update');
+			}
+			if (nameChanged) {
+				// Moved-out members keep their name, so they count for uniqueness too.
+				const [clash] = await tx
+					.select({ id: wgMembers.id })
+					.from(wgMembers)
+					.where(
+						and(
+							eq(wgMembers.wgId, wgId),
+							ne(wgMembers.id, id),
+							sql`lower(${wgMembers.name}) = lower(${name})`,
+						),
+					)
+					.limit(1);
+				if (clash) return { ok: false as const, response: conflict('name_taken', 'name_taken') };
+			}
+			if (active === true && activeChanged) {
+				const [activeCount] = await tx
+					.select({ active: count() })
+					.from(wgMembers)
+					.where(and(eq(wgMembers.wgId, wgId), isNull(wgMembers.deactivatedAt)));
+				if ((activeCount?.active ?? 0) >= MAX_MEMBERS_PER_WG) {
+					return {
+						ok: false as const,
+						response: conflict('member_limit_reached', 'member_limit_reached'),
+					};
+				}
 			}
 
 			const updateValues = {
-				...(active !== undefined ? { deactivatedAt: active ? null : new Date() } : {}),
+				...(activeChanged ? { deactivatedAt: active ? null : new Date() } : {}),
+				...(nameChanged ? { name } : {}),
 			};
-			const [updated] = await tx
-				.update(wgMembers)
-				.set(updateValues)
-				.where(and(eq(wgMembers.id, id), eq(wgMembers.wgId, wgId)))
-				.returning({
-					id: wgMembers.id,
-					name: wgMembers.name,
-					deactivatedAt: wgMembers.deactivatedAt,
-					paypalMerchantId: wgMembers.paypalMerchantId,
-				});
+			let updated:
+				| Pick<typeof wgMembers.$inferSelect, 'id' | 'name' | 'deactivatedAt' | 'paypalMerchantId'>
+				| undefined;
+			try {
+				// A savepoint keeps the transaction usable when the unique index catches a race.
+				[updated] = await tx.transaction((savepoint) =>
+					savepoint
+						.update(wgMembers)
+						.set(updateValues)
+						.where(and(eq(wgMembers.id, id), eq(wgMembers.wgId, wgId)))
+						.returning({
+							id: wgMembers.id,
+							name: wgMembers.name,
+							deactivatedAt: wgMembers.deactivatedAt,
+							paypalMerchantId: wgMembers.paypalMerchantId,
+						}),
+				);
+			} catch (updateErr) {
+				if (isUniqueMemberNameViolation(updateErr)) {
+					return { ok: false as const, response: conflict('name_taken', 'name_taken') };
+				}
+				throw updateErr;
+			}
 			if (!updated) return { ok: false as const, response: notFound('member_not_found') };
 			// A moved-out member must not keep receiving pushes, and their browser
 			// endpoint has to be free for the next WG on the same device.
@@ -196,7 +250,8 @@ export const PATCH = withWgRoute<{ id: string }>(
 			}
 			return {
 				ok: true as const,
-				changedActive: active !== undefined && active !== (target.deactivatedAt === null),
+				changedActive: activeChanged,
+				renamedFrom: nameChanged ? target.name : null,
 				member: updated,
 			};
 		});
@@ -212,6 +267,18 @@ export const PATCH = withWgRoute<{ id: string }>(
 					? `${auth.member.name} hat ${result.member.name} wieder aktiviert.`
 					: `${auth.member.name} hat ${result.member.name} als ausgezogen markiert.`,
 				metadata: { name: result.member.name },
+			});
+		}
+		if (result.renamedFrom !== null) {
+			await recordAuditEvent({
+				wgId,
+				memberId: auth.member.memberId,
+				eventType: 'member.renamed',
+				entityType: 'member',
+				entityId: result.member.id,
+				// Starts with the current name: the feed resolves the actor to it and strips that prefix.
+				summary: `${result.member.name} hat sich umbenannt (vorher ${result.renamedFrom}).`,
+				metadata: { before: result.renamedFrom, after: result.member.name },
 			});
 		}
 		return NextResponse.json({

@@ -21,9 +21,56 @@ type ResetState = 'ready' | 'submitting' | 'unavailable';
 
 interface PasswordResetFormProps {
 	recoveryRequested: boolean;
+	/** A session exists, so /neu would show the WG picker instead of the reset-link form. */
+	signedIn?: boolean;
 }
 
-export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps) {
+/** Entry point to request a fresh reset link; signed-in users must sign out first. */
+function NewLinkAction({ signedIn }: { signedIn: boolean }) {
+	const router = useRouter();
+	const [busy, setBusy] = useState(false);
+	const [failed, setFailed] = useState(false);
+	if (!signedIn) {
+		return (
+			<Link href="/neu" className={cn(buttonVariants({ variant: 'outline' }))}>
+				Neuen Link anfordern
+			</Link>
+		);
+	}
+	async function signOutAndRestart(): Promise<void> {
+		setBusy(true);
+		setFailed(false);
+		try {
+			const { signOutSocialAccount } = await import('@/core/auth/client');
+			// Known limit: no push targets, so the server drops this browser's push endpoint lazily.
+			await signOutSocialAccount([]);
+			router.replace('/neu');
+		} catch {
+			setFailed(true);
+			setBusy(false);
+		}
+	}
+	return (
+		<>
+			{failed && (
+				<Alert variant="destructive">
+					<AlertDescription>Abmelden fehlgeschlagen. Versuche es erneut.</AlertDescription>
+				</Alert>
+			)}
+			<Button
+				type="button"
+				variant="outline"
+				disabled={busy}
+				onClick={() => void signOutAndRestart()}
+			>
+				{busy && <Spinner data-icon="inline-start" aria-hidden />}
+				Abmelden und neuen Link anfordern
+			</Button>
+		</>
+	);
+}
+
+export function PasswordResetForm({ recoveryRequested, signedIn = false }: PasswordResetFormProps) {
 	const router = useRouter();
 	const [state, setState] = useState<ResetState>(recoveryRequested ? 'ready' : 'unavailable');
 	const [password, setPassword] = useState('');
@@ -92,9 +139,7 @@ export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps)
 						Dieser Link ist ungültig oder abgelaufen. Bitte fordere einen neuen Link an.
 					</AlertDescription>
 				</Alert>
-				<Link href="/neu" className={cn(buttonVariants({ variant: 'outline' }))}>
-					Neuen Link anfordern
-				</Link>
+				<NewLinkAction signedIn={signedIn} />
 			</div>
 		);
 	}
@@ -106,9 +151,7 @@ export function PasswordResetForm({ recoveryRequested }: PasswordResetFormProps)
 					<Alert variant="destructive">
 						<AlertDescription>{serverError}</AlertDescription>
 					</Alert>
-					<Link href="/neu" className={cn(buttonVariants({ variant: 'outline' }))}>
-						Neuen Link anfordern
-					</Link>
+					<NewLinkAction signedIn={signedIn} />
 				</>
 			)}
 			<form onSubmit={(event) => void submit(event)} noValidate>

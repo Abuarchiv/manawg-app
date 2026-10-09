@@ -46,9 +46,28 @@ function isUniqueShareCodeViolation(err: unknown): boolean {
 }
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
+	const parsed = await parseBody(req, createWgSchema, {
+		fieldErrors: { name: 'name_invalid', creatorName: 'creator_name_invalid' },
+	});
+	if (!parsed.ok) return parsed.response;
+	const { name, creatorName } = parsed.data;
+
+	let user: { id: string } | null;
+	try {
+		user = await getAuthenticatedUser(req);
+	} catch (err) {
+		// A transient Auth outage is retryable, not an unauthenticated caller.
+		logApiError('[api/wg POST] auth lookup failed', err);
+		return serviceUnavailable('db_error');
+	}
+	if (!user) return unauthorized('auth_required', 'auth_required');
+	const authUserId = user.id;
+
 	// Defense in depth: middleware already covers /api/wg with wgWriteLimiter
 	// (30/min/IP). WG creation is rarer than other writes, so apply the
-	// stricter registerLimiter (3/hour/IP) on top to block WG spam.
+	// stricter registerLimiter (3/hour/IP) on top to block WG spam. It runs after body
+	// validation and auth so rejected attempts (400/401/auth outage) cost no budget.
+	// Known limit: idempotent replays and 5xx retries count too; the key is not known before the write.
 	const ip = clientIpKey(req);
 	// Local/CI dev servers have no Upstash service and must still exercise the
 	// real DB flow; fail-closed deployments reject missing limiter state.
@@ -68,23 +87,6 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 		}
 		return tooMany('rate_limited', 'wg_create_rate_limited');
 	}
-
-	const parsed = await parseBody(req, createWgSchema, {
-		fieldErrors: { name: 'name_invalid', creatorName: 'creator_name_invalid' },
-	});
-	if (!parsed.ok) return parsed.response;
-	const { name, creatorName } = parsed.data;
-
-	let user: { id: string } | null;
-	try {
-		user = await getAuthenticatedUser(req);
-	} catch (err) {
-		// A transient Auth outage is retryable, not an unauthenticated caller.
-		logApiError('[api/wg POST] auth lookup failed', err);
-		return serviceUnavailable('db_error');
-	}
-	if (!user) return unauthorized('auth_required', 'auth_required');
-	const authUserId = user.id;
 	const accountDeletionReplayResponse = async () => {
 		try {
 			await withTransaction((tx) => assertAccountCanAcquireMembership(tx, authUserId));

@@ -6,6 +6,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { LinkRow } from '@/components/wg/einstellungen/LinkRow';
+import { MemberNameForm } from '@/components/wg/einstellungen/MemberNameForm';
 import { PayPalConnect } from '@/components/wg/einstellungen/PayPalConnect';
 import { Section } from '@/components/wg/einstellungen/Section';
 import { WgNameSection } from '@/components/wg/einstellungen/WgNameSection';
@@ -47,6 +48,7 @@ export function ProfileTab({ memberName, wgName, shareCode, memberId }: ProfileT
 						</div>
 					</div>
 				</div>
+				<MemberNameForm memberName={memberName} shareCode={shareCode} memberId={memberId} />
 				<div className="grid gap-2 px-3 pb-3">
 					<ToggleGroup
 						variant="segmented"

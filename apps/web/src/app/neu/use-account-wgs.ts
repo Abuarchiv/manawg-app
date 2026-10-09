@@ -3,11 +3,13 @@
 import { safeNextPath } from '@/core/auth/next-path';
 import { hasSessionCookie } from '@/core/auth/session-hint';
 import { REQUEST_TIMEOUT_MS } from '@/core/infra/api-client';
+import { removeDraft } from '@/core/offline/drafts';
 import { normalizeShareCode } from '@/core/utils/share-code';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
 	type AccountWg,
+	START_DRAFT_KEY,
 	type StartStep,
 	consumeJustSignedIn,
 	getNeuIntentFromSearch,
@@ -93,7 +95,14 @@ export function useAccountWgs({
 	useEffect(() => {
 		if (authState !== 'authenticated') return;
 		const intent = getNeuIntentFromSearch(searchParams.toString());
-		if (intent.joinCode || intent.create) return;
+		if (intent.joinCode || intent.create) {
+			// An invite link for a WG the account already belongs to needs no name or code step.
+			if (intent.joinCode && accountWgs.some((wg) => wg.code === intent.joinCode)) {
+				removeDraft(START_DRAFT_KEY);
+				router.replace(`/wg/${encodeURIComponent(intent.joinCode)}`);
+			}
+			return;
+		}
 		const next = safeNextPath(searchParams.get('next'));
 		const [onlyWg] = accountWgs;
 		// One WG: skip the picker, like the public start page does.
