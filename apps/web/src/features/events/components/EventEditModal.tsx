@@ -23,6 +23,7 @@ import {
 import { Field, FieldLabel } from '@/components/ui/field';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Spinner } from '@/components/ui/spinner';
+import { DiscardChangesDialog } from '@/features/events/components/DiscardChangesDialog';
 import { EventFormFields, focusEventField } from '@/features/events/components/EventFormFields';
 import {
 	RECURRENCE_OPTIONS,
@@ -46,9 +47,10 @@ export interface EditableEvent {
 	allDay: boolean;
 	location: string | null;
 	recurrence: string | null;
+	createdByMemberId?: string | null;
 }
 
-export type UpdateEventPayload = Omit<EditableEvent, 'id'>;
+export type UpdateEventPayload = Omit<EditableEvent, 'id' | 'createdByMemberId'>;
 
 interface EventEditModalProps {
 	event: EditableEvent | null;
@@ -56,6 +58,8 @@ interface EventEditModalProps {
 	onUpdate: (id: string, payload: UpdateEventPayload) => Promise<void>;
 	onDelete: (id: string) => Promise<void>;
 	actionError?: string | null;
+	/** The API only lets the creator and WG admins change an event; others get a read-only view. */
+	readOnly?: boolean;
 	/** Exports the chosen event as .ics for the user's own calendar app. */
 	onExportIcs?: (() => void) | undefined;
 }
@@ -72,6 +76,7 @@ export function EventEditModal({
 	onUpdate,
 	onDelete,
 	actionError,
+	readOnly = false,
 	onExportIcs,
 }: EventEditModalProps) {
 	const [title, setTitle] = useState('');
@@ -87,18 +92,17 @@ export function EventEditModal({
 	const [confirmingDiscard, setConfirmingDiscard] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [errorField, setErrorField] = useState<'title' | 'startsAt' | 'endsAt' | null>(null);
-	// Set synchronously before the confirm dialog tries to close on click (state would come too late).
+	// Set synchronously: state would come too late for the confirm dialog's close-on-click.
 	const deletingRef = useRef(false);
-	// Changing the affected field clears its error state and the message.
 	function clearErrorFor(...fields: Array<'title' | 'startsAt' | 'endsAt'>): void {
 		if (errorField && fields.includes(errorField)) {
 			setErrorField(null);
 			setError(null);
 		}
 	}
-	// The message sits below the fields, the save button is pinned.
+	// The message sits below the fields, the save button is pinned. On field errors
+	// the focused field stays in view, the message is announced.
 	const shownError = error || actionError;
-	// On field errors the focused field stays in view, the message is announced.
 	useEffect(() => {
 		if (shownError && !errorField)
 			document.getElementById('event-edit-error')?.scrollIntoView({ block: 'nearest' });
@@ -119,6 +123,8 @@ export function EventEditModal({
 		setConfirmingDiscard(false);
 	}, [event]);
 
+	const busy = saving || deleting;
+	const locked = busy || readOnly;
 	if (!event) return null;
 	const parsedRecurrence = parseRecurrenceRule(recurrence);
 	const isSimpleRecurrence =
@@ -134,7 +140,7 @@ export function EventEditModal({
 		: '';
 
 	function requestClose(): void {
-		if (!event || saving || deleting) return;
+		if (!event || busy) return;
 		const dirty =
 			title !== event.title ||
 			description !== (event.description ?? '') ||
@@ -149,7 +155,7 @@ export function EventEditModal({
 
 	async function handleSave(e: React.FormEvent): Promise<void> {
 		e.preventDefault();
-		if (saving || deleting) return;
+		if (locked) return;
 		setError(null);
 		setErrorField(null);
 		if (!event) return;
@@ -215,9 +221,17 @@ export function EventEditModal({
 			>
 				<DrawerContent className="mx-auto w-full max-w-md">
 					<DrawerHeader className="border-b pb-3">
-						<DrawerTitle>Termin bearbeiten</DrawerTitle>
-						{event.recurrence && (
-							<DrawerDescription>Änderungen gelten für die gesamte Terminserie.</DrawerDescription>
+						<DrawerTitle>{readOnly ? 'Termin' : 'Termin bearbeiten'}</DrawerTitle>
+						{readOnly ? (
+							<DrawerDescription>
+								Nur wer den Termin angelegt hat und WG-Admins können ihn ändern.
+							</DrawerDescription>
+						) : (
+							event.recurrence && (
+								<DrawerDescription>
+									Änderungen gelten für die gesamte Terminserie.
+								</DrawerDescription>
+							)
 						)}
 					</DrawerHeader>
 					<form noValidate onSubmit={handleSave} className="flex min-h-0 flex-col">
@@ -248,11 +262,11 @@ export function EventEditModal({
 								onLocationChange={setLocation}
 								description={description}
 								onDescriptionChange={setDescription}
-								disabled={saving || deleting}
+								disabled={locked}
 								errorField={errorField}
 								errorId="event-edit-error"
 								recurrenceField={
-									<Field data-disabled={saving || deleting}>
+									<Field data-disabled={locked}>
 										<FieldLabel htmlFor="event-edit-recurrence">Wiederholung</FieldLabel>
 										<NativeSelect
 											id="event-edit-recurrence"
@@ -269,7 +283,7 @@ export function EventEditModal({
 																: '',
 														)
 											}
-											disabled={saving || deleting}
+											disabled={locked}
 											className="w-full [&_select]:min-h-11 [&_select]:text-base"
 										>
 											{recurrence && !isSimpleRecurrence && (
@@ -294,18 +308,20 @@ export function EventEditModal({
 						</div>
 						<DrawerFooter className="border-t pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
 							<div className="flex flex-wrap gap-2">
-								<Button type="submit" className="min-w-fit flex-1" disabled={saving || deleting}>
-									{saving && <Spinner data-icon="inline-start" aria-hidden />}
-									{saving ? 'Speichert…' : 'Speichern'}
-								</Button>
+								{!readOnly && (
+									<Button type="submit" className="min-w-fit flex-1" disabled={busy}>
+										{saving && <Spinner data-icon="inline-start" aria-hidden />}
+										{saving ? 'Speichert…' : 'Speichern'}
+									</Button>
+								)}
 								<Button
 									type="button"
 									variant="outline"
 									className="min-w-fit flex-1"
 									onClick={requestClose}
-									disabled={saving || deleting}
+									disabled={busy}
 								>
-									Abbrechen
+									{readOnly ? 'Schließen' : 'Abbrechen'}
 								</Button>
 							</div>
 							<div className="flex flex-wrap gap-2">
@@ -321,17 +337,19 @@ export function EventEditModal({
 										In Kalender
 									</Button>
 								)}
-								<Button
-									type="button"
-									variant="destructive"
-									className="h-auto min-h-8 min-w-fit flex-1 py-1.5"
-									onClick={() => setConfirmingDelete(true)}
-									disabled={saving || deleting}
-									aria-label="Termin löschen"
-								>
-									<Trash2 data-icon="inline-start" aria-hidden />
-									Termin löschen
-								</Button>
+								{!readOnly && (
+									<Button
+										type="button"
+										variant="destructive"
+										className="h-auto min-h-8 min-w-fit flex-1 py-1.5"
+										onClick={() => setConfirmingDelete(true)}
+										disabled={busy}
+										aria-label="Termin löschen"
+									>
+										<Trash2 data-icon="inline-start" aria-hidden />
+										Termin löschen
+									</Button>
+								)}
 							</div>
 						</DrawerFooter>
 					</form>
@@ -368,29 +386,14 @@ export function EventEditModal({
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
-			<AlertDialog open={confirmingDiscard} onOpenChange={setConfirmingDiscard}>
-				<AlertDialogContent className="w-[calc(100%-2rem)]">
-					<AlertDialogHeader>
-						<AlertDialogTitle>Änderungen verwerfen?</AlertDialogTitle>
-						<AlertDialogDescription>
-							Deine Eingaben sind noch nicht gespeichert.
-						</AlertDialogDescription>
-					</AlertDialogHeader>
-					<AlertDialogFooter>
-						<AlertDialogCancel className="min-h-11">Weiter bearbeiten</AlertDialogCancel>
-						<AlertDialogAction
-							variant="destructive"
-							className="min-h-11"
-							onClick={() => {
-								setConfirmingDiscard(false);
-								onClose();
-							}}
-						>
-							Verwerfen
-						</AlertDialogAction>
-					</AlertDialogFooter>
-				</AlertDialogContent>
-			</AlertDialog>
+			<DiscardChangesDialog
+				open={confirmingDiscard}
+				onOpenChange={setConfirmingDiscard}
+				onDiscard={() => {
+					setConfirmingDiscard(false);
+					onClose();
+				}}
+			/>
 		</>
 	);
 }

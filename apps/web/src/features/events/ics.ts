@@ -1,5 +1,5 @@
 import { berlinDayKey } from '@/core/utils/berlin-day';
-import type { EventOccurrence } from '@/features/events/events';
+import { DEFAULT_DURATION_MS, type EventOccurrence } from '@/features/events/events';
 
 const UTF8_ENCODER = new TextEncoder();
 
@@ -104,7 +104,10 @@ function eventLines(
 		lines.push(`DTEND;VALUE=DATE:${toIcsExclusiveDate(occ.endsAt ?? occ.startsAt)}`);
 	} else {
 		lines.push(`DTSTART:${toIcsUtc(occ.startsAt)}`);
-		if (occ.endsAt) lines.push(`DTEND:${toIcsUtc(occ.endsAt)}`);
+		// Without DTEND calendar apps show an instant; the app itself shows such events as one hour.
+		lines.push(
+			`DTEND:${toIcsUtc(occ.endsAt ?? new Date(Date.parse(occ.startsAt) + DEFAULT_DURATION_MS).toISOString())}`,
+		);
 	}
 	lines.push(`SUMMARY:${escapeIcsText(occ.title)}`);
 	if (occ.description) lines.push(`DESCRIPTION:${escapeIcsText(occ.description)}`);
@@ -127,6 +130,9 @@ function serializeCalendar(
 		'METHOD:PUBLISH',
 	];
 	if (calendarName) lines.push(`X-WR-CALNAME:${escapeIcsText(calendarName)}`);
+	// Subscribed feeds: ask clients to re-fetch hourly (default is often once a day or less).
+	if (includeUpdateMetadata)
+		lines.push('REFRESH-INTERVAL;VALUE=DURATION:PT1H', 'X-PUBLISHED-TTL:PT1H');
 	for (const occurrence of occurrences) {
 		lines.push(...eventLines(occurrence, includeUpdateMetadata, generatedAt));
 	}

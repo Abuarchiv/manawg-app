@@ -58,3 +58,19 @@ export function choreActionErrorMessage(
 	}
 	return `${prefix}.`;
 }
+
+const EDIT_SUBJECT = 'Aufgabe konnte nicht bearbeitet werden';
+const CHORE_EDIT_ERRORS: Record<string, string> = {
+	title_invalid: `${EDIT_SUBJECT}: Der Titel muss 1 bis 120 Zeichen haben.`,
+	interval_invalid: `${EDIT_SUBJECT}: Das Intervall muss zwischen 1 und 365 Tagen oder 1 und 60 Monaten liegen.`,
+	due_date_invalid: `${EDIT_SUBJECT}: Das Fälligkeitsdatum ist ungültig.`,
+	member_not_in_wg: `${EDIT_SUBJECT}: Dieses Mitglied ist nicht mehr in dieser WG.`,
+	chore_changed:
+		'Die Aufgabe wurde inzwischen geändert. Der Plan wird neu geladen, bitte versuche es erneut.',
+	invalid_body: `${EDIT_SUBJECT}: Die Anfrage war ungültig.`,
+	invalid_json: `${EDIT_SUBJECT}: Die Anfrage war ungültig.`,
+};
+
+export function choreEditErrorMessage(error: string): string {
+	return mutationErrorMessage(EDIT_SUBJECT, error, CHORE_EDIT_ERRORS, `${EDIT_SUBJECT}.`);
+}

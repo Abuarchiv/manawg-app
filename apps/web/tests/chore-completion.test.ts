@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const { CHORE_COMPLETION_COPY, choreCompletionFeedback, completionRequestKey } = await import(
-	'../src/features/chores/chore-completion.ts'
-);
+const {
+	CHORE_COMPLETION_COPY,
+	choreCompletionFeedback,
+	completionRequestKey,
+	submitChoreCompletion,
+} = await import('../src/features/chores/chore-completion.ts');
 
 const chore = { title: 'Bad putzen' };
 const names = (id: string | null) => (id === 'anna' ? 'Anna' : undefined);
@@ -38,7 +41,14 @@ test('an unconfirmed completion still says it is done', () => {
 });
 
 test('retryable failures keep the confirm step open', () => {
-	for (const kind of ['failed', 'insert_failed', 'queue_blocked', 'key_unavailable'] as const) {
+	for (const kind of [
+		'failed',
+		'insert_failed',
+		'queue_blocked',
+		'key_unavailable',
+		'read_only',
+		'session_expired',
+	] as const) {
 		const feedback = choreCompletionFeedback({ kind }, chore, names);
 		assert.equal(feedback.tone, 'error', kind);
 		assert.equal(feedback.done, false, kind);
@@ -65,4 +75,30 @@ test('an offline completion is a notice and needs no reload', () => {
 	assert.equal(feedback.tone, 'notice');
 	assert.equal(feedback.message, CHORE_COMPLETION_COPY.queued);
 	assert.equal(feedback.reload, false);
+});
+
+test('maintenance and expired sessions are not reported as a generic failure', async () => {
+	const realFetch = globalThis.fetch;
+	const ctx = { wgId: 'wg', shareCode: 'ABC', memberId: 'm1', keys: new Map<string, string>() };
+	const occurrence = {
+		id: 'c1',
+		title: 'Bad',
+		nextDueAt: '2026-10-06T10:00:00.000Z',
+		assignedMemberId: 'm1',
+	};
+	try {
+		for (const [status, error, kind] of [
+			[503, 'migration_read_only', 'read_only'],
+			[401, 'auth_required', 'session_expired'],
+		] as const) {
+			globalThis.fetch = (async () =>
+				new Response(JSON.stringify({ error }), {
+					status,
+					headers: { 'content-type': 'application/json' },
+				})) as typeof fetch;
+			assert.deepEqual(await submitChoreCompletion(ctx, occurrence), { kind });
+		}
+	} finally {
+		globalThis.fetch = realFetch;
+	}
 });

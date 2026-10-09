@@ -27,6 +27,8 @@ import {
 	createOfflineIdempotencyKey,
 	createQueuedChore,
 } from '@/core/offline/offline-queue';
+import { berlinDayKey } from '@/core/utils/berlin-day';
+import { dueAtForDay } from '@/features/chores/chore-due-date';
 import { choreCreateErrorMessage } from '@/features/chores/chore-errors';
 import type { ChoreFairness } from '@/features/chores/chore-fairness';
 import { computeNextDueAt } from '@/features/chores/chore-recurrence';
@@ -86,6 +88,9 @@ export function useChoreCreate(
 		resetFields,
 	} = fields;
 	const [showForm, setShowForm] = useState(false);
+	// Optional day picked for the first due date; empty means "interval from today".
+	// Not part of the draft: the shared draft key only knows the persisted fields.
+	const [newFirstDue, setNewFirstDue] = useState('');
 	const [pendingSuggestion, setPendingSuggestion] = useState<ChoreSuggestion | null>(null);
 	const [confirmSuggestion, setConfirmSuggestion] = useState(false);
 	const [queueEditId, setQueueEditId] = useState<string | null>(null);
@@ -121,6 +126,7 @@ export function useChoreCreate(
 			setNewInterval(suggestion.intervalDays);
 			setNewRecurrenceType(suggestion.recurrenceType);
 			setNewAssigned('');
+			setNewFirstDue('');
 			setQueueEditId(null);
 			setPendingSuggestion(null);
 			setShowForm(true);
@@ -203,6 +209,17 @@ export function useChoreCreate(
 			void load(false);
 			return;
 		}
+		let firstDueAt: string | undefined;
+		if (newFirstDue) {
+			const picked = dueAtForDay(newFirstDue);
+			if (!picked || newFirstDue < berlinDayKey(new Date())) {
+				setActionError(
+					'Putzaufgabe konnte nicht gespeichert werden: Die erste Fälligkeit darf nicht in der Vergangenheit liegen.',
+				);
+				return;
+			}
+			firstDueAt = picked;
+		}
 		startPending(pendingKey);
 		setActionError(null);
 		setActionNotice(null);
@@ -211,6 +228,7 @@ export function useChoreCreate(
 			intervalDays: newInterval,
 			recurrenceType: newRecurrenceType,
 			assignedMemberId: newAssigned || null,
+			nextDueAt: firstDueAt,
 		});
 		const pendingRequest = choreCreateRequestRef.current;
 		const idempotencyKey =
@@ -234,6 +252,7 @@ export function useChoreCreate(
 					intervalDays: newInterval,
 					recurrenceType: newRecurrenceType,
 					assignedMemberId: newAssigned || null,
+					...(firstDueAt && { nextDueAt: firstDueAt }),
 				}),
 			});
 
@@ -241,7 +260,7 @@ export function useChoreCreate(
 				if (result.status > 0 && result.status < 500 && result.status !== 429)
 					choreCreateRequestRef.current = null;
 				if (result.status === 0) {
-					const queued = createQueuedChore({
+					const base = createQueuedChore({
 						wgId: wg.id,
 						shareCode: wg.shareCode,
 						memberId: identity.memberId,
@@ -251,6 +270,10 @@ export function useChoreCreate(
 						recurrenceType: newRecurrenceType,
 						assignedMemberId: newAssigned || null,
 					});
+					// The replay posts the payload unchanged, so the chosen day travels with it.
+					const queued = firstDueAt
+						? { ...base, payload: { ...base.payload, nextDueAt: firstDueAt } }
+						: base;
 					if ((await enqueueOfflineAction(queued)) === 0) {
 						setActionError(OFFLINE_QUEUE_BLOCKED_DRAFT_MESSAGE);
 						return;
@@ -265,7 +288,9 @@ export function useChoreCreate(
 							intervalDays: newInterval,
 							recurrenceType: newRecurrenceType,
 							assignedMemberId: newAssigned || null,
-							nextDueAt: computeNextDueAt(now, newInterval, now, newRecurrenceType).toISOString(),
+							nextDueAt:
+								firstDueAt ??
+								computeNextDueAt(now, newInterval, now, newRecurrenceType).toISOString(),
 							lastCompletedAt: null,
 							lastCompletedByName: null,
 							openGapCountForAssignee: 0,
@@ -273,6 +298,7 @@ export function useChoreCreate(
 						...current,
 					]);
 					resetFields();
+					setNewFirstDue('');
 					if (!(await clearEditedQueueItem(['chore.create']))) {
 						setActionError(OFFLINE_DRAFT_CLEANUP_FAILED_MESSAGE);
 						return;
@@ -287,6 +313,7 @@ export function useChoreCreate(
 
 			choreCreateRequestRef.current = null;
 			resetFields();
+			setNewFirstDue('');
 			if (!(await clearEditedQueueItem(['chore.create']))) {
 				setActionError(DRAFT_CLEANUP_FAILED_MESSAGE);
 				return;
@@ -326,6 +353,8 @@ export function useChoreCreate(
 		newInterval,
 		newRecurrenceType,
 		newAssigned,
+		newFirstDue,
+		setNewFirstDue,
 		titleInputRef,
 		applyChoreSuggestion,
 		applyQuickChore,

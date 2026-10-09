@@ -13,6 +13,7 @@ import {
 	RECURRENCE_OPTIONS,
 	eventDateForDisplay,
 	formatEventTimeOfDay,
+	formatEventTimeRange,
 	parseRecurrenceRule,
 } from '@/features/events/events';
 import { occurrenceToIcs } from '@/features/events/ics';
@@ -62,6 +63,13 @@ function formatDayLabel(date: Date, now = new Date()): string {
 	if (diff === 0) return `Heute · ${DAY_FORMATTER.format(date)}`;
 	if (diff === 1) return `Morgen · ${DAY_FORMATTER.format(date)}`;
 	return DAY_FORMATTER.format(date);
+}
+
+/** Time of day; a timed span that began before today names its start day too. */
+function timeLabel(occurrence: EventOccurrence, todayStart: Date): string {
+	return !occurrence.allDay && new Date(occurrence.startsAt) < todayStart
+		? formatEventTimeRange(occurrence)
+		: formatEventTimeOfDay(occurrence);
 }
 
 export function downloadOccurrenceIcs(occ: EventOccurrence): void {
@@ -124,11 +132,15 @@ export function CalendarUpcomingList({
 			)
 		: undefined;
 	const days = new Map<string, { label: string; date: Date; entries: typeof entries }>();
+	const now = new Date();
+	const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 	for (const entry of entries) {
-		const date =
+		const startDate =
 			entry.kind === 'event'
 				? eventDateForDisplay(entry.startsAt, entry.occurrence.allDay)
 				: new Date(entry.startsAt);
+		// A span that began before today is still running: list it under today, not under a past day.
+		const date = startDate < todayStart ? todayStart : startDate;
 		const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 		const day = days.get(key) ?? { label: formatDayLabel(date), date, entries: [] };
 		day.entries.push(entry);
@@ -207,7 +219,7 @@ export function CalendarUpcomingList({
 												</span>
 												<span className="text-[12px] break-words text-muted-foreground">
 													<CalendarClock className="mr-1 inline size-4 align-[-2px]" aria-hidden />
-													{formatEventTimeOfDay(entry.occurrence)}
+													{timeLabel(entry.occurrence, todayStart)}
 													{entry.occurrence.location && ` · ${entry.occurrence.location}`}
 													{entry.occurrence.recurring && (
 														<>

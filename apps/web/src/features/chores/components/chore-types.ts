@@ -14,6 +14,11 @@ export interface Chore {
 	openGapCountForAssignee: number;
 }
 
+/** A chore as the plan shows it: the list data plus what only the client derives. */
+export interface PlanChore extends Chore {
+	assigneeAbsent?: boolean;
+}
+
 export interface ChoreListResponse {
 	chores: Chore[];
 	/** Erledigungen pro Mitglied seit Monatsbeginn. */

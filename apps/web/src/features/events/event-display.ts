@@ -65,7 +65,16 @@ export function formatEventTimeRange(occurrence: EventOccurrence): string {
 
 /** Time only, for lists that already show the day alongside. */
 export function formatEventTimeOfDay(occurrence: EventOccurrence): string {
-	if (occurrence.allDay) return 'ganztägig';
+	if (occurrence.allDay) {
+		// A multi-day all-day span would otherwise show only its first day.
+		const first = eventDateForDisplay(occurrence.startsAt, true);
+		const last = eventDateForDisplay(occurrence.endsAt ?? occurrence.startsAt, true);
+		first.setHours(0, 0, 0, 0);
+		last.setHours(0, 0, 0, 0);
+		return last.getTime() > first.getTime()
+			? `ganztägig · bis ${WEEKDAY_FORMATTER.format(last)} ${DATE_FORMATTER.format(last)}`
+			: 'ganztägig';
+	}
 	const start = new Date(occurrence.startsAt);
 	const end = occurrence.endsAt ? new Date(occurrence.endsAt) : null;
 	const startLabel = TIME_FORMATTER.format(start);
@@ -74,13 +83,24 @@ export function formatEventTimeOfDay(occurrence: EventOccurrence): string {
 	return `${startLabel} – ${WEEKDAY_FORMATTER.format(end)} ${DATE_FORMATTER.format(end)} ${TIME_FORMATTER.format(end)}`;
 }
 
+/**
+ * Range of the visible month grid: the Monday on or before the 1st through the
+ * Sunday on or after the last day. The leading/trailing days of the adjacent
+ * months are clickable too, so their events must be loaded and expanded.
+ * Includes local timed events and UTC calendar dates at either boundary.
+ */
 export function getMonthBounds(reference: Date): { start: Date; end: Date } {
 	const year = reference.getFullYear();
 	const month = reference.getMonth();
-	// Include local timed events and UTC calendar dates at either month boundary.
-	const start = new Date(Math.min(new Date(year, month, 1).getTime(), Date.UTC(year, month, 1)));
+	const lead = (new Date(year, month, 1).getDay() + 6) % 7;
+	const trail = (7 - new Date(year, month + 1, 0).getDay()) % 7;
+	const first = new Date(year, month, 1 - lead);
+	const next = new Date(year, month + 1, trail + 1);
+	const start = new Date(
+		Math.min(first.getTime(), Date.UTC(first.getFullYear(), first.getMonth(), first.getDate())),
+	);
 	const end = new Date(
-		Math.max(new Date(year, month + 1, 1).getTime(), Date.UTC(year, month + 1, 1)) - 1,
+		Math.max(next.getTime(), Date.UTC(next.getFullYear(), next.getMonth(), next.getDate())) - 1,
 	);
 	return { start, end };
 }

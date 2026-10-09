@@ -445,7 +445,7 @@ test.describe('calendar fixes', () => {
 			process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true',
 			'requires the local fixture server',
 		);
-		const event: EventInput = {
+		const event = {
 			id: '44444444-4444-4444-8444-444444444444',
 			title: 'Termin aus Push-Link',
 			description: null,
@@ -454,6 +454,8 @@ test.describe('calendar fixes', () => {
 			allDay: false,
 			location: null,
 			recurrence: null,
+			// Own event, so the UI offers delete; the 403 simulates a server-side role change.
+			createdByMemberId: FIXTURE_WG.memberId,
 		};
 		await setupMember(page);
 		await page.route(`**/api/wg/${FIXTURE_WG.shareCode}/events*`, (route) =>
@@ -557,5 +559,38 @@ test.describe('calendar fixes', () => {
 		await page.getByRole('button', { name: 'Speichern', exact: true }).click();
 		await expect.poll(() => patches).toHaveLength(2);
 		expect(patches[1]?.recurrence).toBe('FREQ=WEEKLY');
+	});
+
+	test('members who did not create an event get a read-only view', async ({ page }) => {
+		test.skip(
+			process.env.NEXT_PUBLIC_E2E_FIXTURE_MODE !== 'true',
+			'requires the local fixture server',
+		);
+		const event = {
+			id: '55555555-5555-4555-8555-555555555555',
+			title: 'Fremder Termin',
+			description: null,
+			startsAt: new Date(Date.now() + 86_400_000).toISOString(),
+			endsAt: null,
+			allDay: false,
+			location: null,
+			recurrence: null,
+			createdByMemberId: '99999999-9999-4999-8999-999999999999',
+		};
+		await setupMember(page);
+		await page.route(`**/api/wg/${FIXTURE_WG.shareCode}/events*`, (route) =>
+			route.fulfill({ json: { events: [event] } }),
+		);
+		await page.route(`**/api/wg/${FIXTURE_WG.shareCode}/chores*`, (route) =>
+			route.fulfill({ json: { chores: [] } }),
+		);
+		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/kalender`);
+		await dismissOnboarding(page);
+		await page
+			.getByRole('button', { name: `Termin bearbeiten: ${event.title}`, exact: true })
+			.click();
+		await expect(page.getByRole('heading', { name: 'Termin', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Speichern', exact: true })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Termin löschen', exact: true })).toHaveCount(0);
 	});
 });

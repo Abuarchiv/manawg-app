@@ -62,6 +62,7 @@ export default function PutzenPage() {
 		flashAbsenceId,
 		handleAssignedMemberIdChange,
 		handleComplete,
+		handleEdit,
 		handleIntervalPresetSelect,
 		handleRecurrenceUnitToggle,
 		handleRemove,
@@ -78,10 +79,12 @@ export default function PutzenPage() {
 		memberLookup,
 		monthCompletions,
 		newAssigned,
+		newFirstDue,
 		newInterval,
 		newRecurrenceType,
 		newTitle,
 		nextAssigneeNameByChoreId,
+		overdueFilter,
 		ownDueCount,
 		pendingSuggestion,
 		queuedCount,
@@ -92,6 +95,7 @@ export default function PutzenPage() {
 		setAbsenceReason,
 		setAbsenceStart,
 		setConfirmSuggestion,
+		setNewFirstDue,
 		setNewTitle,
 		setShowForm,
 		showForm,
@@ -128,6 +132,8 @@ export default function PutzenPage() {
 				recurrenceType={newRecurrenceType}
 				onRecurrenceUnitToggle={handleRecurrenceUnitToggle}
 				onIntervalPresetSelect={handleIntervalPresetSelect}
+				firstDueDate={newFirstDue}
+				onFirstDueDateChange={setNewFirstDue}
 				assignedMemberId={newAssigned}
 				onAssignedMemberIdChange={handleAssignedMemberIdChange}
 				members={activeMembers}
@@ -218,6 +224,14 @@ export default function PutzenPage() {
 				</Empty>
 			) : (
 				<div id="chore-list" className="flex flex-col gap-4">
+					{overdueFilter.active && (
+						<div className="flex flex-wrap items-center justify-between gap-2">
+							<p className="text-[13px] text-muted-foreground">Nur überfällige Aufgaben</p>
+							<Button variant="outline" size="sm" onClick={overdueFilter.showAll}>
+								Alle anzeigen
+							</Button>
+						</div>
+					)}
 					{choreGroups.map((group) => (
 						<section
 							key={group.key}
@@ -240,11 +254,13 @@ export default function PutzenPage() {
 										chore={chore}
 										isAdmin={isAdmin}
 										assignee={memberLookup(chore.assignedMemberId)}
+										members={activeMembers}
 										isMine={chore.assignedMemberId === identity.memberId}
 										isPending={isPending(chore.id)}
 										isSwapPending={isPending(`${chore.id}:swap`)}
 										isSwapRequested={swapRequestedIds.has(chore.id)}
 										isTakePending={isPending(`${chore.id}:take`)}
+										isEditPending={isPending(`${chore.id}:edit`)}
 										isCompleteArmed={completeConfirmId === chore.id}
 										completeError={actionError}
 										nextAssigneeName={nextAssigneeNameByChoreId.get(chore.id) ?? null}
@@ -252,6 +268,7 @@ export default function PutzenPage() {
 										onComplete={handleComplete}
 										onSwapRequest={handleSwapRequest}
 										onTakeOver={handleTakeOver}
+										onEdit={handleEdit}
 										onRemove={handleRemove}
 										highlighted={highlightedId === chore.id}
 									/>

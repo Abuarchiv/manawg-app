@@ -30,7 +30,7 @@ interface CalendarMonthProps {
 	onSelectDay: (day: Date) => void;
 	onSelectOccurrence: (occurrence: EventOccurrence) => void;
 	selectedDay: Date | null;
-	/** Chore due dates in the agenda range; they get a dot like events. */
+	/** Chore due dates in the visible grid; they get a dot like events. */
 	choreOccurrences: readonly ChoreOccurrence[];
 	wgBaseHref: string;
 	/** Events not loaded yet (or loading failed): the day list says so instead of "keine Termine". */
@@ -338,6 +338,7 @@ export function CalendarMonth({
 												</span>
 												<span className="text-[12px] break-words text-muted-foreground">
 													{formatEventTimeOfDay(occurrence)}
+													{occurrence.location && ` · ${occurrence.location}`}
 												</span>
 											</span>
 											<ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />

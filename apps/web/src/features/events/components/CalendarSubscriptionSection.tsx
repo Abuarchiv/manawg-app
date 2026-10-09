@@ -7,7 +7,7 @@ import { Field, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { useCalendarSubscription } from '@/features/events/hooks/use-calendar-subscription';
-import { ChevronRight, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
+import { CalendarPlus, ChevronRight, ExternalLink, RefreshCw, Trash2 } from 'lucide-react';
 
 export function CalendarSubscriptionSection({ encodedShareCode }: { encodedShareCode: string }) {
 	const feed = useCalendarSubscription(encodedShareCode);
@@ -59,6 +59,18 @@ export function CalendarSubscriptionSection({ encodedShareCode }: { encodedShare
 							<div className="flex flex-wrap gap-2">
 								<Button
 									nativeButton={false}
+									className="py-1 text-left"
+									render={
+										// webcal:// hands the feed to Apple Kalender (and most desktop calendars) in one tap.
+										<a href={subscription.feedUrl.replace(/^https?:/, 'webcal:')}>
+											<CalendarPlus data-icon="inline-start" aria-hidden />
+											In Kalender-App abonnieren
+										</a>
+									}
+								/>
+								<Button
+									nativeButton={false}
+									variant="outline"
 									className="py-1 text-left"
 									render={
 										<a href={subscription.feedUrl} target="_blank" rel="noopener noreferrer">

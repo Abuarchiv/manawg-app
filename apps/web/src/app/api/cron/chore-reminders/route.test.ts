@@ -20,6 +20,11 @@ const wgMembers = {
 	pushOptIn: 'wgMembers.pushOptIn',
 	notifyChores: 'wgMembers.notifyChores',
 };
+const memberAbsences = {
+	memberId: 'memberAbsences.memberId',
+	startDate: 'memberAbsences.startDate',
+	endDate: 'memberAbsences.endDate',
+};
 const pushSubscriptions = { memberId: 'pushSubscriptions.memberId' };
 const wgs = { id: 'wgs.id', name: 'wgs.name', shareCode: 'wgs.shareCode' };
 
@@ -78,7 +83,7 @@ const db = {
 };
 
 mock.module('@/core/db', {
-	namedExports: { choreCompletions, chores, db, pushSubscriptions, wgMembers, wgs },
+	namedExports: { choreCompletions, chores, db, memberAbsences, pushSubscriptions, wgMembers, wgs },
 });
 mock.module('@/core/infra/cron-auth', { namedExports: { requireCronSecret: () => null } });
 mock.module('@/core/infra/observability', {
@@ -213,6 +218,18 @@ test('chore reminder candidates are bounded to a recent window and capped', asyn
 	assert.deepEqual(subscriptionFilter.args.slice(1), [
 		'pushSubscriptions.memberId',
 		'wgMembers.id',
+	]);
+	const absenceFilter = conditions.find(
+		(condition) => condition.operator === 'sql' && /not exists/.test(condition.text ?? ''),
+	);
+	assert.ok(absenceFilter, 'assignees who are absent today are excluded in SQL');
+	assert.deepEqual(absenceFilter.args.slice(1), [
+		'memberAbsences.memberId',
+		'chores.assignedMemberId',
+		'memberAbsences.startDate',
+		new Date('2026-09-25T21:59:59.999Z'),
+		'memberAbsences.endDate',
+		new Date('2026-09-24T22:00:00.000Z'),
 	]);
 	assert.equal(state.limit, 500);
 	assert.equal(

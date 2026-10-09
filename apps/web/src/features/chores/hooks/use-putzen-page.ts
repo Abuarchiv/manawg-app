@@ -1,9 +1,14 @@
 import { useToast } from '@/components/ui/Toast';
 import { useWg } from '@/components/wg/WgContextProvider';
 import { usePendingSet } from '@/core/hooks/usePendingSet';
-import { getAbsentMemberIds, pickVisibleAbsences } from '@/features/chores/absence';
+import {
+	getAbsentAssigneeChoreIds,
+	getAbsentMemberIds,
+	pickVisibleAbsences,
+} from '@/features/chores/absence';
 import { buildChoreFairness, predictNextAssigneeId } from '@/features/chores/chore-fairness';
 import {
+	filterOverdueGroups,
 	getChorePlanHealth,
 	getChoreStatus,
 	groupChoresForPlan,
@@ -89,14 +94,8 @@ export function usePutzenPage() {
 		};
 	}, [highlightedId, hasItems]);
 
-	useEffect(() => {
-		if (!overdueFilterActive) return;
-		window.setTimeout(() => {
-			document.getElementById('chore-list')?.scrollIntoView({
-				block: 'start',
-			});
-		}, 80);
-	}, [overdueFilterActive]);
+	// `?filter=overdue` shows only overdue chores until "Alle anzeigen" is tapped.
+	const [showAllChores, setShowAllChores] = useState(false);
 
 	// The row exists only after loading; without it in the dependencies the scroll would target nothing.
 	const absenceRowExists = absenceId ? absences.some((absence) => absence.id === absenceId) : false;
@@ -135,10 +134,20 @@ export function usePutzenPage() {
 						['due', 'overdue'].includes(getChoreStatus(chore.nextDueAt).state),
 				).length
 			: undefined;
-	const choreGroups = useMemo(
-		() => groupChoresForPlan(items, identity.memberId),
-		[identity.memberId, items],
-	);
+	const allChoreGroups = useMemo(() => {
+		const absentAssigneeChoreIds = getAbsentAssigneeChoreIds(items, absences);
+		return groupChoresForPlan(
+			items.map((chore) => ({ ...chore, assigneeAbsent: absentAssigneeChoreIds.has(chore.id) })),
+			identity.memberId,
+		);
+	}, [absences, identity.memberId, items]);
+	const overdueGroups = useMemo(() => filterOverdueGroups(allChoreGroups), [allChoreGroups]);
+	// Once nothing is overdue anymore (e.g. after completing the last one) the full list returns.
+	const overdueFilter = {
+		active: overdueFilterActive && !showAllChores && overdueGroups.length > 0,
+		showAll: () => setShowAllChores(true),
+	};
+	const choreGroups = overdueFilter.active ? overdueGroups : allChoreGroups;
 	const visibleAbsences = useMemo(
 		() => pickVisibleAbsences(absences, absencesPanelActive, absenceId),
 		[absenceId, absences, absencesPanelActive],
@@ -173,12 +182,14 @@ export function usePutzenPage() {
 		applyQuickChore: create.applyQuickChore,
 		choreAddPending: isPending('chore:add'),
 		choreGroups,
+		overdueFilter,
 		completeConfirmId: choreActions.completeConfirmId,
 		confirmSuggestion: create.confirmSuggestion,
 		fairness,
 		flashAbsenceId,
 		handleAssignedMemberIdChange: create.handleAssignedMemberIdChange,
 		handleComplete: choreActions.handleComplete,
+		handleEdit: choreActions.handleEdit,
 		handleIntervalPresetSelect: create.handleIntervalPresetSelect,
 		handleRecurrenceUnitToggle: create.handleRecurrenceUnitToggle,
 		handleRemove: choreActions.handleRemove,
@@ -195,6 +206,7 @@ export function usePutzenPage() {
 		memberLookup,
 		monthCompletions: data.monthCompletions,
 		newAssigned: create.newAssigned,
+		newFirstDue: create.newFirstDue,
 		newInterval: create.newInterval,
 		newRecurrenceType: create.newRecurrenceType,
 		newTitle: create.newTitle,
@@ -224,6 +236,7 @@ export function usePutzenPage() {
 		},
 		cancelComplete: choreActions.cancelComplete,
 		setConfirmSuggestion: create.setConfirmSuggestion,
+		setNewFirstDue: create.setNewFirstDue,
 		setNewTitle: create.setNewTitle,
 		setShowForm: create.setShowForm,
 		health: getChorePlanHealth(items),

@@ -94,6 +94,12 @@ mock.module('@/core/infra/observability', {
 mock.module('@/core/rate-limit', {
 	namedExports: { checkRateLimit: async () => ({ success: true }), wgWriteLimiter: {} },
 });
+mock.module('@/core/notifications/notification-dispatch', {
+	namedExports: { dispatchNotificationSafely: async () => ({ warning: null }) },
+});
+mock.module('@/features/chores/server/resolve-swap-request', {
+	namedExports: { resolveChoreSwapRequest: async () => undefined },
+});
 mock.module('@/features/chores/chore-patch', {
 	namedExports: { buildChorePatchUpdate: () => ({}) },
 });

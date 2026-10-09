@@ -1,3 +1,9 @@
+import {
+	READ_ONLY_MESSAGE,
+	SESSION_EXPIRED_MESSAGE,
+	isReadOnlyMode,
+	isSessionExpired,
+} from '@/core/http/error-codes';
 import { apiFetch } from '@/core/infra/api-client';
 import { enqueueOfflineAction } from '@/core/offline/offline-client';
 import {
@@ -30,6 +36,8 @@ export type ChoreCompletionOutcome =
 	| { kind: 'already_completed' }
 	| { kind: 'occurrence_changed' }
 	| { kind: 'insert_failed' }
+	| { kind: 'read_only' }
+	| { kind: 'session_expired' }
 	| { kind: 'failed' };
 
 export interface ChoreCompletionContext {
@@ -111,6 +119,8 @@ export async function submitChoreCompletion(
 		return { kind: 'occurrence_changed' };
 	}
 	if (result.error === 'completion_insert_failed') return { kind: 'insert_failed' };
+	if (isReadOnlyMode(result.error)) return { kind: 'read_only' };
+	if (isSessionExpired(result.error)) return { kind: 'session_expired' };
 	return { kind: 'failed' };
 }
 
@@ -138,6 +148,8 @@ export const CHORE_COMPLETION_COPY = {
 	occurrenceChanged: 'Termin oder Zuständigkeit haben sich geändert. Der Plan wird aktualisiert.',
 	insertFailed:
 		'Erledigt-Aktion konnte nicht vollständig gespeichert werden: Lade den Plan neu und prüfe den Verlauf.',
+	readOnly: `Erledigt-Aktion konnte nicht gespeichert werden: ${READ_ONLY_MESSAGE}`,
+	sessionExpired: `Erledigt-Aktion konnte nicht gespeichert werden: ${SESSION_EXPIRED_MESSAGE}`,
 	failed: 'Erledigt-Aktion konnte nicht gespeichert werden: Versuche es gleich erneut.',
 } as const;
 
@@ -200,6 +212,10 @@ export function choreCompletionFeedback(
 			return error(copy.occurrenceChanged, true, true);
 		case 'insert_failed':
 			return error(copy.insertFailed, false, true, copy.insertFailed);
+		case 'read_only':
+			return error(copy.readOnly, false, false, copy.readOnly);
+		case 'session_expired':
+			return error(copy.sessionExpired, false, false, copy.sessionExpired);
 		case 'failed':
 			return error(copy.failed, false, false, copy.failed);
 	}

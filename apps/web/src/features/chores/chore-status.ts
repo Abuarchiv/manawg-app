@@ -22,6 +22,8 @@ interface ChoreHealthInput {
 interface ChoreRepairInput {
 	assignedMemberId: string | null;
 	nextDueAt: string;
+	/** The assignee is away on the due day (or today if overdue); the rotation only moves the chore on completion. */
+	assigneeAbsent?: boolean;
 }
 
 interface ChoreRepairHint {
@@ -136,6 +138,10 @@ export function getChoreRepairHint(
 		};
 	}
 
+	if (item.assigneeAbsent) {
+		return { tone: 'danger', title: 'Zuständig ist abwesend', action: 'Ich übernehme' };
+	}
+
 	const status = getChoreStatus(item.nextDueAt, now);
 	if (!status.escalated) return null;
 
@@ -179,4 +185,19 @@ export function groupChoresForPlan<T extends ChoreRepairInput>(
 		...group,
 		chores: sorted.filter((chore) => getChoreGroup(chore, currentMemberId) === group.key),
 	})).filter((group) => group.chores.length > 0);
+}
+
+/** Keeps only overdue chores (for `?filter=overdue`); groups left empty are dropped. */
+export function filterOverdueGroups<T extends { nextDueAt: string }>(
+	groups: { key: ChoreGroupKey; label: string; chores: T[] }[],
+	now = Date.now(),
+): { key: ChoreGroupKey; label: string; chores: T[] }[] {
+	return groups
+		.map((group) => ({
+			...group,
+			chores: group.chores.filter(
+				(chore) => getChoreStatus(chore.nextDueAt, now).state === 'overdue',
+			),
+		}))
+		.filter((group) => group.chores.length > 0);
 }

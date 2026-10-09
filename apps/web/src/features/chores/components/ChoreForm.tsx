@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
 import { Spinner } from '@/components/ui/spinner';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { berlinDayKey } from '@/core/utils/berlin-day';
 import type { ChoreMember, RecurrenceType } from '@/features/chores/components/chore-types';
 import {
 	INTERVAL_PRESETS_DAYS,
@@ -33,6 +34,8 @@ interface ChoreFormProps {
 	recurrenceType: RecurrenceType;
 	onRecurrenceUnitToggle: (unit: RecurrenceType) => void;
 	onIntervalPresetSelect: (interval: number, unit: RecurrenceType) => void;
+	firstDueDate: string;
+	onFirstDueDateChange: (value: string) => void;
 	assignedMemberId: string;
 	onAssignedMemberIdChange: (value: string) => void;
 	members: ChoreMember[];
@@ -52,6 +55,8 @@ export function ChoreForm({
 	recurrenceType,
 	onRecurrenceUnitToggle,
 	onIntervalPresetSelect,
+	firstDueDate,
+	onFirstDueDateChange,
 	assignedMemberId,
 	onAssignedMemberIdChange,
 	members,
@@ -139,7 +144,23 @@ export function ChoreForm({
 										</ToggleGroupItem>
 									))}
 								</ToggleGroup>
-								<FieldDescription>Erste Fälligkeit: {firstDue}.</FieldDescription>
+							</Field>
+							<Field data-disabled={pending}>
+								<FieldLabel htmlFor="chore-first-due">Erste Fälligkeit (optional)</FieldLabel>
+								<Input
+									id="chore-first-due"
+									type="date"
+									value={firstDueDate}
+									onChange={(event) => onFirstDueDateChange(event.target.value)}
+									min={berlinDayKey(new Date())}
+									disabled={pending}
+									className="min-w-0 text-base"
+								/>
+								<FieldDescription>
+									{firstDueDate
+										? 'Die Aufgabe ist an diesem Tag fällig.'
+										: `Ohne Datum wird sie ${firstDue} fällig. Für heute wähle das heutige Datum.`}
+								</FieldDescription>
 							</Field>
 							<Field data-disabled={pending}>
 								<FieldLabel htmlFor="chore-assigned">Zuständig</FieldLabel>

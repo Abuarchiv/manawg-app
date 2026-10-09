@@ -302,8 +302,8 @@ test.describe('chore swap coordination (pilot DB worker)', () => {
 				`/api/wg/${shareCode}/announcements/${linked.id}/reactions`,
 				{ data: { reaction: 'take' } },
 			);
-			expect(staleTakeResponse.status()).toBe(400);
-			expect(await staleTakeResponse.json()).toMatchObject({ error: 'reaction_invalid' });
+			expect(staleTakeResponse.status()).toBe(409);
+			expect(await staleTakeResponse.json()).toMatchObject({ error: 'announcement_resolved' });
 			const resolvedOkResponse = await request.post(
 				`/api/wg/${shareCode}/announcements/${linked.id}/reactions`,
 				{ data: { reaction: 'ok' } },

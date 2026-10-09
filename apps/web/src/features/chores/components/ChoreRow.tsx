@@ -16,34 +16,43 @@ import { Spinner } from '@/components/ui/spinner';
 import { MemberAvatar } from '@/components/wg/MemberAvatar';
 import { useConfirmDelete } from '@/core/hooks/useConfirmDelete';
 import { formatRelativeTime, parseValidDate } from '@/core/utils/time';
+import type { ChoreEditChanges } from '@/features/chores/chore-edit';
 import { getChoreRepairHint, getChoreStatus } from '@/features/chores/chore-status';
 import {
 	ChoreCompleteDialog,
 	completeTriggerLabel,
 } from '@/features/chores/components/ChoreCompleteDialog';
-import type { Chore, RecurrenceType } from '@/features/chores/components/chore-types';
+import { ChoreEditDrawer } from '@/features/chores/components/ChoreEditDrawer';
+import type {
+	ChoreMember,
+	PlanChore,
+	RecurrenceType,
+} from '@/features/chores/components/chore-types';
 import { cn } from '@/shared/lib/cn';
 import type { MemberInfo } from '@/shared/lib/member-types';
 
-import { Check, Hand, MessageSquareMore, MoreHorizontal, Trash2 } from 'lucide-react';
+import { Check, Hand, MessageSquareMore, MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { type ReactElement, memo, useState } from 'react';
 
 interface ChoreRowProps {
-	chore: Chore;
+	chore: PlanChore;
 	assignee: MemberInfo;
+	members: ChoreMember[];
 	isMine: boolean;
 	isAdmin: boolean;
 	isPending: boolean;
 	isSwapPending: boolean;
 	isSwapRequested: boolean;
 	isTakePending: boolean;
+	isEditPending: boolean;
 	isCompleteArmed: boolean;
 	completeError: string | null;
 	nextAssigneeName: string | null;
 	onCancelComplete: () => void;
-	onComplete: (chore: Chore) => void;
-	onSwapRequest: (chore: Chore) => void;
-	onTakeOver: (chore: Chore) => void;
+	onComplete: (chore: PlanChore) => void;
+	onSwapRequest: (chore: PlanChore) => void;
+	onTakeOver: (chore: PlanChore) => void;
+	onEdit: (chore: PlanChore, changes: ChoreEditChanges) => Promise<boolean>;
 	onRemove: (id: string) => void;
 	highlighted: boolean;
 }
@@ -74,12 +83,14 @@ function formatChoreCadence(interval: number, type: RecurrenceType): string {
 export const ChoreRow = memo(function ChoreRow({
 	chore,
 	assignee,
+	members,
 	isMine,
 	isAdmin,
 	isPending,
 	isSwapPending,
 	isSwapRequested,
 	isTakePending,
+	isEditPending,
 	isCompleteArmed,
 	completeError,
 	nextAssigneeName,
@@ -87,16 +98,18 @@ export const ChoreRow = memo(function ChoreRow({
 	onComplete,
 	onSwapRequest,
 	onTakeOver,
+	onEdit,
 	onRemove,
 	highlighted,
 }: ChoreRowProps): ReactElement {
 	const [actionsOpen, setActionsOpen] = useState(false);
+	const [editOpen, setEditOpen] = useState(false);
 	const removeConfirm = useConfirmDelete();
 	const status = getChoreStatus(chore.nextDueAt);
 	// Taking over your own chore is a no-op, so the shortcut only shows for others'.
 	const needsTakeOver = !isMine && getChoreRepairHint(chore) !== null;
 	const cadence = formatChoreCadence(chore.intervalDays, chore.recurrenceType);
-	const busy = isPending || isTakePending || isSwapPending;
+	const busy = isPending || isTakePending || isSwapPending || isEditPending;
 	const dueDate = parseValidDate(chore.nextDueAt);
 
 	return (
@@ -131,6 +144,7 @@ export const ChoreRow = memo(function ChoreRow({
 					</span>
 					{' · '}
 					{cadence}
+					{chore.assigneeAbsent && !isMine && ` · ${assignee.name} ist abwesend`}
 				</ItemDescription>
 				{needsTakeOver && (
 					<Button
@@ -202,6 +216,19 @@ export const ChoreRow = memo(function ChoreRow({
 									</>
 								)}
 							</dl>
+							<Button
+								variant="outline"
+								className="min-h-11 shrink-0 py-2"
+								disabled={busy}
+								aria-label={`Aufgabe bearbeiten: ${chore.title}`}
+								onClick={() => {
+									setActionsOpen(false);
+									setEditOpen(true);
+								}}
+							>
+								<Pencil data-icon="inline-start" aria-hidden />
+								Bearbeiten
+							</Button>
 							{/* Nothing to take over for the own chore. */}
 							{!isMine && (
 								<Button
@@ -267,6 +294,19 @@ export const ChoreRow = memo(function ChoreRow({
 					</DrawerContent>
 				</Drawer>
 			</ItemActions>
+			<ChoreEditDrawer
+				open={editOpen}
+				onOpenChange={setEditOpen}
+				chore={chore}
+				members={members}
+				pending={isEditPending}
+				error={editOpen ? completeError : null}
+				onSave={(changes) => {
+					void onEdit(chore, changes).then((saved) => {
+						if (saved) setEditOpen(false);
+					});
+				}}
+			/>
 			<ChoreCompleteDialog
 				open={isCompleteArmed}
 				title={chore.title}

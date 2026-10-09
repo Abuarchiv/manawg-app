@@ -1,10 +1,11 @@
-import { isNetworkError } from '@/core/http/error-codes';
 import { apiFetch } from '@/core/infra/api-client';
 import { discardQueuedEntry } from '@/core/offline/offline-client';
 import { isQueuedCreateId } from '@/core/offline/offline-queue';
 import { parseValidDate } from '@/core/utils/time';
 import { getAbsentMemberIds } from '@/features/chores/absence';
 import { choreCompletionFeedback } from '@/features/chores/chore-completion';
+import type { ChoreEditChanges } from '@/features/chores/chore-edit';
+import { choreEditErrorMessage } from '@/features/chores/chore-errors';
 import { choreActionErrorMessage } from '@/features/chores/chore-errors';
 import { chooseNextAvailableMember } from '@/features/chores/chore-fairness';
 import { computeNextDueAt } from '@/features/chores/chore-recurrence';
@@ -202,12 +203,44 @@ export function useChoreActions(ctx: ChorePageContext) {
 	}
 
 	async function handleTakeOver(chore: Chore): Promise<void> {
-		await handleAssignTo(chore, identity.memberId, 'Du bist jetzt für die Aufgabe eingetragen.');
+		await patchChore(
+			chore,
+			{ assignedMemberId: identity.memberId },
+			`${chore.id}:take`,
+			(result) => choreActionErrorMessage('Aufgabe konnte nicht übernommen werden', result),
+			'Du bist jetzt für die Aufgabe eingetragen.',
+		);
 	}
 
-	async function handleAssignTo(chore: Chore, memberId: string, notice: string): Promise<void> {
-		const pendingKey = `${chore.id}:take`;
-		if (isPending(pendingKey) || isStillQueued(chore)) return;
+	/** Saves the edit form; resolves to whether it went through, so the drawer can close. */
+	async function handleEdit(chore: Chore, changes: ChoreEditChanges): Promise<boolean> {
+		const assigneeName =
+			changes.assignedMemberId === undefined
+				? null
+				: changes.assignedMemberId === null
+					? 'Niemand'
+					: changes.assignedMemberId === identity.memberId
+						? 'du'
+						: (members.find((member) => member.id === changes.assignedMemberId)?.name ?? null);
+		return patchChore(
+			chore,
+			changes,
+			`${chore.id}:edit`,
+			(result) => choreEditErrorMessage(result.error),
+			assigneeName && Object.keys(changes).length === 1
+				? `Zuständig: ${assigneeName}.`
+				: 'Änderungen gespeichert.',
+		);
+	}
+
+	async function patchChore(
+		chore: Chore,
+		changes: ChoreEditChanges,
+		pendingKey: string,
+		errorMessage: (result: { error: string; status: number }) => string,
+		notice: string,
+	): Promise<boolean> {
+		if (isPending(pendingKey) || isStillQueued(chore)) return false;
 		startPending(pendingKey);
 		setActionError(null);
 		setActionNotice(null);
@@ -217,30 +250,40 @@ export function useChoreActions(ctx: ChorePageContext) {
 			{
 				method: 'PATCH',
 				memberId: identity.memberId,
-				body: JSON.stringify({ assignedMemberId: memberId }),
+				body: JSON.stringify(changes),
 			},
 		);
 
-		if (!result.ok) {
-			if (result.status === 404 && result.error === 'chore_not_found') {
-				updateChores((current) => current.filter((item) => item.id !== chore.id));
-				setActionError('Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.');
-				void load(false);
-				endPending(pendingKey);
-				return;
+		try {
+			if (!result.ok) {
+				if (result.status === 404 && result.error === 'chore_not_found') {
+					updateChores((current) => current.filter((item) => item.id !== chore.id));
+					setActionError('Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.');
+					void load(false);
+					return true;
+				}
+				setActionError(errorMessage(result));
+				if (result.status === 409 && result.error === 'chore_changed') void load(false);
+				return false;
 			}
-			setActionError(choreActionErrorMessage('Aufgabe konnte nicht übernommen werden', result));
-		} else {
 			updateChores((current) =>
-				current.map((item) =>
-					item.id === chore.id ? { ...item, assignedMemberId: memberId } : item,
-				),
+				current.map((item) => (item.id === chore.id ? { ...item, ...changes } : item)),
 			);
+			// A new assignee settles the open swap request, so the chore can ask again later.
+			if (changes.assignedMemberId !== undefined) {
+				setSwapRequestedIds((current) => {
+					if (!current.has(chore.id)) return current;
+					const rest = new Set(current);
+					rest.delete(chore.id);
+					return rest;
+				});
+			}
 			toast.success(notice);
 			void load(false);
+			return true;
+		} finally {
+			endPending(pendingKey);
 		}
-
-		endPending(pendingKey);
 	}
 
 	async function handleRemove(id: string): Promise<void> {
@@ -273,13 +316,11 @@ export function useChoreActions(ctx: ChorePageContext) {
 
 			if (!result.ok) {
 				const msg =
-					result.status === 403
+					result.status === 403 && result.error === 'admin_required'
 						? 'Nur WG-Admins können diese Aufgabe endgültig entfernen.'
 						: result.status === 404 && result.error === 'chore_not_found'
 							? 'Diese Putzaufgabe existiert nicht mehr und wurde aus dem Plan entfernt.'
-							: isNetworkError(result.error, result.status)
-								? 'Entfernen fehlgeschlagen: Prüfe deine Verbindung und versuche es erneut.'
-								: 'Entfernen fehlgeschlagen. Versuche es gleich erneut.';
+							: choreActionErrorMessage('Entfernen fehlgeschlagen', result);
 				setActionError(msg);
 				if (result.status === 404 && result.error === 'chore_not_found') {
 					updateChores((current) => current.filter((item) => item.id !== id));
@@ -303,6 +344,7 @@ export function useChoreActions(ctx: ChorePageContext) {
 		handleSwapRequest,
 		swapRequestedIds,
 		handleTakeOver,
+		handleEdit,
 		handleRemove,
 	};
 }

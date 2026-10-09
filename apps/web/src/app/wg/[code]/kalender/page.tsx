@@ -24,7 +24,7 @@ import { useState } from 'react';
 type ViewMode = 'month' | 'list';
 
 export default function KalenderPage() {
-	const { wg } = useWg();
+	const { wg, identity, isAdmin } = useWg();
 	const encodedShareCode = encodeURIComponent(wg.shareCode);
 	const wgBaseHref = `/wg/${encodedShareCode}`;
 	const [month, setMonth] = useState<Date>(() => {
@@ -33,7 +33,10 @@ export default function KalenderPage() {
 	});
 	const calendar = useCalendarPage(month);
 	const highlightEventId = useSearchParams().get('highlight');
-	const { loading, loadError, actionError, editingOccurrence } = calendar;
+	const { loading, loadError, actionError, editingOccurrence, editing } = calendar;
+	// Mirrors the API rule (creator or WG admin) so others are not offered buttons that end in a 403.
+	const canEditEvent =
+		editing === null || isAdmin || editing.createdByMemberId === identity.memberId;
 	// List as default: a WG rarely has more than a handful of events per
 	// month, so the grid is the exception view, not the entry point.
 	const [view, setView] = useState<ViewMode>('list');
@@ -173,7 +176,7 @@ export default function KalenderPage() {
 						onSelectDay={handleDaySelect}
 						onSelectOccurrence={calendar.selectOccurrence}
 						selectedDay={selectedDay}
-						choreOccurrences={calendar.upcomingChoreOccurrences}
+						choreOccurrences={calendar.monthChoreOccurrences}
 						wgBaseHref={wgBaseHref}
 						status={loading ? 'loading' : loadError ? 'error' : undefined}
 					/>
@@ -194,6 +197,7 @@ export default function KalenderPage() {
 				onUpdate={calendar.updateEvent}
 				onDelete={calendar.deleteEvent}
 				actionError={actionError}
+				readOnly={!canEditEvent}
 				onExportIcs={editingOccurrence ? () => downloadOccurrenceIcs(editingOccurrence) : undefined}
 			/>
 			<ThumbAction>

@@ -182,7 +182,9 @@ export function useAbsences(ctx: ChorePageContext, form: AbsenceFormState, queue
 				return;
 			}
 			setQueueEditId(null);
-			toast.success('Abwesenheit gespeichert. Die Rotation überspringt diese Person.');
+			toast.success(
+				'Abwesenheit gespeichert. Neue Zuständigkeiten überspringen diese Person, schon zugewiesene Aufgaben können Mitbewohner übernehmen.',
+			);
 			void load(false);
 		} finally {
 			endPending(pendingKey);

@@ -7,18 +7,24 @@ import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { badRequest, conflict, forbidden, notFound, tooMany } from '@/core/http/api-errors';
 import { parseBody } from '@/core/http/parse-body';
+import { dispatchNotificationSafely } from '@/core/notifications/notification-dispatch';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
+import { MS_PER_DAY } from '@/core/utils/time';
 import { buildChorePatchUpdate } from '@/features/chores/chore-patch';
+import { resolveChoreSwapRequest } from '@/features/chores/server/resolve-swap-request';
 import { type SQL, and, eq, isNull, sql } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
+const TITLE_MIN = 1;
+const TITLE_MAX = 120;
 const INTERVAL_MIN = 1;
 const INTERVAL_MAX_DAYS = 365;
 const INTERVAL_MAX_MONTHS = 60;
 
 const patchSchema = z
 	.object({
+		title: z.string().trim().min(TITLE_MIN).max(TITLE_MAX).optional(),
 		assignedMemberId: z.string().uuid().nullable().optional(),
 		nextDueAt: z.string().datetime({ offset: true }).optional(),
 		intervalDays: z.number().int().min(INTERVAL_MIN).optional(),
@@ -64,6 +70,7 @@ export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { c
 
 	const parsed = await parseBody(req, patchSchema, {
 		fieldErrors: {
+			title: 'title_invalid',
 			assignedMemberId: 'member_id_invalid',
 			nextDueAt: 'due_date_invalid',
 			intervalDays: 'interval_invalid',
@@ -91,6 +98,18 @@ export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { c
 			)
 			.limit(1);
 		if (member.length === 0) return badRequest('member_not_in_wg');
+	}
+	// Read before the update: a changed assignee closes the swap request and
+	// notifies the new one, a re-saved one does nothing.
+	let previousAssigneeId: string | null = null;
+	if (parsed.data.assignedMemberId !== undefined) {
+		const [previous] = await db
+			.select({ assignedMemberId: chores.assignedMemberId })
+			.from(chores)
+			.where(and(eq(chores.id, id), eq(chores.wgId, wgId)))
+			.limit(1);
+		if (!previous) return notFound('chore_not_found');
+		previousAssigneeId = previous.assignedMemberId;
 	}
 	const cadenceChanged =
 		parsed.data.intervalDays !== undefined || parsed.data.recurrenceType !== undefined;
@@ -120,6 +139,7 @@ export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { c
 	}
 
 	const update: {
+		title?: string;
 		assignedMemberId?: string | null;
 		nextDueAt?: Date;
 		anchorAt?: Date;
@@ -131,6 +151,7 @@ export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { c
 		updatedAt: new Date(),
 	};
 	if (recurrencePatch) Object.assign(update, recurrencePatch.update);
+	if (parsed.data.title !== undefined) update.title = parsed.data.title;
 	if (parsed.data.assignedMemberId !== undefined) {
 		const nextAssignee = parsed.data.assignedMemberId;
 		update.assignedMemberId = nextAssignee;
@@ -177,6 +198,27 @@ export const PATCH = withWgRoute<{ id: string }>('chores PATCH', async (req, { c
 			recurrenceType: updated.recurrenceType,
 		},
 	});
+	const assigneeChanged =
+		parsed.data.assignedMemberId !== undefined && previousAssigneeId !== updated.assignedMemberId;
+	if (assigneeChanged) await resolveChoreSwapRequest(wgId, id, auth.member.memberId);
+	// Taking over a chore yourself needs no push; handing a due chore to someone else does.
+	if (
+		assigneeChanged &&
+		updated.assignedMemberId &&
+		updated.assignedMemberId !== auth.member.memberId &&
+		updated.nextDueAt.getTime() <= Date.now() + MS_PER_DAY
+	) {
+		await dispatchNotificationSafely({
+			wg: auth.wg,
+			event: 'chore.due',
+			payload: {
+				title: updated.title,
+				choreId: updated.id,
+				nextDueAt: updated.nextDueAt.toISOString(),
+			},
+			targetMemberIds: [updated.assignedMemberId],
+		});
+	}
 	return NextResponse.json({ chore: updated });
 });
 
@@ -212,6 +254,7 @@ export const DELETE = withWgRoute<{ id: string }>('chores DELETE', async (req, {
 		.returning({ id: chores.id });
 
 	if (result.length === 0) return notFound('chore_not_found');
+	await resolveChoreSwapRequest(wgId, id, auth.member.memberId);
 	await recordAuditEvent({
 		wgId,
 		memberId: auth.member.memberId,

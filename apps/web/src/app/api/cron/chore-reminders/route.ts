@@ -1,5 +1,13 @@
 import * as dbSchema from '@/core/db';
-import { choreCompletions, chores, db, pushSubscriptions, wgMembers, wgs } from '@/core/db';
+import {
+	choreCompletions,
+	chores,
+	db,
+	memberAbsences,
+	pushSubscriptions,
+	wgMembers,
+	wgs,
+} from '@/core/db';
 import { requireCronSecret } from '@/core/infra/cron-auth';
 import { withCronLogging } from '@/core/infra/observability';
 import { dispatchNotification } from '@/core/notifications/notification-dispatch';
@@ -142,6 +150,9 @@ export const GET = withCronLogging(
 					eq(wgMembers.pushOptIn, true),
 					eq(wgMembers.notifyChores, true),
 					sql`exists (select 1 from ${pushSubscriptions} where ${pushSubscriptions.memberId} = ${wgMembers.id})`,
+					// Absent assignees keep the chore (the rotation only moves it on
+					// completion) but get no push; the plan flags it for housemates.
+					sql`not exists (select 1 from ${memberAbsences} where ${memberAbsences.memberId} = ${chores.assignedMemberId} and ${memberAbsences.startDate} <= ${endOfDay} and ${memberAbsences.endDate} >= ${startOfDay})`,
 				),
 			)
 			// Rotate the capped window across daily runs: never-reminded chores

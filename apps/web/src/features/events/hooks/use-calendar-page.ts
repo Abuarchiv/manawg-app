@@ -31,6 +31,8 @@ interface CalendarEvent {
 	allDay: boolean;
 	location: string | null;
 	recurrence: string | null;
+	/** Absent only on optimistic rows; the API always sends it. */
+	createdByMemberId?: string | null;
 }
 
 type CalendarCreateResponse = {
@@ -217,14 +219,23 @@ export function useCalendarPage(month: Date) {
 	);
 
 	const upcomingChoreOccurrences = useMemo(() => {
+		// From the start of today: a chore due this morning is still today's chore.
 		const from = new Date();
 		const to = new Date(from.getTime() + UPCOMING_DAYS * MS_PER_DAY);
+		from.setHours(0, 0, 0, 0);
 		return buildChoreOccurrences(chores, from, to);
 	}, [chores]);
 
+	// The month grid is not limited to the agenda's 30 days.
+	const monthChoreOccurrences = useMemo(() => {
+		const bounds = getMonthBounds(month);
+		return buildChoreOccurrences(chores, bounds.start, bounds.end);
+	}, [chores, month]);
+
 	function selectOccurrence(occurrence: EventOccurrence): void {
 		const event = events.find((e) => e.id === occurrence.eventId);
-		if (!event) return;
+		// An optimistic row has no server id yet; editing it would PATCH a non-existent event.
+		if (!event || event.id.startsWith('pending:')) return;
 		setActionError(null);
 		setEditingOccurrence(occurrence);
 		setEditing(event);
@@ -243,7 +254,11 @@ export function useCalendarPage(month: Date) {
 		if (!idempotencyKey) throw new Error('Termin konnte nicht sicher gesendet werden.');
 		createEventRequestRef.current = { fingerprint, key: idempotencyKey };
 		const optimisticId = `pending:${idempotencyKey}`;
-		const optimisticEvent: CalendarEvent = { id: optimisticId, ...payload };
+		const optimisticEvent: CalendarEvent = {
+			id: optimisticId,
+			...payload,
+			createdByMemberId: identity.memberId,
+		};
 		updateEvents((current) => [...current, optimisticEvent]);
 		const res = await apiFetch<CalendarCreateResponse>(eventsBaseUrl, {
 			method: 'POST',
@@ -280,7 +295,7 @@ export function useCalendarPage(month: Date) {
 		const previous = events.find((event) => event.id === id);
 		if (previous) {
 			updateEvents((current) =>
-				current.map((event) => (event.id === id ? { id, ...payload } : event)),
+				current.map((event) => (event.id === id ? { ...event, ...payload } : event)),
 			);
 		}
 		const res = await apiFetch<{ event: CalendarEvent }>(
@@ -343,6 +358,7 @@ export function useCalendarPage(month: Date) {
 		upcomingOccurrences,
 		recurrenceByEventId,
 		upcomingChoreOccurrences,
+		monthChoreOccurrences,
 		createOpen,
 		setCreateOpen,
 		editing,
