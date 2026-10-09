@@ -20,11 +20,9 @@ test.describe('chat edit focus', () => {
 		const actions = message.getByRole('button', { name: /Aktionen für Nachricht/ });
 		await actions.focus();
 		await page.keyboard.press('Enter');
-		// React, reply and copy come before edit.
-		await expect(page.getByRole('menuitem', { name: 'Reagieren' })).toBeFocused();
-		await page.keyboard.press('ArrowDown');
-		await page.keyboard.press('ArrowDown');
-		await page.keyboard.press('ArrowDown');
+		// The reaction bar (six emojis and "+"), reply and copy come before edit.
+		await expect(page.getByRole('menuitem', { name: 'Mit 👍 reagieren' })).toBeFocused();
+		for (let step = 0; step < 9; step++) await page.keyboard.press('ArrowDown');
 		const editAction = page.getByRole('menuitem', { name: 'Bearbeiten' });
 		await expect(editAction).toBeFocused();
 		await page.keyboard.press('Enter');
@@ -207,7 +205,7 @@ test.describe('chat ios keyboard', () => {
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			return {
 				keyboardTop: state.offsetTop + state.height,
-				composerBottom: field.closest('.border-t')?.getBoundingClientRect().bottom ?? 0,
+				composerBottom: field.closest('[data-chat-composer]')?.getBoundingClientRect().bottom ?? 0,
 			};
 		});
 		expect(Math.abs(result.keyboardTop - result.composerBottom)).toBeLessThan(1);
@@ -247,7 +245,7 @@ test.describe('chat ios keyboard', () => {
 					const nav = document.querySelector('nav[data-app-chrome]')?.getBoundingClientRect();
 					const field = document
 						.querySelector('textarea[aria-label="Chat-Nachricht"]')
-						?.closest('.border-t')
+						?.closest('[data-chat-composer]')
 						?.getBoundingClientRect();
 					return nav && field ? Math.round(nav.top - field.bottom) : null;
 				}),

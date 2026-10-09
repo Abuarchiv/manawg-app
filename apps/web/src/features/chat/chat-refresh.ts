@@ -1,5 +1,6 @@
 import {
 	CHAT_REFRESH_BATCH_SIZE,
+	type ChatReadMarker,
 	advanceChatRefreshSequence,
 	isLatestChatRefreshResponse,
 	nextChatRefreshBatch,
@@ -18,6 +19,7 @@ interface ChatRefreshResponse {
 	messages: ChatMessageDto[];
 	refreshedMessages?: ChatMessageDto[];
 	reactions: ChatReactionRow[];
+	reads?: ChatReadMarker[];
 }
 
 /** Reaction mutations the refresh must not overwrite with an older server snapshot. */
@@ -37,6 +39,7 @@ export interface ChatRefreshDeps {
 	setMessages: (update: Update<ChatMessageDto[]>) => void;
 	setReactionRows: (update: Update<ChatReactionRow[]>) => void;
 	setHasMoreOlder: (update: Update<boolean>) => void;
+	setReads?: (update: Update<ChatReadMarker[]>) => void;
 }
 
 export interface ChatRefresher {
@@ -111,6 +114,8 @@ export function createChatRefresher(deps: ChatRefreshDeps): ChatRefresher {
 				preservedLocalKeys,
 			);
 		});
+		const reads = res.data.reads;
+		if (reads) deps.setReads?.((prev) => (isLatest() ? reads : prev));
 		// Only ever grow: the latest page's length says nothing about whether older pages were
 		// already loaded. Loading older pages clears the flag when the history is exhausted.
 		deps.setHasMoreOlder((prev) =>

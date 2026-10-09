@@ -36,12 +36,19 @@ function DropdownMenuContent({
 	alignOffset = 0,
 	side = 'bottom',
 	sideOffset = 4,
+	backdrop = false,
 	className,
 	...props
 }: MenuPrimitive.Popup.Props &
-	Pick<MenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>) {
+	Pick<MenuPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'> & {
+		/** Dims and blurs the page behind the menu, as a messenger context menu does. */
+		backdrop?: boolean;
+	}) {
 	return (
 		<MenuPrimitive.Portal>
+			{backdrop && (
+				<MenuPrimitive.Backdrop className="fixed inset-0 z-50 bg-black/25 backdrop-blur-[2px] duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+			)}
 			<MenuPositioner
 				className="isolate z-50 outline-none"
 				align={align}

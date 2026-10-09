@@ -40,6 +40,10 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 	const [replyFocusRequest, setReplyFocusRequest] = useState(0);
 	useChatViewportFit(chatRootRef);
 
+	const readerIds = useMemo(
+		() => members.filter((m) => m.active && m.id !== identity.memberId).map((m) => m.id),
+		[members, identity.memberId],
+	);
 	const listMembers = useMemo(
 		() => members.map((m) => ({ id: m.id, name: m.name, color: m.color ?? null })),
 		[members],
@@ -100,9 +104,10 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 						data-scroll-y
 						role="log"
 						aria-label="Chat-Nachrichten"
-						className="bg-background [scroll-behavior:auto]!"
+						// Chat wallpaper as in WhatsApp: warm beige with a faint dot pattern.
+						className="bg-[#efeae2] [background-image:radial-gradient(rgb(0_0_0/0.05)_1px,transparent_1px)] [background-size:18px_18px] dark:bg-[#0b141a] dark:[background-image:radial-gradient(rgb(255_255_255/0.04)_1px,transparent_1px)] [scroll-behavior:auto]!"
 					>
-						<MessageScrollerContent className="mx-auto w-full max-w-3xl gap-3 px-4 py-2">
+						<MessageScrollerContent className="mx-auto w-full max-w-3xl gap-2 px-3 py-2">
 							{chat.bootstrapping ? (
 								<ChatLoadingPlaceholder />
 							) : chat.bootstrapError ? (
@@ -117,6 +122,8 @@ export function ChatView({ wgId, shareCode, initialMessages, initialReactions }:
 									shareCode={shareCode}
 									isAdmin={isAdmin}
 									reactionsByMessage={chat.reactionsByMessage}
+									reads={chat.reads}
+									readerIds={readerIds}
 									hasMoreOlder={chat.hasMoreOlder}
 									loadingOlder={chat.loadingOlder}
 									olderError={chat.olderError}

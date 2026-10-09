@@ -5,7 +5,7 @@ import { notificationWarningMessage } from '@/core/notifications/notification-wa
 import { useVisibilityPausedInterval } from '@/core/utils/use-visibility-paused-interval';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { explainChatError } from '../chat-errors';
-import { mergePagedMessagesById, mergePagedReactions } from '../chat-pure';
+import { type ChatReadMarker, mergePagedMessagesById, mergePagedReactions } from '../chat-pure';
 import { summarizeReactions } from '../chat-reactions';
 import { CHAT_PAGE_SIZE, createChatRefresher } from '../chat-refresh';
 import { type ChatMessageInput, type PendingChatSend, postChatMessage } from '../chat-send';
@@ -40,6 +40,7 @@ export function useChatRoom({
 
 	const [messages, setMessages] = useState<ChatMessageDto[]>(initialMessages);
 	const [reactionRows, setReactionRows] = useState<ChatReactionRow[]>(initialReactions);
+	const [reads, setReads] = useState<ChatReadMarker[]>([]);
 	const [hasMoreOlder, setHasMoreOlder] = useState(initialMessages.length >= CHAT_PAGE_SIZE);
 	const [bootstrapping, setBootstrapping] = useState(initialMessages.length === 0);
 	const [bootstrapError, setBootstrapError] = useState(false);
@@ -77,6 +78,7 @@ export function useChatRoom({
 				setMessages,
 				setReactionRows,
 				setHasMoreOlder,
+				setReads,
 			}),
 		[identity.memberId, messagesUrl, reactionTracker],
 	);
@@ -198,6 +200,7 @@ export function useChatRoom({
 
 	return {
 		messages,
+		reads,
 		reactionsByMessage,
 		hasMoreOlder,
 		bootstrapping,

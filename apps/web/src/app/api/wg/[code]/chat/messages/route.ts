@@ -1,5 +1,12 @@
 import { recordAuditEvent } from '@/core/audit';
-import { db, wgChatMentions, wgChatMessages, wgChatReactions, wgMembers } from '@/core/db';
+import {
+	db,
+	wgChatMentions,
+	wgChatMessages,
+	wgChatReactions,
+	wgChatReads,
+	wgMembers,
+} from '@/core/db';
 import { responseCodec, withIdempotentWrite } from '@/core/db/idempotent-write';
 import { assertPrivateImageCanBeAttached } from '@/core/db/private-image-deletions';
 import {
@@ -94,12 +101,22 @@ export const GET = withWgRoute('chat messages GET', async (req, { code }) => {
 			)
 		: eq(wgChatMessages.wgId, wg.id);
 
-	const pageRows = await db
-		.select()
-		.from(wgChatMessages)
-		.where(where)
-		.orderBy(desc(wgChatMessages.createdAt), desc(wgChatMessages.id))
-		.limit(limit);
+	// Read markers drive the read ticks; only the latest page (the poll) needs them.
+	const [pageRows, reads] = await Promise.all([
+		db
+			.select()
+			.from(wgChatMessages)
+			.where(where)
+			.orderBy(desc(wgChatMessages.createdAt), desc(wgChatMessages.id))
+			.limit(limit),
+		beforeId
+			? []
+			: db
+					.select({ memberId: wgChatReads.memberId, lastReadAt: wgChatMessages.createdAt })
+					.from(wgChatReads)
+					.innerJoin(wgChatMessages, eq(wgChatMessages.id, wgChatReads.lastReadMessageId))
+					.where(eq(wgChatReads.wgId, wg.id)),
+	]);
 
 	const pageIds = new Set(pageRows.map((row) => row.id));
 	const refreshIds = [...new Set(refreshIdParams)].filter((id) => !pageIds.has(id));
@@ -115,6 +132,7 @@ export const GET = withWgRoute('chat messages GET', async (req, { code }) => {
 	if (rows.length === 0) {
 		return NextResponse.json({
 			...chatMessagesReadPayload(pageRows, refreshedRows),
+			reads,
 			reactions: [],
 			mentions: [],
 		});
@@ -124,6 +142,7 @@ export const GET = withWgRoute('chat messages GET', async (req, { code }) => {
 	if (liveMessageIds.length === 0) {
 		return NextResponse.json({
 			...chatMessagesReadPayload(pageRows, refreshedRows),
+			reads,
 			reactions: [],
 			mentions: [],
 		});
@@ -151,6 +170,7 @@ export const GET = withWgRoute('chat messages GET', async (req, { code }) => {
 
 	return NextResponse.json({
 		...chatMessagesReadPayload(pageRows, refreshedRows),
+		reads,
 		reactions: reactionRows,
 		mentions: mentionRows,
 	});

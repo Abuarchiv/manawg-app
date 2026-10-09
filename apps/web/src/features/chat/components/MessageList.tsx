@@ -1,12 +1,16 @@
 'use client';
 
 import { Button } from '@/components/ui/button';
-import { Marker, MarkerContent } from '@/components/ui/marker';
 import { MessageGroup } from '@/components/ui/message';
 import { MessageScrollerItem } from '@/components/ui/message-scroller';
 import { Spinner } from '@/components/ui/spinner';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
-import { groupMessagesByDay } from '../chat-pure';
+import {
+	type ChatReadMarker,
+	chatDayLabel,
+	countChatReaders,
+	groupMessagesByDay,
+} from '../chat-pure';
 import { type BubbleMessage, MessageBubble, type ReactionSummary } from './MessageBubble';
 import { SystemMessage } from './SystemMessage';
 
@@ -17,6 +21,9 @@ interface MessageListProps {
 	shareCode: string;
 	isAdmin: boolean;
 	reactionsByMessage: Map<string, ReactionSummary[]>;
+	reads: readonly ChatReadMarker[];
+	/** Members whose read markers count for the read ticks: everyone active except the viewer. */
+	readerIds: readonly string[];
 	hasMoreOlder: boolean;
 	loadingOlder: boolean;
 	olderError: boolean;
@@ -28,11 +35,6 @@ interface MessageListProps {
 	onDelete: (messageId: string) => Promise<string | null>;
 	onReply: (messageId: string) => void;
 }
-const DAY_FORMAT = new Intl.DateTimeFormat('de-DE', {
-	weekday: 'long',
-	day: 'numeric',
-	month: 'long',
-});
 const NO_REACTIONS: ReactionSummary[] = [];
 const MESSAGE_GROUP_WINDOW_MS = 5 * 60 * 1000;
 
@@ -62,6 +64,8 @@ export function MessageList({
 	shareCode,
 	isAdmin,
 	reactionsByMessage,
+	reads,
+	readerIds,
 	hasMoreOlder,
 	loadingOlder,
 	olderError,
@@ -106,6 +110,7 @@ export function MessageList({
 	);
 	const groups = useMemo(() => groupMessagesByDay(messages), [messages]);
 	const oldestId = messages[0]?.id;
+	const now = new Date();
 
 	// Each message is a direct, stable child of MessageScrollerContent. Inserting
 	// older messages moves the previous first item, which enables prepend restore.
@@ -126,7 +131,7 @@ export function MessageList({
 				<MessageScrollerItem
 					key={message.id}
 					messageId={message.id}
-					className={grouped ? '-mt-2' : undefined}
+					className={grouped ? '-mt-1.5' : undefined}
 				>
 					{message.id === oldestId && hasMoreOlder && (
 						<div className="flex flex-col items-center gap-2 pb-3">
@@ -147,9 +152,14 @@ export function MessageList({
 						</div>
 					)}
 					{index === 0 && (
-						<Marker variant="separator" className="py-2 text-xs">
-							<MarkerContent>{DAY_FORMAT.format(group.day)}</MarkerContent>
-						</Marker>
+						<div className="flex justify-center py-2">
+							<span
+								data-slot="chat-day"
+								className="max-w-full rounded-lg bg-white text-center [overflow-wrap:anywhere] px-3 py-1 text-xs font-medium text-[#54656f] shadow-xs dark:bg-[#182229] dark:text-[#8696a0]"
+							>
+								{chatDayLabel(group.day, now)}
+							</span>
+						</div>
 					)}
 					{message.kind === 'system' && !message.deletedAt ? (
 						<SystemMessage
@@ -169,6 +179,12 @@ export function MessageList({
 								grouped={grouped}
 								isAdmin={isAdmin}
 								isOwn={message.senderMemberId === currentMemberId}
+								readCount={
+									message.senderMemberId === currentMemberId
+										? countChatReaders(message.createdAt, reads, readerIds)
+										: 0
+								}
+								readTotal={readerIds.length}
 								draftKey={`manawg:draft:${shareCode}:${currentMemberId}:chat:edit:${message.id}`}
 								reactions={reactionsByMessage.get(message.id) ?? NO_REACTIONS}
 								replyTo={replyTo}
