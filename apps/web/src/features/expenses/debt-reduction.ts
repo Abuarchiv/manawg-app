@@ -139,9 +139,53 @@ export function computeNetBalances(
 	);
 }
 
-function simplifyCurrencyDebts(balances: BalanceEntry[], currency: string): SimplifiedDebt[] {
-	const compareMemberId = (a: BalanceEntry, b: BalanceEntry): number =>
-		a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0;
+function compareMemberId(a: BalanceEntry, b: BalanceEntry): number {
+	return a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0;
+}
+
+// The exact split into zero-sum groups costs O(n * 2^n), so it runs for at most
+// 16 non-zero balances. Above that, one greedy pass may need extra transfers.
+const MAX_EXACT_BALANCES = 16;
+
+// Splits the balances into the most disjoint groups that each sum to zero. A
+// group of k members settles with k - 1 transfers, so the most groups means the
+// fewest transfers overall.
+function zeroSumGroups(entries: BalanceEntry[]): BalanceEntry[][] {
+	const size = entries.length;
+	if (size < 2 || size > MAX_EXACT_BALANCES) return [entries];
+	const total = 1 << size;
+	const sum = new Float64Array(total);
+	const best = new Uint8Array(total);
+	const last = new Int8Array(total);
+	for (let mask = 1; mask < total; mask++) {
+		const low = 31 - Math.clz32(mask & -mask);
+		sum[mask] = (sum[mask & (mask - 1)] ?? 0) + (entries[low]?.cents ?? 0);
+		const closes = sum[mask] === 0 ? 1 : 0;
+		for (let i = 0; i < size; i++) {
+			if (!(mask & (1 << i))) continue;
+			const value = (best[mask ^ (1 << i)] ?? 0) + closes;
+			if (value >= (best[mask] ?? 0)) {
+				best[mask] = value;
+				last[mask] = i;
+			}
+		}
+	}
+	const groups: BalanceEntry[][] = [];
+	let group: BalanceEntry[] = [];
+	for (let mask = total - 1; mask > 0; ) {
+		const i = last[mask] ?? 0;
+		const entry = entries[i];
+		if (entry) group.push(entry);
+		mask ^= 1 << i;
+		if (sum[mask] === 0) {
+			groups.push(group.sort(compareMemberId));
+			group = [];
+		}
+	}
+	return groups.sort((a, b) => (a[0] && b[0] ? compareMemberId(a[0], b[0]) : 0));
+}
+
+function settleGroup(balances: BalanceEntry[], currency: string): SimplifiedDebt[] {
 	const creditors = balances
 		.filter((b) => b.cents > 0)
 		.map((b) => ({ ...b }))
@@ -175,6 +219,11 @@ function simplifyCurrencyDebts(balances: BalanceEntry[], currency: string): Simp
 		if (creditor.cents === 0) j++;
 	}
 	return result;
+}
+
+function simplifyCurrencyDebts(balances: BalanceEntry[], currency: string): SimplifiedDebt[] {
+	const open = balances.filter((b) => b.cents !== 0).sort(compareMemberId);
+	return zeroSumGroups(open).flatMap((group) => settleGroup(group, currency));
 }
 
 export function simplifyDebts(balances: BalanceEntry[]): SimplifiedDebt[] {

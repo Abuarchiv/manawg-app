@@ -187,3 +187,23 @@ test('a month whose opposite debts cancel out exactly counts as settled', () => 
 	assert.deepEqual(statement.transfers, []);
 	assert.equal(statement.settled, true);
 });
+
+test('a month with two independent groups needs one transfer per debtor', () => {
+	const statement = buildMonthlyStatement(
+		[
+			expense('a', 'L', '2026-09-02T10:00:00Z', { L: 200, J: 200 }),
+			expense('b', 'A', '2026-09-03T10:00:00Z', { A: 200, B: 200, C: 100 }),
+		],
+		[
+			...members,
+			{ id: 'A', name: 'Anna', active: true },
+			{ id: 'B', name: 'Ben', active: true },
+			{ id: 'C', name: 'Cem', active: true },
+		],
+		'2026-09',
+	);
+	assert.deepEqual(
+		statement.transfers.map(({ fromId, toId, cents }) => `${fromId}>${toId}:${cents}`).sort(),
+		['B>A:200', 'C>A:100', 'J>L:200'],
+	);
+});
