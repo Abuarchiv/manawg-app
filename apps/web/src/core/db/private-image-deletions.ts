@@ -8,7 +8,7 @@ import { getPrivateImageKeyFromStoredUrl, parsePrivateImageKey } from '@/core/va
 
 const CLEANUP_DELAY_MS = 2 * 60 * 60 * 1000 + 5 * 60 * 1000;
 const CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
-const CLEANUP_BATCH_SIZE = 50;
+export const CLEANUP_BATCH_SIZE = 50;
 /** A finished tombstone is kept this long (replayed offline uploads cannot outlive it), then dropped. */
 const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 

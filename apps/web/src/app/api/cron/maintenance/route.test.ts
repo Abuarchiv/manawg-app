@@ -10,6 +10,11 @@ const keys = [
 
 const state = {
 	keys: [] as string[],
+	batches: null as string[][] | null,
+	claimed: [] as string[],
+	removeCalls: [] as string[][],
+	removeFailsOnCall: 0,
+	dequeueError: null as Error | null,
 	referenced: new Set<string>(),
 	pending: 0,
 	removeError: null as Error | null,
@@ -33,17 +38,20 @@ mock.module('@/core/db/account-deletion', {
 });
 mock.module('@/core/db/private-image-deletions', {
 	namedExports: {
+		CLEANUP_BATCH_SIZE: 50,
 		claimPrivateImageCleanupBatch: async () => {
 			state.events.push('claim');
-			return state.keys;
+			state.claimed = state.batches ? (state.batches.shift() ?? []) : state.keys;
+			return state.claimed;
 		},
 		findLivePrivateImageReferenceKeys: async (objectKeys: string[]) => {
 			state.events.push('references');
-			assert.deepEqual(objectKeys, state.keys);
+			assert.deepEqual(objectKeys, state.claimed);
 			return state.referenced;
 		},
 		dequeueImageDeletions: async (objectKeys: string[]) => {
 			state.events.push('dequeue');
+			if (state.dequeueError) throw state.dequeueError;
 			state.dequeued = objectKeys;
 		},
 		markPrivateImageStorageDeleted: async (objectKeys: string[]) => {
@@ -78,7 +86,9 @@ mock.module('@/core/infra/supabase-storage', {
 		removeSupabaseImages: async (objectKeys: string[]) => {
 			state.events.push('remove');
 			state.removed = objectKeys;
-			if (state.removeError) throw state.removeError;
+			state.removeCalls.push(objectKeys);
+			if (state.removeError && state.removeCalls.length >= state.removeFailsOnCall)
+				throw state.removeError;
 		},
 	},
 });
@@ -88,6 +98,11 @@ const { GET } = await import('./route');
 function harness() {
 	Object.assign(state, {
 		keys: [],
+		batches: null,
+		claimed: [],
+		removeCalls: [],
+		removeFailsOnCall: 0,
+		dequeueError: null,
 		referenced: new Set<string>(),
 		pending: 0,
 		removeError: null,
@@ -158,5 +173,51 @@ test('maintenance reports reference violations and provider failures while keepi
 		assert.equal(rescuedBody.ok, true);
 		assert.equal(rescuedBody.privateImageCleanup.rescued, 1);
 		assert.deepEqual(state.dequeued, [keys[1]]);
+	});
+});
+
+const batchOf = (size: number, tag: string) =>
+	Array.from({ length: size }, (_, i) => `manawg/${tag}/expense/${i}.jpg`);
+
+test('maintenance drains the private image queue until a short batch', async () => {
+	await withEnv({ CRON_SECRET: 'test' }, async () => {
+		const { state, get } = harness();
+		state.batches = [batchOf(50, 'a'), batchOf(50, 'b'), batchOf(20, 'c'), batchOf(50, 'd')];
+		const response = await get();
+		const body = await response.json();
+		assert.equal(response.status, 200);
+		assert.equal(state.removeCalls.length, 3);
+		assert.equal(state.events.filter((event) => event === 'claim').length, 3);
+		assert.equal(body.privateImageCleanup.attempted, 120);
+		assert.equal(body.privateImageCleanup.completed, 120);
+	});
+});
+
+test('maintenance stops draining after a storage failure', async () => {
+	await withEnv({ CRON_SECRET: 'test' }, async () => {
+		const { state, get } = harness();
+		state.batches = [batchOf(50, 'a'), batchOf(50, 'b'), batchOf(50, 'c')];
+		state.removeError = new Error('provider unavailable');
+		state.removeFailsOnCall = 2;
+		const response = await get();
+		const body = await response.json();
+		assert.equal(response.status, 503);
+		assert.equal(state.events.filter((event) => event === 'claim').length, 2);
+		assert.equal(body.privateImageCleanup.failed, 50);
+		assert.equal(body.privateImageCleanup.completed, 50);
+		assert.equal(body.privateImageCleanup.error, 'storage_remove_failed');
+	});
+});
+
+test('maintenance stops draining after a failed live-reference rescue', async () => {
+	await withEnv({ CRON_SECRET: 'test' }, async () => {
+		const { state, get } = harness();
+		const first = batchOf(50, 'a');
+		state.batches = [first, batchOf(50, 'b')];
+		state.referenced = new Set([first[0] as string]);
+		state.dequeueError = new Error('db unavailable');
+		const body = await (await get()).json();
+		assert.equal(state.events.filter((event) => event === 'claim').length, 1);
+		assert.equal(body.privateImageCleanup.error, 'live_reference_rescue_failed');
 	});
 });

@@ -113,6 +113,7 @@ mock.module('@/core/db/account-deletion', {
 });
 mock.module('@/core/db/private-image-deletions', {
 	namedExports: {
+		CLEANUP_BATCH_SIZE: 50,
 		claimPrivateImageCleanupBatch: async () => {
 			harness.imageCleanupRuns++;
 			return [];

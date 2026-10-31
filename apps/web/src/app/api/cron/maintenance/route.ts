@@ -4,6 +4,7 @@ import { getSupabaseEnv, hasSupabaseEnv } from '@/core/auth/supabase-env';
 import { retryPendingAccountDeletions } from '@/core/db/account-deletion';
 import { sweepOrphanUploads } from '@/core/db/orphan-uploads';
 import {
+	CLEANUP_BATCH_SIZE,
 	claimPrivateImageCleanupBatch,
 	countPendingPrivateImageDeletions,
 	dequeueImageDeletions,
@@ -19,16 +20,19 @@ import { confirmedRecipientOf, sendAccountDeletedMail } from '@/core/mail/accoun
 import { purgeOldMailLog } from '@/core/mail/mail-retention';
 import { DEFAULT_LOCALE } from '@/shared/i18n/locale';
 
-async function cleanupPrivateImages(): Promise<{
+export const maxDuration = 60;
+
+type ImageCleanupPass = {
 	attempted: number;
 	completed: number;
 	failed: number;
 	skippedReferenced: number;
 	rescued: number;
-	pending: number;
 	error: string | null;
-}> {
-	const keys = await claimPrivateImageCleanupBatch();
+};
+
+/** Processes one claimed batch; a set `error` means the batch did not finish cleanly. */
+async function cleanupPrivateImageBatch(keys: string[]): Promise<ImageCleanupPass> {
 	const referenced = await findLivePrivateImageReferenceKeys(keys);
 	const removable = keys.filter((key) => !referenced.has(key));
 	let completed = 0;
@@ -70,16 +74,44 @@ async function cleanupPrivateImages(): Promise<{
 			}
 		}
 	}
-
 	return {
 		attempted: keys.length,
 		completed,
 		failed,
 		skippedReferenced: referenced.size,
 		rescued,
-		pending: await countPendingPrivateImageDeletions(),
 		error: errorCode,
 	};
+}
+
+const IMAGE_CLEANUP_BUDGET_MS = 40_000;
+
+/**
+ * Drains the due deletion queue in batches within a time budget. It stops on a short batch
+ * (queue empty) and on the first error, so rows that keep failing are not claimed again.
+ */
+async function cleanupPrivateImages(): Promise<ImageCleanupPass & { pending: number }> {
+	const startedAt = Date.now();
+	const total: ImageCleanupPass = {
+		attempted: 0,
+		completed: 0,
+		failed: 0,
+		skippedReferenced: 0,
+		rescued: 0,
+		error: null,
+	};
+	do {
+		const keys = await claimPrivateImageCleanupBatch();
+		const pass = await cleanupPrivateImageBatch(keys);
+		total.attempted += pass.attempted;
+		total.completed += pass.completed;
+		total.failed += pass.failed;
+		total.skippedReferenced += pass.skippedReferenced;
+		total.rescued += pass.rescued;
+		total.error = pass.error;
+		if (pass.error !== null || keys.length < CLEANUP_BATCH_SIZE) break;
+	} while (Date.now() - startedAt < IMAGE_CLEANUP_BUDGET_MS);
+	return { ...total, pending: await countPendingPrivateImageDeletions() };
 }
 
 /** Without a configured bucket there is nothing to sweep. */
