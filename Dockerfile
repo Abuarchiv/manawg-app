@@ -6,9 +6,9 @@
 # (apps/web/scripts/selfhost/public-env.mjs). Optional browser features are baked in only when
 # their build arguments are set: build your own image to enable Web Push, Sentry or PostHog.
 
-ARG NODE_IMAGE=node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914
+FROM node:22.23.4-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS base
 
-FROM ${NODE_IMAGE} AS deps
+FROM base AS deps
 WORKDIR /repo
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
@@ -42,7 +42,7 @@ RUN "$(node -p "require.resolve('esbuild/bin/esbuild', { paths: [require('node:p
 	--external:pg-native --outfile=/out/setup.mjs \
 	--banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
 
-FROM ${NODE_IMAGE} AS runner
+FROM base AS runner
 LABEL org.opencontainers.image.title="ManaWG" \
 	org.opencontainers.image.description="The app for shared flats: expenses, cleaning schedule, shopping list" \
 	org.opencontainers.image.source="https://github.com/Abuarchiv/manawg" \
