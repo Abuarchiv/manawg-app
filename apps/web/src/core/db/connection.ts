@@ -126,7 +126,7 @@ export function validateDatabaseUrl(url: string, label: string): void {
 	}
 	// Drizzle binds BEGIN/COMMIT to one node-postgres client, which supports
 	// Supavisor transaction pooling. Migration/session locks use the separate
-	// direct-connection validator in scripts/db-migrate.mjs.
+	// direct-connection validator in scripts/db-migrate/connection.mjs.
 	const host = parsed.hostname.toLowerCase();
 	const isLocal = isLocalHost(host);
 	if (!isLocal && !parsed.port) {

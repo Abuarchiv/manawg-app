@@ -178,7 +178,7 @@ export default {
 			notFound:
 				'This flat was not found. It may already have been deleted, or the link is out of date.',
 			invalidCode: 'The flat code is not valid. Open the flat through a valid link.',
-			membershipInvalid: 'Your local membership is no longer valid. Join the flat again.',
+			membershipInvalid: 'Your membership is no longer valid. Join the flat again.',
 			fallback: 'The flat could not be deleted. Try again later.',
 		},
 	},

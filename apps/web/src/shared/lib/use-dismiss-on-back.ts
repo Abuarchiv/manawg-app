@@ -58,7 +58,7 @@ function onPopState() {
  * drops the marker entry. Touch-only for CloseWatcher: with a keyboard, Base UI
  * already owns Escape.
  *
- * A navigation started while the overlay closes (e.g. "Verwerfen" → router.replace)
+ * A navigation started while the overlay closes (e.g. "Discard" → router.replace)
  * replaces the marker entry once it commits; the caller announces it through
  * `markOverlayNavigation` so no back() is issued while it is pending.
  *

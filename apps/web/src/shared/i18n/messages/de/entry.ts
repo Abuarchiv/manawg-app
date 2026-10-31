@@ -104,7 +104,7 @@ export default {
 	errors: {
 		badInvite:
 			'Dieser Einladungslink ist unvollständig oder ungültig. Frag die WG nach einem neuen Link.',
-		inviteExpired: 'Diese Einladung ist abgelaufen. Bitte ein Mitglied um eine neue.',
+		inviteExpired: 'Diese Einladung ist nicht mehr gültig. Bitte ein Mitglied um eine neue.',
 		deletionPending:
 			'Dein Konto wird gerade gelöscht. Neue WGs oder Beitritte sind nicht mehr möglich.',
 		wgNotFound: 'Diese WG gibt es nicht.',

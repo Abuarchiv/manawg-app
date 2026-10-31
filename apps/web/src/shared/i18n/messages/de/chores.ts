@@ -1,7 +1,7 @@
 export default {
 	status: {
 		unknown: 'Datum prüfen',
-		overdue: 'seit {days} T. offen',
+		overdue: 'seit {days} T. offen',
 		dueToday: 'heute fällig',
 		tomorrow: 'morgen',
 		inDays: 'in {days} T.',

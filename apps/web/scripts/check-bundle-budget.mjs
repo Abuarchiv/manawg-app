@@ -25,9 +25,7 @@ const KILOBYTE = 1024;
 // Shared counts the Next.js runtime, React and the root layout; turbopack ships them on every page.
 const SHARED_JS_BUDGET_KB = 220;
 const PER_ROUTE_BUDGET_KB = 55;
-const ROUTE_BUDGET_OVERRIDES_KB = {};
 const TESSERACT_INFO_BUDGET_KB = 2500;
-const LAZY_CHUNK_HINTS = ['tesseract'];
 const TESSERACT_CHUNK_HINT = 'tesseract';
 
 const PROJECT_ROOT = resolve(process.cwd());
@@ -67,7 +65,7 @@ function readJson(path) {
 }
 
 function isLazyChunk(path) {
-	return LAZY_CHUNK_HINTS.some((hint) => path.includes(hint));
+	return path.includes(TESSERACT_CHUNK_HINT);
 }
 
 function isRenderablePageEntry(entry) {
@@ -140,9 +138,8 @@ function main() {
 		const routeOnly = chunks.filter((c) => counts.get(c) === 1 && !isLazyChunk(c));
 		const sizeKb = sumGzipKb(routeOnly);
 		perRouteResults.push({ page, sizeKb });
-		const budgetKb = ROUTE_BUDGET_OVERRIDES_KB[page] ?? PER_ROUTE_BUDGET_KB;
-		if (sizeKb > budgetKb) {
-			failures.push(`Route ${page} = ${sizeKb.toFixed(1)} kB exceeds ${budgetKb} kB`);
+		if (sizeKb > PER_ROUTE_BUDGET_KB) {
+			failures.push(`Route ${page} = ${sizeKb.toFixed(1)} kB exceeds ${PER_ROUTE_BUDGET_KB} kB`);
 		}
 	}
 

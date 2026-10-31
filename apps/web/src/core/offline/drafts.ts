@@ -2,7 +2,7 @@ import { formatCentsInput } from '@/core/utils/amount';
 import { toBerlinDayKey } from '@/core/utils/berlin-day';
 import { safeLocalStorage } from '@/core/utils/browser';
 import { isRecord } from '@/core/utils/is-record';
-import { todayInputValue } from '@/core/utils/local-date';
+import { isoToInputDate } from '@/core/utils/local-date';
 import { DEFAULT_LOCALE, type Locale } from '@/shared/i18n/locale';
 import type { OfflineAction, OfflineActionType } from './offline-queue';
 
@@ -232,7 +232,7 @@ export function buildQueueEditDraft(
 						typeof action.payload.paidByMemberId === 'string' ? action.payload.paidByMemberId : '',
 					// Re-queuing must keep the day the expense happened, not the day of the edit.
 					...(action.type === 'expense.create' && typeof action.payload.occurredAt === 'string'
-						? { occurredOn: todayInputValue(new Date(action.payload.occurredAt)) }
+						? { occurredOn: isoToInputDate(action.payload.occurredAt) }
 						: {}),
 					splitMode: manualSplits && Object.keys(manualSplits).length > 0 ? 'manual' : 'equal',
 					recurringIntervalMonths:

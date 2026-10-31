@@ -72,7 +72,7 @@ export function ImportHistory() {
 									? t('entryBy', { description, count: item.inserted, author })
 									: t('entry', { description, count: item.inserted })}
 							</span>
-							{mayUndo && <ImportUndo importId={item.id} label={t('undoLabel', { description })} />}
+							{mayUndo && <ImportUndo importId={item.id} description={description} />}
 						</li>
 					);
 				})}

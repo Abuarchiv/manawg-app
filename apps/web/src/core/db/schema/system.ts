@@ -47,5 +47,3 @@ export const idempotencyResponses = pgTable(
 		expiresIdx: index('idempotency_responses_expires_idx').on(t.expiresAt),
 	}),
 );
-export type IdempotencyResponse = typeof idempotencyResponses.$inferSelect;
-export type NewIdempotencyResponse = typeof idempotencyResponses.$inferInsert;

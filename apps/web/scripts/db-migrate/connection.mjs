@@ -3,7 +3,7 @@
  * every check runs before `pg` is touched, so a misconfigured URL fails without network access.
  */
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', 'host.docker.internal']);
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', 'host.docker.internal']);
 
 /** Loopback, `.local`, or a single-label name such as a Docker Compose service (`db`). */
 function isLocalHost(host) {

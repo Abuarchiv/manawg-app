@@ -259,6 +259,29 @@ test.describe('English expense import', () => {
 		await expectNoGermanChrome(page);
 	});
 
+	test('a file without one readable row names each rejected row', async ({
+		context,
+		page,
+		baseURL,
+	}) => {
+		await setEnglishLocale(context, baseURL ?? 'http://localhost:3111');
+		await page.setViewportSize({ width: 390, height: 844 });
+		await setupMember(page);
+		await mockHistory(page);
+		await page.route(`${API}/imports/preview`, (route) =>
+			route.fulfill({ json: { ...previewBody, parsed: [], memberMapping: {}, conflicts: [] } }),
+		);
+		await openWizard(page);
+		await pasteExport(page);
+		await page.getByRole('button', { name: 'Create preview', exact: true }).click();
+
+		const error = page.locator('#import-error');
+		await expect(error).toContainText('Preview failed:');
+		await error.getByText('Show details', { exact: true }).click();
+		await expect(error.getByText(/^Row 4: Rent \(.+\)$/)).toBeVisible();
+		await expectNoGermanChrome(page);
+	});
+
 	test('leaving with typed input asks in English', async ({ context, page, baseURL }) => {
 		await setEnglishLocale(context, baseURL ?? 'http://localhost:3111');
 		await page.setViewportSize({ width: 390, height: 844 });
@@ -301,9 +324,9 @@ test.describe('English expense import', () => {
 
 		await expect(page.getByRole('heading', { name: 'Earlier imports' })).toBeVisible();
 		await expect(page.getByText(/Splitwise from 3 Mar 2026: 2 expenses/)).toBeVisible();
-		await page.getByRole('button', { name: 'Undo Splitwise from 3 Mar 2026' }).click();
+		await page.getByRole('button', { name: 'Undo import: Splitwise from 3 Mar 2026' }).click();
 		expect(undoRequests).toEqual([]);
-		await page.getByRole('button', { name: /confirm removal/ }).click();
+		await page.getByRole('button', { name: /Remove all imported expenses/ }).click();
 		await expect(page.getByText('Import undone: 2 expenses removed.')).toBeVisible();
 		expect(undoRequests).toEqual(['DELETE']);
 		await expectNoGermanChrome(page);

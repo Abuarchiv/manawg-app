@@ -112,7 +112,7 @@ export default {
 		failed: 'The image could not be uploaded',
 		failedRetry: 'The image could not be uploaded. Try again.',
 		invalidFile: 'The file or file type is not valid.',
-		invalidType: 'Choose a JPG, PNG or WebP file.',
+		invalidType: 'Choose a JPG, PNG, WebP or HEIC file.',
 		tooLarge: 'The image is too large.',
 		notConfigured: 'Image upload is not set up yet.',
 		rateLimited: 'Too many uploads. Try again in a moment.',
@@ -195,7 +195,7 @@ export default {
 		remain: 'Open balances remain after {mode, select, leave {leaving} other {moving out}}:',
 		balanceOwner: '{direction, select, owes {Owes {name}} other {{name} owes}}',
 		cancelLeaveLabel: 'Cancel leaving the flat',
-		confirmLeaveLabel: 'Confirm leaving the flat',
+		confirmLeaveLabel: 'Leave the flat',
 		confirm: '{mode, select, leave {Leave} other {Mark as moved out}}',
 	},
 	wgProvider: {

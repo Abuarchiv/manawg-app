@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MS_PER_DAY } from '@/core/utils/time';
 
 // nextDueAt drives the cron's catch-up loop (one iteration per missed
 // interval). An unbounded past date would translate into an unbounded
@@ -7,13 +8,12 @@ import { z } from 'zod';
 // due date.
 const MAX_PAST_DAYS = 366;
 const MAX_FUTURE_DAYS = 3650;
-const DAY_MS = 86_400_000;
 
 export function isRecurringDueAtInRange(value: string): boolean {
 	const parsed = Date.parse(value);
 	if (Number.isNaN(parsed)) return false;
 	const skew = Date.now() - parsed;
-	return skew <= MAX_PAST_DAYS * DAY_MS && skew >= -MAX_FUTURE_DAYS * DAY_MS;
+	return skew <= MAX_PAST_DAYS * MS_PER_DAY && skew >= -MAX_FUTURE_DAYS * MS_PER_DAY;
 }
 
 /**
@@ -47,5 +47,5 @@ export function isRecurringAnchorAllowed(
 	const anchor = Date.parse(anchorAt);
 	const due = Date.parse(nextDueAt);
 	if (Number.isNaN(anchor) || Number.isNaN(due)) return false;
-	return anchor <= due && due - anchor <= maxLeadDays * DAY_MS;
+	return anchor <= due && due - anchor <= maxLeadDays * MS_PER_DAY;
 }

@@ -12,7 +12,6 @@ export default {
 		post: 'Beitrag',
 		newMessage: 'Neue Nachricht',
 		newReply: 'Neue Antwort',
-		newReaction: 'Neue Reaktion',
 		newMention: 'Neue Erwähnung',
 		soon: 'demnächst',
 	},
@@ -57,10 +56,6 @@ export default {
 	announcementCommented: {
 		title: 'Neue Antwort',
 		body: '{actorName} hat auf der Pinnwand geantwortet: {title}',
-	},
-	announcementReacted: {
-		title: 'Pinnwand-Reaktion',
-		body: '{actorName} hat auf deinen Beitrag reagiert: {title}',
 	},
 	announcementResolved: {
 		title: 'Pinnwand geklärt',

@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface ImportErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function ImportError({ error, reset }: ImportErrorProps) {
+export default function ImportError({ error, retry }: ImportErrorProps) {
 	const t = useTranslations('expenses-import.boundary');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-import"
 			title={t('title')}
 			body={t('body')}

@@ -20,7 +20,7 @@ interface WgNameSectionProps {
 	memberId: string;
 }
 
-/** Admin-only rename; the PATCH route has always accepted `name`, this is its UI. */
+/** Admin-only rename of the flat. */
 export function WgNameSection({ wgName, shareCode, memberId }: WgNameSectionProps) {
 	const t = useTranslations('settings');
 	const m = useMessage();

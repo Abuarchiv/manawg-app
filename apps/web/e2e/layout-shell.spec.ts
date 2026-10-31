@@ -88,7 +88,10 @@ test.describe('public header reflow', () => {
 
 		const layoutFailures: string[] = [];
 		for (const path of ['/', '/discover/calendar']) {
+			// Fixture builds always look up the session, which swaps the link for a skeleton until then.
+			const sessionChecked = page.waitForResponse('**/api/wg/mine');
 			await page.goto(path);
+			await sessionChecked;
 			const brand = page.getByRole('link', { name: 'ManaWG Startseite', exact: true });
 			const account = page.getByRole('link', { name: 'Anmelden', exact: true });
 			await expect(brand).toHaveAttribute('href', '/');

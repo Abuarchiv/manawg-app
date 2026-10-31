@@ -94,7 +94,7 @@ if (nameVal !== 'Anna') bug(`Name from sign-up not prefilled: ${nameVal}`);
 await a.p.getByLabel('WG-Name').fill('Testwohnung');
 await a.p.getByRole('button', { name: 'WG erstellen', exact: true }).click();
 await a.p
-	.waitForSelector('text=ist live', { timeout: 20000 })
+	.waitForSelector('text=wurde erstellt', { timeout: 20000 })
 	.catch(() => bug('A WG creation: no success screen'));
 const linkBtn = a.p.getByRole('button', { name: 'Einladungslink kopieren' });
 await a.p

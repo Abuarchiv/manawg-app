@@ -14,9 +14,9 @@ import { wgMembers, wgs } from './schema';
 /**
  * Ledger of transactional mails (welcome, invitation, reminder, account
  * deleted). `dedupe_key` is unique per mail that may be sent once
- * (`welcome:<authUserId>`); a row is
- * claimed as `sending` before the provider call and finished as `sent` or
- * `failed`. Addresses are never stored, only the member or account reference.
+ * (`welcome:<authUserId>`); a row is claimed as `sending` before the provider
+ * call and finished as `sent` or `failed`. Addresses are never stored, only
+ * the member or account reference.
  */
 export const mailLog = pgTable(
 	'mail_log',

@@ -103,8 +103,4 @@ export const calendarSubscriptionsRelations = relations(calendarSubscriptions, (
 	member: one(wgMembers, { fields: [calendarSubscriptions.memberId], references: [wgMembers.id] }),
 }));
 
-export type WgEvent = typeof wgEvents.$inferSelect;
-export type NewWgEvent = typeof wgEvents.$inferInsert;
 export type CalendarSubscription = typeof calendarSubscriptions.$inferSelect;
-export type NewCalendarSubscription = typeof calendarSubscriptions.$inferInsert;
-export type AuditEvent = typeof auditEvents.$inferSelect;

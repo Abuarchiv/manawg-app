@@ -176,7 +176,6 @@ export async function loadDashboardData(
 	const latestAnnouncement = getLatestManualAnnouncement(announcementRows, memberById);
 	const { myOpenAnnouncements, absenceRows, recurringRows, auditRows, currentMemberNotification } =
 		await loadSecondaryRows(wgId, currentMemberId);
-	const filteredMyOpenAnnouncements = myOpenAnnouncements;
 	const dueRecurringExpenses = getDueRecurringExpenses(
 		recurringRows
 			.filter((item) => item.pausedAt === null)
@@ -233,7 +232,7 @@ export async function loadDashboardData(
 		dueChores,
 		activity: activity.slice(0, ACTIVITY_LIMIT),
 		latestAnnouncement,
-		myOpenAnnouncements: filteredMyOpenAnnouncements.map((item) => ({
+		myOpenAnnouncements: myOpenAnnouncements.map((item) => ({
 			...item,
 			createdAt: item.createdAt.toISOString(),
 		})),

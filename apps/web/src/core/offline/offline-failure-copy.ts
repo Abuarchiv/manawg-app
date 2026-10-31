@@ -93,6 +93,7 @@ function failure(name: FailureName): OfflineFailureExplanation {
 export function explainOfflineActionFailure(
 	status: number,
 	error?: string,
+	heldForReview = false,
 ): OfflineFailureExplanation {
 	const code = error ?? null;
 	if (status === 0) return failure('noConnection');
@@ -108,7 +109,8 @@ export function explainOfflineActionFailure(
 	if (status >= 500 || (code !== null && SERVER_ERROR_CODES.has(code))) {
 		return failure('serverNotReady');
 	}
-	return failure('syncFailed');
+	// A held action is not resent, so "try later" would be wrong for it.
+	return failure(heldForReview ? 'rejected' : 'syncFailed');
 }
 
 /** "{title}: {detail}" of an explanation as one message. */
@@ -138,7 +140,7 @@ export function requestFailureState(
 	error: string | undefined,
 	holdForReview: boolean,
 ): FailureState {
-	const explanation = explainOfflineActionFailure(status, error);
+	const explanation = explainOfflineActionFailure(status, error, holdForReview);
 	if (status === 0) {
 		return {
 			lastError: NO_CONNECTION_ERROR,

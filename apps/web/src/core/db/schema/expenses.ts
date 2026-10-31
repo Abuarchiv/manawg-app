@@ -292,13 +292,5 @@ export const expensePaymentsRelations = relations(expensePayments, ({ one }) => 
 }));
 
 export type Expense = typeof expenses.$inferSelect;
-export type NewExpense = typeof expenses.$inferInsert;
 export type ExpenseSplit = typeof expenseSplits.$inferSelect;
-export type NewExpenseSplit = typeof expenseSplits.$inferInsert;
-export type ExpensePayment = typeof expensePayments.$inferSelect;
-export type NewExpensePayment = typeof expensePayments.$inferInsert;
-export type ExpenseImport = typeof expenseImports.$inferSelect;
-export type NewExpenseImport = typeof expenseImports.$inferInsert;
 export type RecurringExpense = typeof recurringExpenses.$inferSelect;
-export type ExpenseReminder = typeof expenseReminders.$inferSelect;
-export type NewExpenseReminder = typeof expenseReminders.$inferInsert;

@@ -1,7 +1,6 @@
 // manawg app service worker — installability + minimal offline shell
 //
-// Registered at runtime by the pwa-register component (src/shared/components).
-// Nothing
+// Registered at runtime by src/components/app/PwaRegister.tsx. Nothing
 // imports this file, so dead-code tooling reports it as unused — it is not.
 // Deleting it breaks installability and the offline shell with no build error.
 //
@@ -270,7 +269,6 @@ self.addEventListener('fetch', (event) => {
 	const url = new URL(request.url);
 	if (url.origin !== self.location.origin) return;
 	if (url.pathname.startsWith('/api') || url.pathname.startsWith('/auth')) return;
-	if (url.pathname.includes('/_next/data')) return;
 
 	// Network-first for HTML navigations (always serve fresh app shell when online)
 	if (request.mode === 'navigate' || request.headers.get('accept')?.includes('text/html')) {

@@ -142,13 +142,10 @@ export function useSyncedCollection<TData, TItem>(config: SyncedCollectionConfig
 				const replay = current.offline;
 				if (replay) {
 					syncOfflineActions(replay.shareCode, { memberId: current.memberId })
-						.then((synced) => {
+						.then(() => {
 							if (!mountedRef.current || requestId !== loadRequestIdRef.current) return;
+							// `onSynced` of useOfflineQueueSync already reloads when actions were replayed.
 							refreshCount();
-							if (synced > 0) {
-								configRef.current.offline?.onReplayed?.();
-								reloadRef.current('synced');
-							}
 						})
 						.catch((err) =>
 							captureException(err, { action: 'syncOfflineActions', page: replay.page }),

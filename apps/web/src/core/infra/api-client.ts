@@ -44,18 +44,11 @@ const MEMBERSHIP_LOST_ERRORS = new Set(['not_a_member', 'member_deactivated', 'w
  */
 export function noteSessionExpiry(response: Response, expectedAccount: string | null): void {
 	if (response.status !== 401 || typeof window === 'undefined') return;
-	void response
-		.clone()
-		.json()
-		.then((body: { error?: unknown; code?: unknown }) => {
-			if (
-				expectedAccount === getLocalAccount() &&
-				(body.error === 'auth_required' || body.code === 'auth_required')
-			) {
-				window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
-			}
-		})
-		.catch(() => undefined);
+	void readApiErrorCode(response).then((code) => {
+		if (code === 'auth_required' && expectedAccount === getLocalAccount()) {
+			window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+		}
+	});
 }
 
 /**
@@ -111,17 +104,7 @@ export async function apiFetch<T>(
 		if (res.status === 204) return { ok: true, data: undefined as T };
 
 		if (!res.ok) {
-			let error = res.statusText;
-			try {
-				const body = (await res.json()) as { code?: unknown; error?: unknown };
-				if (typeof body.error === 'string' && body.error.length > 0) {
-					error = body.error;
-				} else if (typeof body.code === 'string' && body.code.length > 0) {
-					error = body.code;
-				}
-			} catch {
-				// keep statusText
-			}
+			const error = (await readApiErrorCode(res)) || res.statusText;
 			// Removed, left, or the share code rotated while the app was open: every screen
 			// would otherwise show an empty list. The WG shell reacts (explain or redirect).
 			if (

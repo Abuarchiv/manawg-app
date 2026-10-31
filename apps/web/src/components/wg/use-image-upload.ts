@@ -58,7 +58,7 @@ export function useImageUpload({
 	const uploadPendingRef = useRef(false);
 	const syncPendingRef = useRef<AbortController | null>(null);
 	const uploadAbortRef = useRef<AbortController | null>(null);
-	// Callers pass a fresh onChange on every render (the chat composer); effects must not restart for that.
+	// Callers pass a fresh onChange on every render; effects must not restart for that.
 	const onChangeRef = useRef(onChange);
 	onChangeRef.current = onChange;
 	// An upload that finishes after its form closed must not write into the next form.
@@ -127,9 +127,6 @@ export function useImageUpload({
 				const publicUrl = await uploadPendingImageToken(value, identity.memberId, abort.signal);
 				if (!isCurrent()) return;
 				onChangeRef.current(publicUrl);
-				// Chat cannot send while the token is pending, so no queued action will ever
-				// replay it; the stored copy (up to the upload size cap) would stay on the device otherwise.
-				if (purpose === 'chat') void removePendingImage(value, identity.memberId).catch(() => {});
 			} catch (err) {
 				if (!isCurrent()) return;
 				if (err instanceof PendingImageMissingError) {
@@ -169,7 +166,7 @@ export function useImageUpload({
 				setUploading(false);
 			}
 		};
-	}, [identity.memberId, purpose, value]);
+	}, [identity.memberId, value]);
 
 	async function handleFile(original: File): Promise<void> {
 		if (disabled) return;

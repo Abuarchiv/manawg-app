@@ -1,11 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-	buildSettlementSummary,
-	computeDirectDebts,
-	computeNetBalances,
-	simplifyDebts,
-} from './debt-reduction';
+import { computeDirectDebts, computeNetBalances, simplifyDebts } from './debt-reduction';
 import { computeBalances } from './debts';
 
 const members = [
@@ -94,7 +89,6 @@ test('direct summaries preserve gross positive debts in both directions', () => 
 	];
 
 	assert.deepEqual(directRows(computeDirectDebts(expenses, members)), direct);
-	assert.equal(buildSettlementSummary(expenses, members).directCount, 2);
 	assert.deepEqual(pairRows(computeBalances(expenses)), [
 		{ fromId: 'A', toId: 'B', cents: 100, currency: 'EUR' },
 	]);

@@ -81,6 +81,22 @@ export async function seedLocalAccount(page: Page): Promise<void> {
 }
 
 /**
+ * The month grid opens on the current Berlin month. Steps one month forward when `iso` falls
+ * into the next one, so specs with "in two days" dates also pass at the end of a month.
+ */
+export async function showMonthOf(page: Page, iso: string, nextMonthLabel: string): Promise<void> {
+	const month = (date: Date) =>
+		new Intl.DateTimeFormat('en-CA', {
+			timeZone: 'Europe/Berlin',
+			year: 'numeric',
+			month: '2-digit',
+		}).format(date);
+	if (month(new Date(iso)) !== month(new Date())) {
+		await page.getByRole('button', { name: nextMonthLabel }).click();
+	}
+}
+
+/**
  * Navigates to a feature path with retry-on-cold-start so the first request
  * after Next dev boot does not flake the suite.
  */

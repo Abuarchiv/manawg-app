@@ -285,11 +285,6 @@ test.describe('daily overview navigation', () => {
 		page,
 	}) => {
 		await setupMember(page);
-		await mockDashboard(page, BASE, {
-			openShoppingCount: 0,
-			dueChores: [],
-			dueRecurringExpenses: [],
-		});
 		await page.route(`**${BASE}/chat/unread-count`, (route) =>
 			route.fulfill({
 				status: 200,

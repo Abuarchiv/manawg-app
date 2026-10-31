@@ -48,9 +48,17 @@ interface DataTabProps {
 	identity: SessionMember;
 	exportSummary: ExportSectionOption[];
 	exportSummaryError: Message | null;
+	/** False until the counts arrived: the summary then still holds placeholder zeros. */
+	exportCountsLoaded: boolean;
 }
 
-export function DataTab({ wg, identity, exportSummary, exportSummaryError }: DataTabProps) {
+export function DataTab({
+	wg,
+	identity,
+	exportSummary,
+	exportSummaryError,
+	exportCountsLoaded,
+}: DataTabProps) {
 	const t = useTranslations('settings.data');
 	const legal = legalRows(useLocale() as Locale);
 	const m = useMessage();
@@ -122,7 +130,7 @@ export function DataTab({ wg, identity, exportSummary, exportSummaryError }: Dat
 	return (
 		<>
 			<Section title={t('exportTitle')} hint={t('exportHint')}>
-				{exportSummary.length > 0 && !exportSummaryError && (
+				{exportCountsLoaded && !exportSummaryError && (
 					<div className="border-border grid grid-cols-[repeat(auto-fit,minmax(7rem,1fr))] gap-x-4 gap-y-1.5 border-b p-3 text-xs">
 						{exportSummary.map((section) => (
 							<div key={section.key} className="flex min-w-0 items-baseline gap-2">

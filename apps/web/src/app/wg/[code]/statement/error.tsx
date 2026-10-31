@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface StatementErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function StatementError({ error, reset }: StatementErrorProps) {
+export default function StatementError({ error, retry }: StatementErrorProps) {
 	const t = useTranslations('statement');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-statement"
 			title={t('page.boundary.title')}
 			body={t('page.boundary.body')}

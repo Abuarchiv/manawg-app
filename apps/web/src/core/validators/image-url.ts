@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const URL_MAX = 2048;
 const PRIVATE_IMAGE_PATH = '/api/upload/read';
-const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+const LOCAL_DEVELOPMENT_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 const PRIVATE_IMAGE_KEY_PATTERN =
 	/^manawg\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\/(?:expense|announcement|chat)\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.(?:jpg|png|webp|heic|heif)$/;
 
@@ -15,17 +15,22 @@ function cleanEnvValue(value: string | undefined): string | null {
 	return trimmed ? trimmed : null;
 }
 
+/** Plain HTTP is accepted for loopback hosts, except on a production deployment. */
+function isLocalDevelopmentHttp(parsed: URL): boolean {
+	return (
+		parsed.protocol === 'http:' &&
+		LOCAL_DEVELOPMENT_HOSTS.has(parsed.hostname.toLowerCase()) &&
+		process.env.VERCEL_ENV !== 'production'
+	);
+}
+
 function trustedOrigin(value: string, variableName: string): string {
 	const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
 	const parsed = new URL(candidate);
 	if (parsed.username || parsed.password) {
 		throw new Error(`${variableName} must not contain credentials`);
 	}
-	const isLocalDevelopmentHttp =
-		parsed.protocol === 'http:' &&
-		LOCAL_DEVELOPMENT_HOSTS.has(parsed.hostname.toLowerCase()) &&
-		process.env.VERCEL_ENV !== 'production';
-	if (parsed.protocol !== 'https:' && !isLocalDevelopmentHttp) {
+	if (parsed.protocol !== 'https:' && !isLocalDevelopmentHttp(parsed)) {
 		throw new Error(`${variableName} must be an absolute HTTP(S) origin`);
 	}
 	return parsed.origin;
@@ -45,7 +50,6 @@ function getTrustedAppOrigin(): string {
 }
 
 export function parsePrivateImageKey(key: string): PrivateImageKey | null {
-	if (typeof key !== 'string') return null;
 	const match = PRIVATE_IMAGE_KEY_PATTERN.exec(key);
 	return match?.[1] ? { wgId: match[1] } : null;
 }
@@ -87,11 +91,7 @@ function parsePrivateImageUrl(
 		return null;
 	}
 	if (parsed.username || parsed.password) return null;
-	const isLocalDevelopmentHttp =
-		parsed.protocol === 'http:' &&
-		LOCAL_DEVELOPMENT_HOSTS.has(parsed.hostname.toLowerCase()) &&
-		process.env.VERCEL_ENV !== 'production';
-	if (parsed.protocol !== 'https:' && !isLocalDevelopmentHttp) return null;
+	if (parsed.protocol !== 'https:' && !isLocalDevelopmentHttp(parsed)) return null;
 	if (requireCurrentOrigin) {
 		let appOrigin: string;
 		try {

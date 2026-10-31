@@ -53,7 +53,7 @@ interface WgContextValue {
 	wg: WgSummary;
 	members: Member[];
 	identity: SessionMember;
-	refreshMembers: (memberId?: string) => Promise<void>;
+	refreshMembers: () => Promise<void>;
 	// Whether the caller is the WG admin — UI gating only (deactivate/
 	// reactivate buttons, chat admin-delete). Every mutation re-checks
 	// server-side, so this being stale/spoofed can't grant real access.

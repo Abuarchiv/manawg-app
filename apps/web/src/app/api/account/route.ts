@@ -87,7 +87,8 @@ export async function DELETE(req: NextRequest): Promise<NextResponse> {
 				deleteAuthUser(url, serviceRoleKey, authUserId),
 			));
 		if (completed && !local.completedAt) {
-			const locale = requestLocale(req);
+			// The account's stored language, like every other mail; the device's as fallback.
+			const locale = recipient?.locale ?? requestLocale(req);
 			afterResponse(() => sendAccountDeletedMail(user.id, recipient?.email ?? null, locale));
 		}
 		return acceptedDeletionResponse(req, completed, local.deletedWgs);

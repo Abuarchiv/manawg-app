@@ -34,7 +34,6 @@ const state = {
 	status: 'open',
 	locks: 0,
 	audits: [] as string[],
-	notifications: 0,
 	activeMember: true,
 	deactivateAfterGuard: false,
 	replayLockedWgId: undefined as string | undefined,
@@ -148,19 +147,11 @@ mock.module('@/core/guards/require-wg-member', {
 mock.module('@/core/infra/observability', {
 	namedExports: { captureException: () => undefined, logApiError: () => undefined },
 });
-mock.module('@/core/notifications/notification-dispatch', {
-	namedExports: {
-		dispatchNotificationSafely: async () => {
-			state.notifications++;
-			return { warning: null };
-		},
-	},
-});
 mock.module('@/core/rate-limit', {
 	namedExports: { wgWriteLimiter: {}, checkRateLimit: async () => ({ success: true }) },
 });
 mock.module('@/core/db/with-replay', {
-	namedExports: { withIdempotentReplay, persistReplayWarning: async () => true },
+	namedExports: { withIdempotentReplay },
 });
 mock.module('@/features/announcements/announcement-workflow', {
 	namedExports: { ANNOUNCEMENT_REACTIONS: ['seen', 'take', 'ok'] },
@@ -179,7 +170,6 @@ function harness() {
 	state.status = 'open';
 	state.locks = 0;
 	state.audits = [];
-	state.notifications = 0;
 	state.activeMember = true;
 	state.deactivateAfterGuard = false;
 	state.replayLockedWgId = undefined;
@@ -207,7 +197,6 @@ test('same key replays an added reaction without toggling it off', async () => {
 	assert.equal(first.active, true);
 	assert.equal(state.reaction?.id, 'reaction-1');
 	assert.deepEqual(state.audits, ['announcement.reaction.added']);
-	assert.equal(state.notifications, 1);
 	assert.equal(state.locks, 1);
 });
 
@@ -218,7 +207,6 @@ test('distinct keys for add then remove serialize on the announcement lock', asy
 	assert.equal(((await removed.json()) as { active: boolean }).active, false);
 	assert.equal(state.reaction, null);
 	assert.deepEqual(state.audits, ['announcement.reaction.added', 'announcement.reaction.removed']);
-	assert.equal(state.notifications, 1);
 	assert.equal(state.locks, 2);
 });
 test('explicit active true with a new key is a no-op when already active', async () => {
@@ -228,7 +216,6 @@ test('explicit active true with a new key is a no-op when already active', async
 	assert.equal(second.active, true);
 	assert.equal(state.reaction?.id, 'reaction-1');
 	assert.deepEqual(state.audits, ['announcement.reaction.added']);
-	assert.equal(state.notifications, 1);
 });
 
 test('a reaction is not saved after a concurrent move-out', async () => {
@@ -240,7 +227,6 @@ test('a reaction is not saved after a concurrent move-out', async () => {
 	assert.equal((await response.json()).error, 'member_deactivated');
 	assert.equal(state.reaction, null);
 	assert.deepEqual(state.audits, []);
-	assert.equal(state.notifications, 0);
 	assert.equal(state.locks, 0);
 	assert.equal(state.replayLockedWgId, wgId);
 });

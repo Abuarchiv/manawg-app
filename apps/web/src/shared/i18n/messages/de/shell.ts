@@ -110,7 +110,7 @@ export default {
 		failed: 'Bild konnte nicht hochgeladen werden',
 		failedRetry: 'Bild konnte nicht hochgeladen werden. Versuche es erneut.',
 		invalidFile: 'Datei oder Dateityp ist ungültig.',
-		invalidType: 'Bitte JPG, PNG oder WebP wählen.',
+		invalidType: 'Bitte JPG, PNG, WebP oder HEIC wählen.',
 		tooLarge: 'Das Bild ist zu groß.',
 		notConfigured: 'Bild-Upload ist noch nicht konfiguriert.',
 		rateLimited: 'Zu viele Uploads. Versuche es gleich noch einmal.',

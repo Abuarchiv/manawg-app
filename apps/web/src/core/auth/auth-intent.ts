@@ -1,8 +1,8 @@
 import { safeNextPath } from './next-path';
 
 /** The pages that start an account flow; neither may be a post-login `next` target. */
-export const SIGN_IN_PATH = '/login';
-export const SIGN_UP_PATH = '/signup';
+const SIGN_IN_PATH = '/login';
+const SIGN_UP_PATH = '/signup';
 
 /** Sign-in, registration and the `/auth/*` utility routes are never a place to return to after login. */
 export function isAuthPagePath(path: string): boolean {

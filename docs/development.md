@@ -100,8 +100,9 @@ transaction pooler port `6543` is rejected.
 The Docker stack migrates itself on every start (`scripts/selfhost/setup.mjs` with
 `MANAWG_SELF_HOSTED=true`, which only skips the Supabase URL check; the server still needs the `anon` and `authenticated` roles, which the stack's `supabase/postgres` image provides).
 
-New migrations: edit the feature file in `src/core/db/schema/` (`schema.ts` re-exports them all), then `pnpm --filter @manawg/web db:generate`
-(drizzle-kit; `drizzle.config.ts` loads `.env` via `dotenv/config`).
+New migrations: edit the table definition in `src/core/db/schema/` (`schema.ts` re-exports those files) or in one of the
+`src/core/db/schema-*.ts` files (inventory, invites, mail log, statement emails), then run `pnpm --filter @manawg/web db:generate`
+(drizzle-kit; `drizzle.config.ts` lists every schema file and loads `.env` via `dotenv/config`).
 
 ### Fixture mode (no database)
 

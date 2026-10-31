@@ -85,6 +85,3 @@ export const wgInventoryLogRelations = relations(wgInventoryLog, ({ one }) => ({
 }));
 
 export type WgInventoryItem = typeof wgInventoryItems.$inferSelect;
-export type NewWgInventoryItem = typeof wgInventoryItems.$inferInsert;
-export type WgInventoryLogEntry = typeof wgInventoryLog.$inferSelect;
-export type NewWgInventoryLogEntry = typeof wgInventoryLog.$inferInsert;

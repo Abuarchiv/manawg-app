@@ -7,7 +7,6 @@ import {
 	type DispatchInput,
 	dispatchNotificationSafely,
 } from '../src/core/notifications/notification-dispatch';
-import { isTransientWebPushStatus } from '../src/core/notifications/web-push-errors';
 import {
 	pushAuthKeySchema,
 	pushEndpointSchema,
@@ -75,8 +74,5 @@ describe('push validator', () => {
 		assert.equal(pushP256dhSchema.safeParse('A'.repeat(86)).success, false);
 		assert.equal(pushAuthKeySchema.safeParse('A'.repeat(23)).success, false);
 		assert.equal(pushAuthKeySchema.safeParse('!'.repeat(22)).success, false);
-		assert.equal(isTransientWebPushStatus(429), true);
-		assert.equal(isTransientWebPushStatus(503), true);
-		assert.equal(isTransientWebPushStatus(400), false);
 	});
 });

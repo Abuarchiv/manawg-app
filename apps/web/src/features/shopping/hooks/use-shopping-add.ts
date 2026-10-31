@@ -229,19 +229,21 @@ export function useShoppingAdd({
 					return;
 				}
 				settleTemp(null);
-				if (res.status === 409 && res.error === 'shopping_item_duplicate') {
-					await load(true);
-					onDuplicate(name);
-				}
-				if (retryableResponse) await load(true);
+				const duplicate = res.status === 409 && res.error === 'shopping_item_duplicate';
 				setAddError(
-					res.status === 409 && res.error === 'shopping_item_duplicate'
+					duplicate
 						? shoppingDuplicateError(name, Boolean(quantity))
 						: // The middleware rejects 429 and read-only mode before any processing: nothing was saved.
 							retryableResponse && res.status !== 429 && !isReadOnlyMode(res.error)
 							? { key: 'shopping.add.retryHint' }
 							: shoppingAddError(res.error),
 				);
+				// The message shows at once; the refresh behind it can be slow.
+				if (duplicate) {
+					await load(true);
+					onDuplicate(name);
+				}
+				if (retryableResponse) await load(true);
 				return;
 			}
 			addIdempotencyKeyRef.current = null;

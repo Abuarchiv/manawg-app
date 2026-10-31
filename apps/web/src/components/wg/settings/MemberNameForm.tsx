@@ -74,7 +74,7 @@ export function MemberNameForm({
 				return;
 			}
 			setSaved(true);
-			await refreshMembers(memberId);
+			await refreshMembers();
 		} finally {
 			setPending(false);
 		}

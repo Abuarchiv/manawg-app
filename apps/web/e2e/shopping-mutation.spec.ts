@@ -5,6 +5,7 @@ import {
 	navigateToFeature,
 	setupMember,
 	skipUnlessFixtures,
+	waitForHydration,
 } from './support/helpers';
 
 test.describe('shopping retry', () => {
@@ -52,6 +53,8 @@ test.describe('shopping retry', () => {
 		await setupMember(page);
 		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/shopping`);
 		await dismissOnboarding(page);
+		// A value filled before hydration is reset in WebKit and leaves the submit button disabled.
+		await waitForHydration(page, '[aria-label="Artikel-Name"]');
 		await page.getByLabel('Artikel-Name').fill('Rettich');
 		await page.getByRole('button', { name: 'Artikel hinzufügen', exact: true }).click();
 		await expect(
@@ -100,6 +103,8 @@ test.describe('shopping retry', () => {
 		await setupMember(page);
 		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/shopping`);
 		await dismissOnboarding(page);
+		// A value filled before hydration is reset in WebKit and leaves the submit button disabled.
+		await waitForHydration(page, '[aria-label="Artikel-Name"]');
 		const input = page.getByLabel('Artikel-Name');
 		await input.fill('Milch');
 		await input.press('Enter');
@@ -127,6 +132,8 @@ test.describe('shopping retry', () => {
 		await setupMember(page);
 		await navigateToFeature(page, `/wg/${FIXTURE_WG.shareCode}/shopping`);
 		await dismissOnboarding(page);
+		// A value filled before hydration is reset in WebKit and leaves the submit button disabled.
+		await waitForHydration(page, '[aria-label="Artikel-Name"]');
 		const readQueuedKeys = () =>
 			page.evaluate(() => {
 				const raw = window.localStorage.getItem('manawg:offline-actions');

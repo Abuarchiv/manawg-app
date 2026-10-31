@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface ExpensesErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function ExpensesError({ error, reset }: ExpensesErrorProps) {
+export default function ExpensesError({ error, retry }: ExpensesErrorProps) {
 	const t = useTranslations('expenses.page');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-expenses"
 			title={t('errorTitle')}
 			body={t('errorBody')}

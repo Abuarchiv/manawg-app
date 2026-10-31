@@ -59,7 +59,11 @@ const EVENTS: Readonly<Record<string, AuditEventDef>> = {
 	},
 	'announcement.reaction.removed': NONE,
 	'announcement.created': NONE,
-	'announcement.updated': NONE,
+	'announcement.updated': {
+		derive: (metadata) => ({
+			change: metadata.statusChanged === true ? String(metadata.status) : 'none',
+		}),
+	},
 	'announcement.deleted': NONE,
 	'calendar.feed_created': NONE,
 	'calendar.feed_rotated': NONE,

@@ -44,9 +44,21 @@ export function logApiError(label: string, ...errors: unknown[]): void {
 
 function describeThrown(err: unknown): string {
 	if (err instanceof Error) {
-		return safeErrorName(err.name);
+		// Node's network codes (ETIMEDOUT, ECONNRESET…) are fixed identifiers, never request data;
+		// an AggregateError (connection attempts to every address failed) only says something
+		// through the codes of its inner errors.
+		const inner = err instanceof AggregateError ? err.errors : [];
+		const codes = [...new Set([err, ...inner].map(systemErrorCode).filter(Boolean))];
+		return codes.length > 0
+			? `${safeErrorName(err.name)} ${codes.join(',')}`
+			: safeErrorName(err.name);
 	}
 	return `thrown ${typeof err}`;
+}
+
+function systemErrorCode(err: unknown): string | null {
+	const code = err && typeof err === 'object' ? (err as { code?: unknown }).code : undefined;
+	return typeof code === 'string' && /^E[A-Z_]{2,30}$/.test(code) ? code : null;
 }
 
 function safeContext(context?: Record<string, unknown>): Record<string, string> {

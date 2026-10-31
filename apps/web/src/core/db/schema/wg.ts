@@ -114,8 +114,5 @@ export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one })
 	}),
 }));
 
-export type Wg = typeof wgs.$inferSelect;
-export type NewWg = typeof wgs.$inferInsert;
 export type WgMember = typeof wgMembers.$inferSelect;
-export type NewWgMember = typeof wgMembers.$inferInsert;
 export type PushSubscription = typeof pushSubscriptions.$inferSelect;

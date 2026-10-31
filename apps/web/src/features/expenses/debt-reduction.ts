@@ -12,12 +12,7 @@ export interface SimplifiedDebt {
 }
 
 export interface SettlementSummary {
-	directCount: number;
-	simplifiedCount: number;
-	savedTransfers: number;
-	totalOpenCents: number;
 	simplified: SimplifiedDebt[];
-	totalOpenByCurrency?: Record<string, number>;
 }
 
 interface BalanceEntry {
@@ -194,24 +189,5 @@ export function buildSettlementSummary(
 	members: MemberInput[],
 	payments: readonly ExpensePaymentInput[] = [],
 ): SettlementSummary {
-	const direct = computeDirectDebts(expenses, members, payments);
-	const simplified = simplifyDebts(computeNetBalances(expenses, members, payments));
-	const totalOpenByCurrency = Object.fromEntries(
-		[...new Set(direct.map((debt) => normalizeCurrency(debt.currency)))].map((currency) => [
-			currency,
-			direct
-				.filter((debt) => normalizeCurrency(debt.currency) === currency)
-				.reduce((sum, debt) => sum + debt.cents, 0),
-		]),
-	);
-	return {
-		directCount: direct.length,
-		simplifiedCount: simplified.length,
-		savedTransfers: Math.max(0, direct.length - simplified.length),
-		// Kept for backwards-compatible callers; never use this value to offset
-		// balances. Use totalOpenByCurrency when displaying totals.
-		totalOpenCents: direct.reduce((sum, debt) => sum + debt.cents, 0),
-		simplified,
-		totalOpenByCurrency,
-	};
+	return { simplified: simplifyDebts(computeNetBalances(expenses, members, payments)) };
 }

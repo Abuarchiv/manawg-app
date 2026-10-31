@@ -63,10 +63,6 @@ test.describe('debt overview', () => {
 	test('a provided simplified result is authoritative even without direct debts', () => {
 		expect(
 			getDebtOverview([], 'me', {
-				directCount: 0,
-				simplifiedCount: 1,
-				savedTransfers: 0,
-				totalOpenCents: 1200,
 				simplified: [outgoing],
 			}).personal,
 		).toEqual([outgoing]);

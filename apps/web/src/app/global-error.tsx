@@ -49,10 +49,10 @@ const subscribeNever = () => () => {};
 
 export default function GlobalError({
 	error,
-	reset,
+	retry,
 }: {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }) {
 	// The server pass renders German; the client picks the reader's language right after hydration.
 	const locale = useSyncExternalStore(subscribeNever, readLocale, () => 'de' as const);
@@ -90,7 +90,7 @@ export default function GlobalError({
 							<Button
 								type="button"
 								size="lg"
-								onClick={() => (isChunkLoadError(error) ? window.location.reload() : reset())}
+								onClick={() => (isChunkLoadError(error) ? window.location.reload() : retry())}
 							>
 								{copy.retry}
 							</Button>

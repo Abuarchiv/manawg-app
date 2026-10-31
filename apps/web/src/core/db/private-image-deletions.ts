@@ -4,13 +4,14 @@ import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from 'drizzle-
 import { db } from '@/core/db';
 import { announcements, expenses, privateImageDeletions, wgChatMessages } from '@/core/db/schema';
 import { type DbTransaction, TransactionAbort, withTransaction } from '@/core/db/transaction';
+import { MS_PER_DAY, MS_PER_HOUR } from '@/core/utils/time';
 import { getPrivateImageKeyFromStoredUrl, parsePrivateImageKey } from '@/core/validators/image-url';
 
-const CLEANUP_DELAY_MS = 2 * 60 * 60 * 1000 + 5 * 60 * 1000;
-const CLEANUP_RECHECK_MS = 24 * 60 * 60 * 1000;
+const CLEANUP_DELAY_MS = 2 * MS_PER_HOUR + 5 * 60_000;
+const CLEANUP_RECHECK_MS = MS_PER_DAY;
 const CLEANUP_BATCH_SIZE = 50;
 /** A finished tombstone is kept this long (replayed offline uploads cannot outlive it), then dropped. */
-const TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const TOMBSTONE_RETENTION_MS = 30 * MS_PER_DAY;
 
 // Full per-WG image-history scan; normalizing reference keys would help if measured delete latency warrants it.
 async function getWgPrivateImageKeys(
@@ -45,6 +46,21 @@ async function getWgPrivateImageKeys(
 	return keys;
 }
 
+const INSERT_BATCH_SIZE = 250;
+
+async function insertDeletionKeys(
+	executor: Pick<typeof db, 'insert'>,
+	objectKeys: readonly string[],
+): Promise<void> {
+	for (let offset = 0; offset < objectKeys.length; offset += INSERT_BATCH_SIZE) {
+		const batch = objectKeys.slice(offset, offset + INSERT_BATCH_SIZE);
+		await executor
+			.insert(privateImageDeletions)
+			.values(batch.map((objectKey) => ({ objectKey })))
+			.onConflictDoNothing();
+	}
+}
+
 /** Every private image key any row of the WG still points at, deleted chat messages included. */
 export async function findWgReferencedImageKeys(wgId: string): Promise<Set<string>> {
 	return withTransaction((tx) => getWgPrivateImageKeys(tx, wgId, true));
@@ -55,13 +71,7 @@ export async function findWgReferencedImageKeys(wgId: string): Promise<Set<strin
  * cleanup removes them later after checking once more that no row points at them.
  */
 export async function queueImageDeletions(objectKeys: readonly string[]): Promise<void> {
-	for (let offset = 0; offset < objectKeys.length; offset += 250) {
-		const batch = objectKeys.slice(offset, offset + 250);
-		await db
-			.insert(privateImageDeletions)
-			.values(batch.map((objectKey) => ({ objectKey })))
-			.onConflictDoNothing();
-	}
+	await insertDeletionKeys(db, objectKeys);
 }
 
 /** Takes keys back off the queue that no deletion has run for yet. */
@@ -135,13 +145,7 @@ export async function revokePrivateImageIfUnreferenced(
 
 export async function recordWgImageDeletions(tx: DbTransaction, wgId: string): Promise<number> {
 	const keys = [...(await getWgPrivateImageKeys(tx, wgId, true))];
-	for (let offset = 0; offset < keys.length; offset += 250) {
-		const batch = keys.slice(offset, offset + 250);
-		await tx
-			.insert(privateImageDeletions)
-			.values(batch.map((objectKey) => ({ objectKey })))
-			.onConflictDoNothing();
-	}
+	await insertDeletionKeys(tx, keys);
 	return keys.length;
 }
 

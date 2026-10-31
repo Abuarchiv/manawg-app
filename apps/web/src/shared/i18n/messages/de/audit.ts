@@ -7,13 +7,13 @@ export default {
 		feed: '{self, select, yes {hast} other {hat}} eine Abwesenheit entfernt.',
 	},
 	announcementCommentCreated: {
-		feed: '{self, select, yes {hast} other {hat}} einen Kommentar geschrieben.',
+		feed: '{self, select, yes {hast} other {hat}} eine Antwort geschrieben.',
 	},
 	announcementCommentUpdated: {
-		feed: '{self, select, yes {hast} other {hat}} einen Kommentar aktualisiert.',
+		feed: '{self, select, yes {hast} other {hat}} eine Antwort aktualisiert.',
 	},
 	announcementCommentDeleted: {
-		feed: '{self, select, yes {hast} other {hat}} {moderated, select, yes {als Admin einen Kommentar} other {einen Kommentar}} entfernt.',
+		feed: '{self, select, yes {hast} other {hat}} {moderated, select, yes {als Admin eine Antwort} other {eine Antwort}} entfernt.',
 	},
 	announcementReactionAdded: {
 		feed: '{self, select, yes {hast} other {hat}} mit „{reaction}“ reagiert.',
@@ -25,7 +25,7 @@ export default {
 		feed: '{self, select, yes {hast} other {hat}} einen Pinnwand-Beitrag erstellt.',
 	},
 	announcementUpdated: {
-		feed: '{self, select, yes {hast} other {hat}} einen Pinnwand-Beitrag aktualisiert.',
+		feed: '{self, select, yes {hast} other {hat}} {change, select, resolved {einen Pinnwand-Beitrag als geklärt markiert.} open {einen Pinnwand-Beitrag wieder geöffnet.} other {einen Pinnwand-Beitrag aktualisiert.}}',
 	},
 	announcementDeleted: {
 		feed: '{self, select, yes {hast} other {hat}} einen Pinnwand-Beitrag entfernt.',

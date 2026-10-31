@@ -175,8 +175,7 @@ export default {
 			notFound:
 				'Diese WG wurde nicht gefunden. Sie wurde möglicherweise schon gelöscht oder der Link ist veraltet.',
 			invalidCode: 'Der WG-Code ist ungültig. Öffne die WG über einen gültigen Link.',
-			membershipInvalid:
-				'Deine lokale Mitgliedschaft ist nicht mehr gültig. Tritt der WG erneut bei.',
+			membershipInvalid: 'Deine Mitgliedschaft ist nicht mehr gültig. Tritt der WG erneut bei.',
 			fallback: 'Löschen fehlgeschlagen. Bitte versuche es später erneut.',
 		},
 	},
@@ -301,7 +300,7 @@ export default {
 			inventory: 'Vorräte',
 			absences: 'Abwesenheiten',
 			announcements: 'Pinnwand',
-			announcementComments: 'Pinnwand-Kommentare',
+			announcementComments: 'Pinnwand-Antworten',
 			events: 'Termine',
 			chatMessages: 'Chat',
 			auditEvents: 'WG-Änderungen',

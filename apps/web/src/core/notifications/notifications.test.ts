@@ -219,7 +219,6 @@ test('every event has a complete message in both locales', () => {
 		'notification.test',
 		'announcement.posted',
 		'announcement.commented',
-		'announcement.reacted',
 		'announcement.resolved',
 		'chore.due',
 		'shopping.added',

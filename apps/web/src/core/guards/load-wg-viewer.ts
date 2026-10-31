@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { and, eq, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm';
 import { cache } from 'react';
 import { getAuthenticatedUserFromCookies } from '@/core/auth/server';
 import { db, wgMembers, wgs } from '@/core/db';
@@ -85,7 +85,9 @@ export const loadWgShell = cache(async (code: string) => {
 			deactivatedAt: wgMembers.deactivatedAt,
 		})
 		.from(wgMembers)
-		.where(eq(wgMembers.wgId, access.id));
+		.where(eq(wgMembers.wgId, access.id))
+		// The roster order feeds every member list; without it a row update reshuffles them.
+		.orderBy(asc(wgMembers.createdAt), asc(wgMembers.id));
 	// Same rule as isWgAdmin: the first active admin row.
 	const initialIsAdmin =
 		rows.find((row) => row.role === 'admin' && row.deactivatedAt === null)?.id === access.memberId;

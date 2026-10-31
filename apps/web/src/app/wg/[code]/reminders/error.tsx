@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface RemindersErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function RemindersError({ error, reset }: RemindersErrorProps) {
+export default function RemindersError({ error, retry }: RemindersErrorProps) {
 	const t = useTranslations('expenses-debts.page.boundary');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-reminders"
 			title={t('title')}
 			body={t('body')}

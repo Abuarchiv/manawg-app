@@ -4,10 +4,10 @@ import type de from '../de/home';
 export default {
 	due: {
 		checkDate: 'Check date',
-		overdue: 'open for {count, plural, one {# day} other {# days}}',
+		overdue: 'open for {count, plural, one {# day} other {# days}}',
 		today: 'due today',
 		tomorrow: 'due tomorrow',
-		inDays: 'in {count, plural, one {# day} other {# days}}',
+		inDays: 'in {count, plural, one {# day} other {# days}}',
 	},
 	today: {
 		unassigned: 'Not assigned yet',

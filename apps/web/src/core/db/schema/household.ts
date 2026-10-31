@@ -124,4 +124,3 @@ export type Chore = typeof chores.$inferSelect;
 // type-checks — zod requires `[string, ...string[]]`.
 export const CHORE_RECURRENCE_TYPES = ['days', 'months'] as const;
 export type ChoreRecurrenceType = (typeof CHORE_RECURRENCE_TYPES)[number];
-export type MemberAbsence = typeof memberAbsences.$inferSelect;

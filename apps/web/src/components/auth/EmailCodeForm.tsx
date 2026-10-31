@@ -53,6 +53,10 @@ export function useEmailCode({
 	function failureOf(caught: unknown, fallback: 'generic' | 'wrong-code'): CodeError {
 		const failure = classifyAuthError(caught);
 		if (failure === 'rate-limit' || failure === 'network') return failure;
+		// A server fault says nothing about the code, so it must not read as a wrong one.
+		const status =
+			caught !== null && typeof caught === 'object' ? Reflect.get(caught, 'status') : 0;
+		if (typeof status === 'number' && status >= 500) return 'generic';
 		return fallback;
 	}
 

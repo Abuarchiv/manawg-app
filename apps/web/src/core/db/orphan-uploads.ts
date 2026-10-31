@@ -6,6 +6,7 @@ import { wgs } from '@/core/db/schema';
 import { logApiError } from '@/core/infra/observability';
 import type { StoredImageObject } from '@/core/infra/supabase-storage';
 import { listSupabaseImageFolders, listSupabaseImageObjects } from '@/core/infra/supabase-storage';
+import { MS_PER_DAY } from '@/core/utils/time';
 import { selectOrphanKeys } from './orphan-upload-selection';
 import {
 	dequeueImageDeletions,
@@ -16,14 +17,13 @@ import {
 
 const PURPOSES = ['expense', 'announcement', 'chat'] as const;
 const WGS_PER_RUN = 10;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 const UUID_FOLDER = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The daily slice of `ids`: a few at a time, stepping through the list so every id is reached. */
 function dailyBatch<T>(ids: readonly T[], now: Date): T[] {
 	if (ids.length === 0) return [];
-	const start = (Math.floor(now.getTime() / DAY_MS) * WGS_PER_RUN) % ids.length;
+	const start = (Math.floor(now.getTime() / MS_PER_DAY) * WGS_PER_RUN) % ids.length;
 	return Array.from(
 		{ length: Math.min(WGS_PER_RUN, ids.length) },
 		(_, index) => ids[(start + index) % ids.length] as T,

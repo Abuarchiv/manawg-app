@@ -109,7 +109,7 @@ test.describe('ManaWG launch smoke', () => {
 		await page.addInitScript(() => window.localStorage.clear());
 		await gotoWithRetry(page, '/invite/expired-invite-token-1');
 		await expect(
-			page.getByText('Diese Einladung ist abgelaufen. Bitte ein Mitglied um eine neue.'),
+			page.getByText('Diese Einladung ist nicht mehr gültig. Bitte ein Mitglied um eine neue.'),
 		).toBeVisible({ timeout: 30_000 });
 		await expect(page.getByRole('button', { name: 'Beitreten', exact: true })).toHaveCount(0);
 		await expect(page.getByLabel('Dein Anzeigename')).toHaveCount(0);
@@ -133,7 +133,7 @@ test.describe('ManaWG launch smoke', () => {
 		await page.getByRole('button', { name: 'Beitreten', exact: true }).click();
 
 		await expect(
-			page.getByText('Diese Einladung ist abgelaufen. Bitte ein Mitglied um eine neue.'),
+			page.getByText('Diese Einladung ist nicht mehr gültig. Bitte ein Mitglied um eine neue.'),
 		).toBeVisible();
 		await expect(page.getByLabel('Dein Anzeigename')).toHaveCount(0);
 	});

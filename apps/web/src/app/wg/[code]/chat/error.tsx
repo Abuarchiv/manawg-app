@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface ChatErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function ChatError({ error, reset }: ChatErrorProps) {
+export default function ChatError({ error, retry }: ChatErrorProps) {
 	const t = useTranslations('chat.errorPage');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-chat"
 			title={t('title')}
 			body={t('body')}

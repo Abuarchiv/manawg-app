@@ -72,7 +72,9 @@ export function PasswordResetRequest() {
 						{t('validEmail')}
 					</p>
 				)}
-				{state === 'failed' && <GenericAuthError failure={failure} />}
+				{state === 'failed' && (
+					<GenericAuthError failure={failure} fallback={{ key: 'auth.failure.mail' }} />
+				)}
 				{state === 'sent' && (
 					<Alert>
 						<AlertDescription>{t('signIn.resetSent')}</AlertDescription>

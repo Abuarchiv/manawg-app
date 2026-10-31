@@ -1,10 +1,10 @@
 export default {
 	due: {
 		checkDate: 'Datum prüfen',
-		overdue: 'seit {count, plural, one {# Tag} other {# Tagen}} offen',
+		overdue: 'seit {count, plural, one {# Tag} other {# Tagen}} offen',
 		today: 'heute fällig',
 		tomorrow: 'morgen fällig',
-		inDays: 'in {count} Tagen',
+		inDays: 'in {count} Tagen',
 	},
 	today: {
 		unassigned: 'Noch nicht zugewiesen',

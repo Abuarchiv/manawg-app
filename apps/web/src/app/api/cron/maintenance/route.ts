@@ -100,8 +100,8 @@ async function purgeRetention(): Promise<void> {
 }
 
 /**
- * Purges expired replay rows, runs bounded account/image deletion recovery
- * and hands the admin role to a member with an account in WGs that lack one.
+ * Purges expired replay rows and old ledger rows, retries pending account deletions,
+ * removes queued private images and queues orphaned uploads for removal.
  */
 export const GET = withCronLogging(
 	'maintenance',
@@ -129,7 +129,6 @@ export const GET = withCronLogging(
 				: null;
 		const [purge, deletions, privateImages, orphans] = await Promise.allSettled([
 			purgeExpiredIdempotencyResponses(),
-
 			retryPendingAccountDeletions(deleteAuth),
 			cleanupPrivateImages(),
 			sweepOrphans(),

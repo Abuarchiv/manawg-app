@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
 	resolveConnectionString,
+	validateDatabaseUrl,
 	validateSupabaseSessionUrl,
 } from '../scripts/db-migrate/connection.mjs';
 import { errorCodeSuffix, safeFailureReason } from '../scripts/db-migrate/failure.mjs';
@@ -111,4 +112,8 @@ test('errorCodeSuffix reports SQLSTATE-like codes from the error or its cause on
 	assert.equal(errorCodeSuffix(Object.assign(new Error('x'), { code: 42501 })), '');
 	assert.equal(errorCodeSuffix('plain string'), '');
 	assert.equal(errorCodeSuffix(null), '');
+});
+
+test('validateDatabaseUrl treats the IPv6 loopback address as local', () => {
+	assert.doesNotThrow(() => validateDatabaseUrl('postgresql://u:p@[::1]:5432/postgres', 'URL'));
 });

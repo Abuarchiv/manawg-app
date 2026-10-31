@@ -33,11 +33,11 @@ import { useWg } from '@/components/wg/WgContextProvider';
 import {
 	type ActivityFilter,
 	type ActivityKind,
+	activityDayRelation,
 	buildActivityInbox,
 	filterActivityItems,
 	groupActivityItemsByDay,
 } from '@/composition/activity';
-import { berlinDayKey, prevBerlinDayStart, startOfBerlinDay } from '@/core/utils/berlin-day';
 import { dayMonthOptions } from '@/core/utils/time';
 import { dateTimeFormat } from '@/shared/i18n/intl';
 import type { Locale } from '@/shared/i18n/locale';
@@ -88,11 +88,8 @@ export default function ActivityPage() {
 
 	// Groups are keyed by Berlin calendar day; the label follows the reader's language.
 	function dayLabel(date: string): string {
-		const now = Date.now();
-		if (date === berlinDayKey(new Date(now))) return t('today');
-		if (date === berlinDayKey(prevBerlinDayStart(startOfBerlinDay(new Date(now))))) {
-			return t('yesterday');
-		}
+		const relation = activityDayRelation(date);
+		if (relation) return t(relation);
 		return dateTimeFormat(locale, {
 			weekday: 'short',
 			...dayMonthOptions(locale),

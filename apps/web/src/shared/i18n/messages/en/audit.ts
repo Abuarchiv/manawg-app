@@ -16,7 +16,11 @@ export default {
 	announcementReactionAdded: { feed: same('reacted with “{reaction}”.') },
 	announcementReactionRemoved: { feed: same('removed a reaction.') },
 	announcementCreated: { feed: same('created a noticeboard post.') },
-	announcementUpdated: { feed: same('updated a noticeboard post.') },
+	announcementUpdated: {
+		feed: same(
+			'{change, select, resolved {marked a noticeboard post as resolved.} open {reopened a noticeboard post.} other {updated a noticeboard post.}}',
+		),
+	},
 	announcementDeleted: { feed: same('removed a noticeboard post.') },
 	calendarFeedCreated: { feed: same('created the calendar feed.') },
 	calendarFeedRotated: { feed: same('renewed the calendar feed.') },

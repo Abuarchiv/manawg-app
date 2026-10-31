@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface ChoresErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function ChoresError({ error, reset }: ChoresErrorProps) {
+export default function ChoresError({ error, retry }: ChoresErrorProps) {
 	const t = useTranslations('chores.errorPage');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-chores"
 			title={t('title')}
 			body={t('body')}

@@ -16,7 +16,6 @@ export type NotificationEvent =
 	| 'notification.test'
 	| 'announcement.posted'
 	| 'announcement.commented'
-	| 'announcement.reacted'
 	| 'announcement.resolved'
 	| 'chore.due'
 	| 'shopping.added'
@@ -38,7 +37,7 @@ type NotificationCategory =
 	| 'events'
 	| 'reminders'
 	| 'chat';
-type NotificationPriority = 'urgent' | 'normal' | 'silent';
+type NotificationPriority = 'urgent' | 'normal';
 
 export interface NotificationMessage {
 	title: string;
@@ -74,7 +73,6 @@ export function notificationCategoryForEvent(event: NotificationEvent): Notifica
 export function notificationPriorityForEvent(event: NotificationEvent): NotificationPriority {
 	if (event === 'chore.due') return 'urgent';
 	if (event === 'event.upcoming' || event === 'event.today') return 'urgent';
-	if (event === 'announcement.reacted') return 'silent';
 	if (event === 'notification.test') return 'normal';
 	return 'normal';
 }
@@ -255,15 +253,6 @@ export function formatNotificationMessage(
 				body: t('announcementCommented.body', {
 					actorName,
 					title: text(payload.title, t('fallback.newReply')),
-				}),
-				urlPath: announcementUrlPath(payload),
-			};
-		case 'announcement.reacted':
-			return {
-				title: t('announcementReacted.title'),
-				body: t('announcementReacted.body', {
-					actorName,
-					title: text(payload.title, t('fallback.newReaction')),
 				}),
 				urlPath: announcementUrlPath(payload),
 			};

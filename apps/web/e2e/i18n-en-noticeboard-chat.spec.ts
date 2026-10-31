@@ -387,7 +387,8 @@ test.describe('English chat', () => {
 				// The message scroller exposes exactly one log; the focusable viewport stays a region.
 				await expect(page.getByRole('log')).toHaveCount(1);
 				await expect(page.locator('[role=log] [role=log]')).toHaveCount(0);
-				await expect(log.getByText('Today').first()).toBeVisible();
+				// Messages a few minutes old fall on the previous day right after midnight.
+				await expect(log.getByText(/^(Today|Yesterday)$/).first()).toBeVisible();
 				// The fixture page lists its own messages first; the mocked page arrives with the next poll.
 				await expect(log.getByText('Mina joined the flat.')).toBeVisible({ timeout: POLL_WAIT_MS });
 				await expect(log.getByText('Mina added Oat milk for €18.90.')).toBeVisible();

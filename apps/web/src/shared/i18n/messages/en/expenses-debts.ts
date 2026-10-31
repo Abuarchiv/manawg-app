@@ -21,7 +21,7 @@ export default {
 		'{debtorSelf, select, yes {You owe} other {{debtor} owes}} {creditorSelf, select, yes {you} other {{creditor}}}',
 	age: {
 		days: 'open for {count, plural, one {# day} other {# days}}',
-		dueToday: 'due today',
+		today: 'open since today',
 	},
 	remind: {
 		idle: 'Remind',

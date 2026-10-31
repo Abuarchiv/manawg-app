@@ -35,6 +35,10 @@ export default {
 		title: 'Sync failed',
 		detail: 'The action stays in the queue. Try again later.',
 	},
+	rejected: {
+		title: 'Rejected by the server',
+		detail: 'The action is not sent again. Edit or discard it here.',
+	},
 	maintenance: {
 		title: 'App under maintenance',
 		detail: 'The action stays in the queue and is sent once maintenance is over.',

@@ -9,6 +9,7 @@ import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { type AuthFailure, classifyAuthError } from '@/core/auth/password-errors';
+import type { Message } from '@/shared/i18n/message';
 import {
 	type AuthFormProps,
 	type BusyAction,
@@ -21,6 +22,8 @@ import {
 
 /** Seconds before the confirmation mail can be requested again; the server limits stay authoritative. */
 const RESEND_COOLDOWN_SECONDS = 60;
+
+const MAIL_FAILED: Message = { key: 'auth.failure.mail' };
 
 /** E-mail and password: sign in, resend a confirmation mail, or request a reset link. */
 export function useEmailAuth({
@@ -36,6 +39,8 @@ export function useEmailAuth({
 		null,
 	);
 	const [failure, setFailure] = useState<AuthFailure>('other');
+	// True when the failed action was sending a mail, so an unclassified failure does not read as a sign-in failure.
+	const [mailFailed, setMailFailed] = useState(false);
 	// The unconfirmed address behind the last sign-in; the resend action outlives later feedback.
 	const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
 	const [emailMessage, setEmailMessage] = useState<string | null>(null);
@@ -44,6 +49,7 @@ export function useEmailAuth({
 
 	function resetEmailFeedback(): void {
 		setFailure('other');
+		setMailFailed(false);
 		setEmailError(null);
 		setEmailMessage(null);
 	}
@@ -91,6 +97,7 @@ export function useEmailAuth({
 			setEmailMessage(t('confirmationResent'));
 		} catch (error) {
 			setFailure(classifyAuthError(error));
+			setMailFailed(true);
 			setEmailError('generic');
 		} finally {
 			setBusy(null);
@@ -112,6 +119,7 @@ export function useEmailAuth({
 			setEmailMessage(t('resetSent'));
 		} catch (error) {
 			setFailure(classifyAuthError(error));
+			setMailFailed(true);
 			setEmailError('generic');
 		} finally {
 			setBusy(null);
@@ -133,6 +141,7 @@ export function useEmailAuth({
 		setPassword,
 		emailError,
 		failure,
+		mailFailed,
 		emailMessage,
 		submitEmail,
 		resendConfirmation,
@@ -159,6 +168,7 @@ export function EmailAuthForm({
 		setPassword,
 		emailError,
 		failure,
+		mailFailed,
 		emailMessage,
 		submitEmail,
 		resendConfirmation,
@@ -217,7 +227,10 @@ export function EmailAuthForm({
 				</Field>
 				{emailError === 'generic' && (
 					<div id="auth-email-error">
-						<GenericAuthError failure={failure} />
+						<GenericAuthError
+							failure={failure}
+							{...(mailFailed ? { fallback: MAIL_FAILED } : {})}
+						/>
 					</div>
 				)}
 				{emailError === 'invalid' && (

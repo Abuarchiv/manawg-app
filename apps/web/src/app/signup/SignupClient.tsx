@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
+import { startSocialLogin } from '@/app/login/start-flow';
 import { CredentialsAuth } from '@/components/auth/CredentialsAuth';
 import { useGoogleSignIn } from '@/components/auth/google-sign-in';
 import { SocialLoginButtons } from '@/components/auth/SocialLoginButtons';
@@ -40,10 +41,7 @@ export function SignupClient({ intentQuery }: { intentQuery: string }) {
 						<SocialLoginButtons
 							variant="sign-up"
 							next={afterAuthPath}
-							onOAuthStart={async (provider, next) => {
-								const { startSocialLogin } = await import('@/core/auth/client');
-								await startSocialLogin(provider, next);
-							}}
+							onOAuthStart={startSocialLogin}
 							disabled={credentialsBusy}
 						/>
 						<FieldSeparator>{t('start.or')}</FieldSeparator>

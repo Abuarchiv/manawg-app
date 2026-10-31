@@ -5,10 +5,10 @@
  *
  *   1. the runtime role `manawg_app` (row access only, no DDL) with MANAWG_APP_DB_PASSWORD,
  *   2. the Drizzle migrations (scripts/db-migrate, same ledger and checks as production),
- *   3. the private image bucket with the rules of src/core/infra/private-image-policy.ts,
- *   4. the Supabase Auth mail templates, rendered for this instance into MAIL_TEMPLATES_DIR,
- *      where the gateway serves them to Auth,
- *   5. stored receipt photo links, moved onto the current NEXT_PUBLIC_APP_URL origin.
+ *   3. stored receipt photo links, moved onto the current NEXT_PUBLIC_APP_URL origin,
+ *   4. the private image bucket with the rules of src/core/infra/private-image-policy.ts,
+ *   5. the Supabase Auth mail templates, rendered for this instance into MAIL_TEMPLATES_DIR,
+ *      where the gateway serves them to Auth.
  *
  * The Docker image ships this file bundled (Dockerfile); `node scripts/selfhost/setup.mjs` runs it
  * from a checkout as well.

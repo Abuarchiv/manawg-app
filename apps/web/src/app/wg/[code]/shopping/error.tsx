@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface ShoppingErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function ShoppingError({ error, reset }: ShoppingErrorProps) {
+export default function ShoppingError({ error, retry }: ShoppingErrorProps) {
 	const t = useTranslations('shopping.errorPage');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-shopping"
 			title={t('title')}
 			body={t('body')}

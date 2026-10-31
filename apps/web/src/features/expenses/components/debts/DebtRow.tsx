@@ -38,7 +38,7 @@ export function DebtRow({
 	const owedToMe = creditor.id === currentMemberId;
 	const iOwe = debtor.id === currentMemberId;
 	const ageLabel =
-		oldestDebtAgeDays >= 1 ? t('age.days', { count: oldestDebtAgeDays }) : t('age.dueToday');
+		oldestDebtAgeDays >= 1 ? t('age.days', { count: oldestDebtAgeDays }) : t('age.today');
 
 	return (
 		<li>

@@ -4,19 +4,13 @@ import { z } from 'zod';
 import { recordAuditEvent } from '@/core/audit';
 import { announcementReactions, announcements } from '@/core/db';
 import { lockActiveAccountMember } from '@/core/db/account-deletion';
-import { persistReplayWarning, withIdempotentReplay } from '@/core/db/with-replay';
+import { withIdempotentReplay } from '@/core/db/with-replay';
 import { UUID_PATTERN } from '@/core/guards/api-auth';
 import { requireWgMember } from '@/core/guards/require-wg-member';
 import { withWgRoute } from '@/core/guards/with-wg-route';
 import { badRequest, rateLimitedReplayResponse } from '@/core/http/api-errors';
 import { parseBody } from '@/core/http/parse-body';
-import { logApiError } from '@/core/infra/observability';
-import {
-	dispatchNotificationSafely,
-	type NotificationDispatchWarning,
-} from '@/core/notifications/notification-dispatch';
 import { checkRateLimit, wgWriteLimiter } from '@/core/rate-limit';
-import { announcementPushTitle } from '@/features/announcements/announcement-push-title';
 import { ANNOUNCEMENT_REACTIONS } from '@/features/announcements/announcement-workflow';
 
 const reactionSchema = z.object({
@@ -25,14 +19,7 @@ const reactionSchema = z.object({
 	active: z.boolean(),
 });
 
-type ReactionEffect =
-	| { type: 'removed'; reactionId: string }
-	| {
-			type: 'added';
-			reactionId: string;
-			authorMemberId: string;
-			announcementContent: string;
-	  };
+type ReactionEffect = { type: 'added' | 'removed'; reactionId: string };
 
 export const POST = withWgRoute<{ id: string }>(
 	'announcement reaction POST',
@@ -70,12 +57,7 @@ export const POST = withWgRoute<{ id: string }>(
 
 				// Lock the announcement so a take cannot race a concurrent resolve.
 				const [announcement] = await tx
-					.select({
-						id: announcements.id,
-						authorMemberId: announcements.authorMemberId,
-						content: announcements.content,
-						status: announcements.status,
-					})
+					.select({ status: announcements.status })
 					.from(announcements)
 					.where(and(eq(announcements.id, id), eq(announcements.wgId, wg.id)))
 					.limit(1)
@@ -130,12 +112,7 @@ export const POST = withWgRoute<{ id: string }>(
 				return reaction
 					? {
 							response: { ...response(true), entityId: reaction.id },
-							effect: {
-								type: 'added' as const,
-								reactionId: reaction.id,
-								authorMemberId: announcement.authorMemberId,
-								announcementContent: announcement.content,
-							},
+							effect: { type: 'added' as const, reactionId: reaction.id },
 						}
 					: { response: response(true), effect: null };
 			},
@@ -145,65 +122,19 @@ export const POST = withWgRoute<{ id: string }>(
 			return NextResponse.json(outcome.response.body, { status: outcome.response.status });
 		}
 
-		const effect = outcome.effect;
-		if (effect.type === 'removed') {
-			await recordAuditEvent({
-				wgId: wg.id,
-				memberId: auth.member.memberId,
-				eventType: 'announcement.reaction.removed',
-				entityType: 'announcement_reaction',
-				entityId: effect.reactionId,
-				actorName: auth.member.name,
-				metadata: { announcementId: id, reaction: parsed.data.reaction },
-			});
-			return NextResponse.json(outcome.response.body, { status: outcome.response.status });
-		}
-
+		// Reactions notify nobody: the author sees them on the board.
 		await recordAuditEvent({
 			wgId: wg.id,
 			memberId: auth.member.memberId,
-			eventType: 'announcement.reaction.added',
+			eventType:
+				outcome.effect.type === 'added'
+					? 'announcement.reaction.added'
+					: 'announcement.reaction.removed',
 			entityType: 'announcement_reaction',
-			entityId: effect.reactionId,
+			entityId: outcome.effect.reactionId,
 			actorName: auth.member.name,
 			metadata: { announcementId: id, reaction: parsed.data.reaction },
 		});
-		let warning: NotificationDispatchWarning = null;
-		if (effect.authorMemberId !== auth.member.memberId) {
-			try {
-				const delivery = await dispatchNotificationSafely({
-					wg,
-					event: 'announcement.reacted',
-					payload: {
-						announcementId: id,
-						title: announcementPushTitle(effect.announcementContent),
-						actorName: auth.member.name,
-					},
-					targetMemberIds: [effect.authorMemberId],
-					excludeMemberId: auth.member.memberId,
-				});
-				warning = delivery.warning;
-			} catch (err) {
-				logApiError('[announcement/reactions] post-commit notification failed', err);
-			}
-		}
-		if (warning && outcome.key) {
-			try {
-				if (!(await persistReplayWarning(scope, outcome.key, effect.reactionId, warning))) {
-					logApiError(
-						'[announcement/reactions] replay warning persistence failed',
-						new Error('replay_row_missing'),
-					);
-					warning = null;
-				}
-			} catch (err) {
-				logApiError('[announcement/reactions] replay warning persistence failed', err);
-				warning = null;
-			}
-		}
-		return NextResponse.json({
-			...(outcome.response.body as { reaction: string; active: boolean }),
-			warning,
-		});
+		return NextResponse.json(outcome.response.body, { status: outcome.response.status });
 	},
 );

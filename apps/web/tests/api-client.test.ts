@@ -324,9 +324,14 @@ test('apiFetch rechecks the account after parsing a delayed error body', async (
 	const body = deferred<{ error: string }>();
 	const bodyStarted = deferred<void>();
 	const response = Response.json({ error: 'auth_required' }, { status: 401 });
-	response.json = () => {
-		bodyStarted.resolve();
-		return body.promise;
+	const clone = response.clone.bind(response);
+	response.clone = () => {
+		const copy = clone();
+		copy.json = () => {
+			bodyStarted.resolve();
+			return body.promise;
+		};
+		return copy;
 	};
 	replaceFetch(t, async () => response);
 

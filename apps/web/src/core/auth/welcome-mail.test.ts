@@ -16,12 +16,12 @@ mock.module('@/core/mail/send-mail', {
 const { queueWelcomeMail } = await import('./welcome-mail');
 const { renderWelcomeMail } = await import('@/core/mail/templates');
 
-const newUser = (locale: unknown): User =>
+const newUser = (locale: unknown, createdAt = new Date()): User =>
 	({
 		id: 'u1',
 		email: 'a@example.test',
 		email_confirmed_at: new Date().toISOString(),
-		created_at: new Date().toISOString(),
+		created_at: createdAt.toISOString(),
 		user_metadata: { full_name: 'Anna', locale },
 	}) as unknown as User;
 
@@ -41,4 +41,10 @@ test('the request language is the fallback when the account stores none', () => 
 		sent[0]?.mail.subject,
 		renderWelcomeMail({ firstName: 'Anna', locale: 'en' }).subject,
 	);
+});
+
+test('a sign-up confirmed days later still gets the welcome mail', () => {
+	sent.length = 0;
+	queueWelcomeMail(newUser('de', new Date(Date.now() - 3 * 24 * 60 * 60 * 1000)), 'de');
+	assert.equal(sent.length, 1);
 });

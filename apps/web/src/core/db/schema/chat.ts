@@ -164,12 +164,3 @@ export const wgChatMentionsRelations = relations(wgChatMentions, ({ one }) => ({
 		references: [wgMembers.id],
 	}),
 }));
-
-export type WgChatMessage = typeof wgChatMessages.$inferSelect;
-export type NewWgChatMessage = typeof wgChatMessages.$inferInsert;
-export type WgChatReaction = typeof wgChatReactions.$inferSelect;
-export type NewWgChatReaction = typeof wgChatReactions.$inferInsert;
-export type WgChatRead = typeof wgChatReads.$inferSelect;
-export type NewWgChatRead = typeof wgChatReads.$inferInsert;
-export type WgChatMention = typeof wgChatMentions.$inferSelect;
-export type NewWgChatMention = typeof wgChatMentions.$inferInsert;

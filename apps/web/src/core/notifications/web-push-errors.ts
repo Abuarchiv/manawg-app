@@ -41,8 +41,32 @@ export function parseWebPushStatusCode(err: unknown): number {
 	return statusCode >= 100 && statusCode <= 599 ? statusCode : 0;
 }
 
-export function isTransientWebPushStatus(statusCode: number): boolean {
+function isTransientWebPushStatus(statusCode: number): boolean {
 	return statusCode === 408 || statusCode === 429 || statusCode >= 500;
+}
+
+// Connection failures before the push service answered. Node reports a failed IPv6/IPv4 race as an
+// AggregateError (e.g. ENETUNREACH + ETIMEDOUT in a container without IPv6), which the next attempt
+// usually wins.
+const TRANSIENT_NETWORK_CODES = new Set([
+	'ECONNREFUSED',
+	'ECONNRESET',
+	'EAI_AGAIN',
+	'EHOSTUNREACH',
+	'ENETUNREACH',
+	'ETIMEDOUT',
+]);
+
+/** Worth another attempt: a retryable push-service status or a connection that never got through. */
+export function isTransientWebPushError(err: unknown): boolean {
+	const statusCode = parseWebPushStatusCode(err);
+	if (statusCode !== 0) return isTransientWebPushStatus(statusCode);
+	const attempts = err instanceof AggregateError ? err.errors : [err];
+	return attempts.some((attempt) => {
+		const code =
+			attempt && typeof attempt === 'object' ? (attempt as { code?: unknown }).code : null;
+		return typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code);
+	});
 }
 
 // Messages web-push throws locally (encryption-helper) when a stored subscription's own keys are

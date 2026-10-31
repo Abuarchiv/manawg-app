@@ -15,7 +15,6 @@ export default {
 		post: 'Post',
 		newMessage: 'New message',
 		newReply: 'New reply',
-		newReaction: 'New reaction',
 		newMention: 'New mention',
 		soon: 'soon',
 	},
@@ -60,10 +59,6 @@ export default {
 	announcementCommented: {
 		title: 'New reply',
 		body: '{actorName} replied on the noticeboard: {title}',
-	},
-	announcementReacted: {
-		title: 'Noticeboard reaction',
-		body: '{actorName} reacted to your post: {title}',
 	},
 	announcementResolved: {
 		title: 'Noticeboard post resolved',

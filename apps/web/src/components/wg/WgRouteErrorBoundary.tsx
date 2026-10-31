@@ -20,7 +20,7 @@ import { SUPPORT_MAILTO } from '@/shared/lib/support-mailto';
 
 interface WgRouteErrorBoundaryProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 	/** Identifies the failing route in the error log — e.g. `wg-chat`, `wg-supplies`. */
 	boundary: string;
 	/** Heading shown to the user. */
@@ -42,7 +42,7 @@ interface WgRouteErrorBoundaryProps {
  */
 export function WgRouteErrorBoundary({
 	error,
-	reset,
+	retry,
 	boundary,
 	title,
 	body,
@@ -102,7 +102,7 @@ export function WgRouteErrorBoundary({
 								<Button
 									type="button"
 									size="lg"
-									onClick={() => (isChunkLoadError(error) ? window.location.reload() : reset())}
+									onClick={() => (isChunkLoadError(error) ? window.location.reload() : retry())}
 									className="w-full"
 								>
 									{t('tryAgain')}

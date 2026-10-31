@@ -8,6 +8,7 @@ import {
 	mockUnreadCount,
 	navigateToFeature,
 	setupMember,
+	showMonthOf,
 	skipUnlessFixtures,
 } from './support/helpers';
 import { setEnglishLocale } from './support/i18n';
@@ -18,9 +19,9 @@ const CHORE_LINK = 'main a[href*="highlight=label-chore"]';
 test.describe('calendar label in name', () => {
 	skipUnlessFixtures();
 
-	for (const [language, rota, monthTab] of [
-		['de', 'Putzplan', 'Monat'],
-		['en', 'cleaning rota', 'Month'],
+	for (const [language, rota, monthTab, nextMonth] of [
+		['de', 'Putzplan', 'Monat', 'Nächster Monat'],
+		['en', 'cleaning rota', 'Month', 'Next month'],
 	] as const) {
 		test(`rows keep their visible text in the accessible name (${language})`, async ({
 			page,
@@ -82,21 +83,7 @@ test.describe('calendar label in name', () => {
 			await expectVisibleTextInName();
 
 			await page.getByRole('tab', { name: monthTab }).click();
-			await expect(page.getByRole('grid')).toBeVisible();
-			const targetMonth = new Intl.DateTimeFormat(language, {
-				month: 'long',
-				year: 'numeric',
-				timeZone: 'Europe/Berlin',
-			}).format(noon);
-			if (!(await page.getByText(targetMonth, { exact: true }).isVisible())) {
-				await page
-					.getByRole('button', {
-						name: language === 'de' ? 'Nächster Monat' : 'Next month',
-						exact: true,
-					})
-					.click();
-			}
-			await expect(page.getByText(targetMonth, { exact: true })).toBeVisible();
+			await showMonthOf(page, startsAt, nextMonth);
 			await page.locator(`[data-day-cell][aria-label$=", ${rota}"]`).click();
 			await expect(page.locator(CHORE_LINK)).toBeVisible();
 			await expectVisibleTextInName();

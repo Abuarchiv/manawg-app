@@ -1,3 +1,4 @@
+import { Agent } from 'node:https';
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db, pushSubscriptions, wgMembers } from '@/core/db';
 import { captureException, logApiError } from '@/core/infra/observability';
@@ -11,7 +12,7 @@ import {
 } from '@/core/notifications/notifications';
 import {
 	isInvalidSubscriptionKeyError,
-	isTransientWebPushStatus,
+	isTransientWebPushError,
 	parseWebPushStatusCode,
 } from '@/core/notifications/web-push-errors';
 import type { Locale } from '@/shared/i18n/locale';
@@ -45,6 +46,15 @@ interface WebPushResult {
 }
 
 const PUSH_RETRY_DELAYS_MS = [100, 300] as const;
+/**
+ * Pauses before a 404/410 ("subscription gone") is believed. FCM answers 410 for a subscription it
+ * issued only seconds ago until it has propagated (measured up to about 6 s), and now and then once
+ * for an older one; removing the subscription then would silently end push for that device.
+ */
+const PUSH_GONE_CONFIRM_DELAYS_MS = [1_500] as const;
+const NEW_SUBSCRIPTION_GONE_DELAYS_MS = [1_000, 2_000, 4_000] as const;
+/** A subscription this young is never removed for 404/410, only reported as a failed delivery. */
+const NEW_SUBSCRIPTION_GRACE_MS = 2 * 60_000;
 // Fan-out is chunked instead of firing every member's push at once: large
 // WGs would otherwise open one burst of connections and risk provider rate
 // limits. WG membership is capped, so batches stay small either way.
@@ -89,6 +99,12 @@ const PUSH_TTL_SECONDS: Record<'urgent' | 'normal', number> = {
 };
 /** A push service that does not answer by then is treated as a failed delivery. */
 const PUSH_REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * Node gives each address of the push service 250 ms to connect before trying the next one; on a
+ * host without IPv6 and a slow first packet (Docker Desktop, home servers) every attempt can expire
+ * and the push fails with ETIMEDOUT although the service is reachable.
+ */
+const pushAgent = new Agent({ autoSelectFamilyAttemptTimeout: 2_000 });
 
 /** Quiet-hour settings are WG-local and use the same Berlin calendar zone as
  * recurrence and reminders. Never depend on the host process timezone. */
@@ -145,6 +161,7 @@ async function sendWebPush(
 
 	await Promise.allSettled(
 		subs.map(async (sub) => {
+			const isNew = Date.now() - sub.createdAt.getTime() < NEW_SUBSCRIPTION_GRACE_MS;
 			try {
 				for (let attempt = 0; ; attempt += 1) {
 					try {
@@ -163,21 +180,29 @@ async function sendWebPush(
 								TTL: PUSH_TTL_SECONDS[priority],
 								urgency: priority === 'urgent' ? 'high' : 'normal',
 								timeout: PUSH_REQUEST_TIMEOUT_MS,
+								agent: pushAgent,
 							},
 						);
 						sent += 1;
 						break;
 					} catch (err) {
 						const statusCode = parseWebPushStatusCode(err);
-						if (!isTransientWebPushStatus(statusCode) || attempt >= PUSH_RETRY_DELAYS_MS.length) {
-							throw err;
-						}
-						await new Promise((resolve) => setTimeout(resolve, PUSH_RETRY_DELAYS_MS[attempt]));
+						const delays: readonly number[] =
+							statusCode === 404 || statusCode === 410
+								? isNew
+									? NEW_SUBSCRIPTION_GONE_DELAYS_MS
+									: PUSH_GONE_CONFIRM_DELAYS_MS
+								: isTransientWebPushError(err)
+									? PUSH_RETRY_DELAYS_MS
+									: [];
+						if (attempt >= delays.length) throw err;
+						await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
 					}
 				}
 			} catch (err) {
 				const statusCode = parseWebPushStatusCode(err);
-				if (statusCode === 404 || statusCode === 410 || isInvalidSubscriptionKeyError(err)) {
+				const gone = (statusCode === 404 || statusCode === 410) && !isNew;
+				if (gone || isInvalidSubscriptionKeyError(err)) {
 					staleSubscriptionIds.push(sub.id);
 				} else {
 					failures.push(err);
@@ -268,7 +293,6 @@ export async function dispatchNotification(
 	};
 	const category = notificationCategoryForEvent(input.event);
 	const priority = input.urgent ? 'urgent' : notificationPriorityForEvent(input.event);
-	if (priority === 'silent') return { sent: 0, failures: [] };
 	const currentHour = berlinCurrentHour();
 
 	const targetMembers = rows

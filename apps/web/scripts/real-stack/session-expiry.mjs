@@ -83,7 +83,8 @@ await p.waitForLoadState('networkidle');
 await expireWait('browser');
 await dump('before-click');
 await p.locator('nav').getByText('Haushalt').click();
-await p.waitForLoadState('networkidle');
+// A client-side navigation updates the URL after the network settles.
+await p.waitForURL(/\/chores/, { timeout: 10_000 }).catch(() => {});
 expect(p.url().includes('/chores'), 'tab switch without logout', p.url());
 await p
 	.getByText(/^Einkäufe/)

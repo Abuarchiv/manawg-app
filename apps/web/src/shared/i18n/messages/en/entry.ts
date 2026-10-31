@@ -107,7 +107,7 @@ export default {
 	},
 	errors: {
 		badInvite: 'This invite link is incomplete or not valid. Ask a flatmate for a new invite link.',
-		inviteExpired: 'This invitation has expired. Ask a member for a new one.',
+		inviteExpired: 'This invitation is no longer valid. Ask a member for a new one.',
 		deletionPending: 'Your account is being deleted. You can no longer create or join flats.',
 		wgNotFound: 'This flat does not exist.',
 		nameTaken: 'That name is already taken in this flat.',

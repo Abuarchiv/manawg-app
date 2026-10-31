@@ -67,6 +67,8 @@ export default function SettingsPage() {
 	const [exportSummary, setExportSummary] =
 		useState<ReturnType<typeof buildExportSummaryFromCounts>>(buildEmptyExportSummary);
 	const [exportSummaryError, setExportSummaryError] = useState<Message | null>(null);
+	// The summary starts with zero counts so the CSV select has its sections; they are shown only once loaded.
+	const [exportCountsLoaded, setExportCountsLoaded] = useState(false);
 	// The hash is read in the mount effect below: reading it here would differ from the server render.
 	const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
 
@@ -96,6 +98,7 @@ export default function SettingsPage() {
 				return;
 			}
 			setExportSummary(buildExportSummaryFromCounts(result.data.counts));
+			setExportCountsLoaded(true);
 			setExportSummaryError(null);
 			exportSummaryLoaded.current = true;
 		})();
@@ -207,6 +210,7 @@ export default function SettingsPage() {
 								identity={identity}
 								exportSummary={exportSummary}
 								exportSummaryError={exportSummaryError}
+								exportCountsLoaded={exportCountsLoaded}
 							/>
 						)}
 					</TabsContent>

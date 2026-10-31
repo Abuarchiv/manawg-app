@@ -22,7 +22,7 @@ function undoErrorMessage(error: string): Message {
 }
 
 /** Takes back everything an import created. Needs a second tap, because it removes expenses. */
-export function ImportUndo({ importId, label }: { importId: string; label?: string }) {
+export function ImportUndo({ importId, description }: { importId: string; description?: string }) {
 	const { wg, identity } = useWg();
 	const t = useTranslations('expenses-import.undo');
 	const renderMessage = useMessage();
@@ -77,7 +77,9 @@ export function ImportUndo({ importId, label }: { importId: string; label?: stri
 				variant={armed ? 'destructive' : 'outline'}
 				className="min-h-11"
 				disabled={pending}
-				{...(label ? { 'aria-label': armed ? t('confirmAria', { label }) : label } : {})}
+				{...(description
+					? { 'aria-label': t(armed ? 'confirmAria' : 'buttonAria', { description }) }
+					: {})}
 				onClick={() => (armed ? void undo() : setArmed(true))}
 			>
 				{pending && <Spinner aria-hidden />}

@@ -142,9 +142,8 @@ export function OfflineBanner() {
 			});
 			const after = countOfflineActions(wg.shareCode, { memberId: identity.memberId });
 			setQueueCount(after);
-			if (synced > 0) {
-				toast.success(render(manualSyncResultMessage(synced, after, { offlineLabel: true })));
-			} else if (before > 0 && after > 0) {
+			// A successful sync already toasts through the synced-event listener above.
+			if (synced <= 0 && before > 0 && after > 0) {
 				setNotice({ key: 'shell.offlineBanner.notSent' });
 			}
 		} catch {

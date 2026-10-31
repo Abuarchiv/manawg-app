@@ -213,6 +213,11 @@ test('known codes win over the status bucket; unknown codes fall back to it', ()
 		'offline.failure.syncFailed.title',
 	);
 	assert.equal(explainOfflineActionFailure(500).title.key, 'offline.failure.serverNotReady.title');
+	// A held answer is never resent, so it must not say "try again later".
+	assert.equal(
+		explainOfflineActionFailure(400, 'something_new', true).title.key,
+		'offline.failure.rejected.title',
+	);
 });
 
 test('401 reads as an expired session, 403 as missing access, a deactivated member as moved out', () => {

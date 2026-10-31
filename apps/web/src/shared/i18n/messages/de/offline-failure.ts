@@ -33,6 +33,10 @@ export default {
 		title: 'Synchronisierung fehlgeschlagen',
 		detail: 'Die Aktion bleibt in der Warteschlange. Versuche es später noch einmal.',
 	},
+	rejected: {
+		title: 'Vom Server abgelehnt',
+		detail: 'Die Aktion wird nicht erneut gesendet. Bearbeite oder verwirf sie hier.',
+	},
 	maintenance: {
 		title: 'App in Wartung',
 		detail:

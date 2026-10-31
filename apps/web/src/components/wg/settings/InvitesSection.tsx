@@ -52,7 +52,7 @@ export function InvitesSection({ wg, identity }: { wg: WgSummary; identity: Sess
 	} = useCachedFetch<{ invites: InviteListItem[] }>(listUrl, { memberId: identity.memberId });
 	const [creating, setCreating] = useState(false);
 	const [revokingId, setRevokingId] = useState<string | null>(null);
-	const [fresh, setFresh] = useState<string | null>(null);
+	const [fresh, setFresh] = useState<{ id: string; url: string } | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const busyRef = useRef(false);
@@ -69,7 +69,7 @@ export function InvitesSection({ wg, identity }: { wg: WgSummary; identity: Sess
 				setError(render(result.message));
 				return;
 			}
-			setFresh(result.invite.url);
+			setFresh({ id: result.invite.id, url: result.invite.url });
 			void refresh({ afterMutation: true });
 		} finally {
 			busyRef.current = false;
@@ -104,7 +104,7 @@ export function InvitesSection({ wg, identity }: { wg: WgSummary; identity: Sess
 				return;
 			}
 			setMessage(t('revoked'));
-			setFresh(null);
+			setFresh((current) => (current?.id === id ? null : current));
 			void refresh({ afterMutation: true });
 		} finally {
 			busyRef.current = false;
@@ -137,15 +137,15 @@ export function InvitesSection({ wg, identity }: { wg: WgSummary; identity: Sess
 								aria-label={t('qrAlt')}
 								className="mx-auto w-fit rounded-lg bg-white p-3"
 							>
-								<QRCode value={fresh} size={148} level="M" />
+								<QRCode value={fresh.url} size={148} level="M" />
 							</div>
-							<p className="text-foreground break-all text-sm">{fresh}</p>
+							<p className="text-foreground break-all text-sm">{fresh.url}</p>
 							<div className="flex gap-2">
 								<Button
 									type="button"
 									variant="outline"
 									className="flex-1"
-									onClick={() => void share(fresh)}
+									onClick={() => void share(fresh.url)}
 								>
 									<Share2 aria-hidden />
 									{t('share')}
@@ -155,7 +155,7 @@ export function InvitesSection({ wg, identity }: { wg: WgSummary; identity: Sess
 									variant="outline"
 									className="flex-1"
 									aria-label={t('copyAria')}
-									onClick={() => void copy(fresh)}
+									onClick={() => void copy(fresh.url)}
 								>
 									<Copy aria-hidden />
 									{t('copy')}

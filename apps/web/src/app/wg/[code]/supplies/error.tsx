@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface SuppliesErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function SuppliesError({ error, reset }: SuppliesErrorProps) {
+export default function SuppliesError({ error, retry }: SuppliesErrorProps) {
 	const t = useTranslations('inventory.errorPage');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-supplies"
 			title={t('title')}
 			body={t('body')}

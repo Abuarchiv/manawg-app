@@ -71,13 +71,13 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 
 	// The layout's roster has no roles; load them so the Admin badge is right from the start.
 	useEffect(() => {
-		void refreshMembers(identity.memberId);
-	}, [refreshMembers, identity.memberId]);
+		void refreshMembers();
+	}, [refreshMembers]);
 
 	function handleMemberDeactivated(name: string): void {
 		setMemberActionError(null);
 		setMemberActionMessage(t('movedOutDone', { name }));
-		void refreshMembers(identity.memberId);
+		void refreshMembers();
 	}
 
 	async function handleTransferAdmin(): Promise<void> {
@@ -106,7 +106,7 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 		setMemberActionError(null);
 		setMemberActionMessage(t('promoted', { name: memberToPromote.name }));
 		setMemberToPromote(null);
-		void refreshMembers(identity.memberId);
+		void refreshMembers();
 	}
 
 	async function handleReactivate(member: { id: string; name: string }): Promise<void> {
@@ -124,7 +124,7 @@ export function MembersSection({ wg, members, identity }: MembersSectionProps) {
 		);
 		if (res.ok) {
 			setMemberActionMessage(t('reactivated', { name: member.name }));
-			void refreshMembers(identity.memberId);
+			void refreshMembers();
 		} else {
 			setMemberActionError(
 				isRateLimited(res.error, res.status)

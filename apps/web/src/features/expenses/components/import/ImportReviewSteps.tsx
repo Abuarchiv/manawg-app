@@ -59,28 +59,36 @@ export function ImportMappingStep({ headingRef, wizard }: StepProps) {
 	);
 }
 
-function RejectedRowsAlert({ rejected }: { rejected: readonly RejectedRow[] }) {
+/** The rows the parser could not read, each with its line and reason, behind a disclosure. */
+export function RejectedRowsDetails({ rejected }: { rejected: readonly RejectedRow[] }) {
 	const t = useTranslations('expenses-import.preview');
 	const renderMessage = useMessage();
+	return (
+		<details>
+			<summary className="min-h-11 cursor-pointer py-2">{t('rejectedDetails')}</summary>
+			<ul className="flex flex-col gap-1">
+				{rejected.map((row) => (
+					<li key={row.line}>
+						{t('rejectedRow', {
+							line: String(row.line),
+							description: row.description,
+							reason: renderMessage(describeRejectedRowReason(row.reason)),
+						})}
+					</li>
+				))}
+			</ul>
+		</details>
+	);
+}
+
+function RejectedRowsAlert({ rejected }: { rejected: readonly RejectedRow[] }) {
+	const t = useTranslations('expenses-import.preview');
 	if (rejected.length === 0) return null;
 	return (
 		<Alert>
 			<AlertTitle>{t('rejectedTitle', { count: rejected.length })}</AlertTitle>
 			<AlertDescription>
-				<details>
-					<summary className="min-h-11 cursor-pointer py-2">{t('rejectedDetails')}</summary>
-					<ul className="flex flex-col gap-1">
-						{rejected.map((row) => (
-							<li key={row.line}>
-								{t('rejectedRow', {
-									line: String(row.line),
-									description: row.description,
-									reason: renderMessage(describeRejectedRowReason(row.reason)),
-								})}
-							</li>
-						))}
-					</ul>
-				</details>
+				<RejectedRowsDetails rejected={rejected} />
 			</AlertDescription>
 		</Alert>
 	);

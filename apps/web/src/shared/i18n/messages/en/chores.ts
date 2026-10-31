@@ -4,7 +4,7 @@ import type de from '../de/chores';
 export default {
 	status: {
 		unknown: 'Check date',
-		overdue: 'open for {days, plural, one {# day} other {# days}}',
+		overdue: 'open for {days, plural, one {# day} other {# days}}',
 		dueToday: 'due today',
 		tomorrow: 'tomorrow',
 		inDays: 'in {days, plural, one {# day} other {# days}}',

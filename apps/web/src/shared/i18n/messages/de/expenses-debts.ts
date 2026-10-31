@@ -18,7 +18,7 @@ export default {
 		'{debtorSelf, select, yes {Du schuldest} other {{debtor} schuldet}} {creditorSelf, select, yes {dir} other {{creditor}}}',
 	age: {
 		days: 'seit {count, plural, one {# Tag} other {# Tagen}}',
-		dueToday: 'heute fällig',
+		today: 'seit heute',
 	},
 	remind: {
 		idle: 'Erinnern',

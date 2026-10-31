@@ -1,7 +1,8 @@
 import type { StoredImageObject } from '@/core/infra/supabase-storage';
+import { MS_PER_DAY } from '@/core/utils/time';
 
 /** A picture may sit in an unsent draft or an offline queue for a while before its row exists. */
-const ORPHAN_MIN_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+const ORPHAN_MIN_AGE_MS = 14 * MS_PER_DAY;
 
 /** The stored pictures old enough, unreferenced and not already queued for deletion. */
 export function selectOrphanKeys(

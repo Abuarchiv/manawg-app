@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
-import { groupActivityItemsByDay } from '../src/composition/activity';
+import { activityDayRelation, groupActivityItemsByDay } from '../src/composition/activity';
 import {
 	getBerlinWeekWindow,
 	getForYouItems,
@@ -640,17 +640,14 @@ describe('edge data helpers', () => {
 	test('"Gestern" is the previous Berlin day on the day after spring-forward', () => {
 		// 30.03.2026 00:30 CEST; 29.03. had only 23h, so now-24h lands on 28.03.
 		const now = Date.parse('2026-03-29T22:30:00Z');
-		const groups = groupActivityItemsByDay([item('2026-03-29T10:00:00Z')], now);
-		assert.equal(groups[0]?.label, 'Gestern');
+		const [group] = groupActivityItemsByDay([item('2026-03-29T10:00:00Z')]);
+		assert.equal(activityDayRelation(group?.date ?? '', now), 'yesterday');
 	});
 
 	test('day labels do not shift for devices ahead of Berlin', () => {
 		withTz('Pacific/Kiritimati', () => {
-			const groups = groupActivityItemsByDay(
-				[item('2026-09-20T10:00:00Z')],
-				Date.parse('2026-10-01T10:00:00Z'),
-			);
-			assert.match(groups[0]?.label ?? '', /20\.09\./);
+			const groups = groupActivityItemsByDay([item('2026-09-20T10:00:00Z')]);
+			assert.equal(groups[0]?.date, '2026-09-20');
 		});
 	});
 

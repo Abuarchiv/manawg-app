@@ -11,6 +11,7 @@ import {
 	type RecoveryAction,
 	recoveryActionFor,
 } from '@/features/expenses/import-errors';
+import type { RejectedRow } from '@/features/expenses/import-parsers';
 import type { Message } from '@/shared/i18n/message';
 import type { ImportSourceKind } from './ImportSourcePicker';
 import {
@@ -43,6 +44,8 @@ export function useImportWizard() {
 	const [skipIndexes, setSkipIndexes] = useState<Set<number>>(new Set());
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<Message | null>(null);
+	// Reasons per row when the file has no readable row at all, shown with the error.
+	const [unreadableRows, setUnreadableRows] = useState<readonly RejectedRow[]>([]);
 	const [commitState, setCommitState] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
 	const [commitResult, setCommitResult] = useState<CommitResponse | null>(null);
 	const [skipDuplicates, setSkipDuplicates] = useState(true);
@@ -52,6 +55,7 @@ export function useImportWizard() {
 	function clearImportError(): void {
 		setError(null);
 		setRecoveryAction(null);
+		setUnreadableRows([]);
 	}
 
 	/** Everything derived from the current input: preview, mapping, selection, result. */
@@ -136,8 +140,13 @@ export function useImportWizard() {
 		// Without a recognised expense the mapping step would be empty and claim both
 		// "all names recognised" and "no names recognised".
 		if (res.data.parsed.length === 0) {
-			const unreadable = (res.data.rejected?.length ?? 0) > 0;
-			showImportError('preview', unreadable ? 'rows_unreadable' : 'empty_payload', PREVIEW_FAILED);
+			const rejected = res.data.rejected ?? [];
+			showImportError(
+				'preview',
+				rejected.length > 0 ? 'rows_unreadable' : 'empty_payload',
+				PREVIEW_FAILED,
+			);
+			setUnreadableRows(rejected);
 			return;
 		}
 		setPreview(res.data);
@@ -283,6 +292,7 @@ export function useImportWizard() {
 		setSkipDuplicates,
 		busy,
 		error,
+		unreadableRows,
 		recoveryAction,
 		commitState,
 		commitResult,

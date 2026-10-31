@@ -166,14 +166,16 @@ export function MonthlyStatementDocument({
 									<th scope="row" className="max-w-0 py-2.5 text-left font-medium">
 										<span className="flex min-w-0 items-center gap-2">
 											<MemberAvatar name={member.name} size={24} />
-											<span className="truncate" title={member.name}>
-												{member.name}
-											</span>
-											{member.id === viewerId && (
-												<span className="shrink-0 text-[12px] font-normal text-muted-foreground">
-													{t('document.you')}
+											<span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+												<span className="max-w-full truncate" title={member.name}>
+													{member.name}
 												</span>
-											)}
+												{member.id === viewerId && (
+													<span className="text-[12px] font-normal text-muted-foreground">
+														{t('document.you')}
+													</span>
+												)}
+											</span>
 										</span>
 									</th>
 									<td className={cn(MONEY, 'pl-3 text-right text-[13px]')}>

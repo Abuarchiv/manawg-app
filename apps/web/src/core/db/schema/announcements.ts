@@ -92,5 +92,4 @@ export const announcementComments = pgTable(
 );
 
 export type Announcement = typeof announcements.$inferSelect;
-export type AnnouncementReaction = typeof announcementReactions.$inferSelect;
 export type AnnouncementComment = typeof announcementComments.$inferSelect;

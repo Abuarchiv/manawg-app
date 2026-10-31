@@ -15,6 +15,8 @@ export async function saveAccountLocale(locale: Locale): Promise<void> {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ locale }),
+		// A stalled connection must not hold back the reload that applies the new language.
+		signal: AbortSignal.timeout(5000),
 	}).catch(() => null);
 	// An unread body keeps the request open in Chromium, so the page never settles.
 	await res?.text().catch(() => undefined);

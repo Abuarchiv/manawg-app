@@ -122,12 +122,12 @@ export default {
 			'{description}: {count, plural, one {{count, number, ::group-off} Ausgabe} other {{count, number, ::group-off} Ausgaben}}',
 		entryBy:
 			'{description}: {count, plural, one {{count, number, ::group-off} Ausgabe} other {{count, number, ::group-off} Ausgaben}}, von {author}',
-		undoLabel: '{description} rückgängig machen',
 	},
 	undo: {
 		button: 'Import rückgängig machen',
 		confirm: 'Wirklich alle importierten Ausgaben entfernen',
-		confirmAria: '{label}: wirklich entfernen',
+		buttonAria: 'Import rückgängig machen: {description}',
+		confirmAria: 'Wirklich alle importierten Ausgaben entfernen: {description}',
 		cancel: 'Abbrechen',
 		doneUnknown: 'Import rückgängig gemacht.',
 		done: 'Import rückgängig gemacht: {count, plural, one {{count, number, ::group-off} Ausgabe} other {{count, number, ::group-off} Ausgaben}} entfernt.',

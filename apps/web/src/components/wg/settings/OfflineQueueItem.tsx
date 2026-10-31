@@ -55,7 +55,7 @@ export function OfflineQueueItem({
 	const lastError = item.lastErrorMessage ? message(item.lastErrorMessage) : item.lastError;
 	const rowBusy = syncing || checkingServer;
 	return (
-		<Item key={item.id} variant="outline" className="items-start">
+		<Item variant="outline" className="items-start">
 			<ItemContent className="min-w-0">
 				<ItemTitle>
 					<span className="min-w-0 flex-1 truncate">{message(summary.title)}</span>

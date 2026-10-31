@@ -25,7 +25,7 @@ import { ImportHistory } from './ImportHistory';
 import { ImportInputStep } from './ImportInputStep';
 import { ImportProgress } from './ImportProgress';
 import { ImportResultStep } from './ImportResultStep';
-import { ImportMappingStep, ImportPreviewStep } from './ImportReviewSteps';
+import { ImportMappingStep, ImportPreviewStep, RejectedRowsDetails } from './ImportReviewSteps';
 import { type ImportSourceKind, ImportSourcePicker } from './ImportSourcePicker';
 import { ImportStepHeading } from './ImportStepHeading';
 import type { ImportStep } from './import-wizard-types';
@@ -216,6 +216,9 @@ export function ImportWizard() {
 				<Alert id="import-error" variant="destructive">
 					<AlertDescription className="flex flex-col items-start gap-2">
 						<span>{renderMessage(error)}</span>
+						{wizard.unreadableRows.length > 0 && (
+							<RejectedRowsDetails rejected={wizard.unreadableRows} />
+						)}
 						{recoveryAction && (
 							<Button
 								variant="outline"

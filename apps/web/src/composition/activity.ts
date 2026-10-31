@@ -99,7 +99,6 @@ interface ActivityTimelineInput {
 
 interface ActivityChronicleGroup {
 	date: string;
-	label: string;
 	items: ActivityItem[];
 }
 
@@ -273,38 +272,24 @@ export function filterActivityItems(
 	});
 }
 
-export function groupActivityItemsByDay(
-	items: ActivityItem[],
-	now = Date.now(),
-): ActivityChronicleGroup[] {
-	const formatter = new Intl.DateTimeFormat('de-DE', {
-		weekday: 'short',
-		day: '2-digit',
-		month: '2-digit',
-		timeZone: 'Europe/Berlin',
-	});
-	// Group by Berlin calendar day so entries around midnight land under the
-	// label the user actually sees (labels are formatted in Berlin time).
-	const todayKey = berlinDayKey(new Date(now));
-	// Not `now - 24h`: on the day after spring-forward (23h) that lands two days back.
-	const yesterdayKey = berlinDayKey(prevBerlinDayStart(startOfBerlinDay(new Date(now))));
+/** Groups items by Berlin calendar day, newest day first; the page labels the days in the reader's language. */
+export function groupActivityItemsByDay(items: ActivityItem[]): ActivityChronicleGroup[] {
+	// Berlin day, so entries around midnight land under the day the reader sees.
 	const groups = new Map<string, ActivityItem[]>();
-
 	for (const item of items) {
 		const key = berlinDayKey(new Date(item.timestamp));
 		groups.set(key, [...(groups.get(key) ?? []), item]);
 	}
-
 	return Array.from(groups.entries())
 		.sort(([a], [b]) => b.localeCompare(a))
-		.map(([date, groupItems]) => ({
-			date,
-			label:
-				date === todayKey
-					? 'Heute' // i18n-ignore label of the grouping helper; the page renders day labels from the catalog
-					: date === yesterdayKey
-						? 'Gestern' // i18n-ignore label of the grouping helper; the page renders day labels from the catalog
-						: formatter.format(new Date(`${date}T12:00:00.000Z`)),
-			items: groupItems,
-		}));
+		.map(([date, groupItems]) => ({ date, items: groupItems }));
+}
+
+/** Whether a Berlin day key is today or yesterday. */
+export function activityDayRelation(date: string, now = Date.now()): 'today' | 'yesterday' | null {
+	if (date === berlinDayKey(new Date(now))) return 'today';
+	// Not `now - 24h`: on the day after spring-forward (23h) that lands two days back.
+	if (date === berlinDayKey(prevBerlinDayStart(startOfBerlinDay(new Date(now)))))
+		return 'yesterday';
+	return null;
 }

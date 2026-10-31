@@ -209,6 +209,7 @@ export const PATCH = withWgRoute<{ id: string }>(
 				status: updated.status,
 				kind: updated.kind,
 				pinned: updated.pinnedAt !== null,
+				statusChanged: outcome.statusChanged,
 			},
 		});
 		let warning: NotificationDispatchWarning = null;

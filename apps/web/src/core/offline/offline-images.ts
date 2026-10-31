@@ -15,7 +15,7 @@ const TOKEN_PREFIX = 'manawg-pending-image:';
 // A stalled PUT on a bad mobile connection would otherwise block the uploader indefinitely.
 const UPLOAD_TIMEOUT_MS = 60_000;
 
-export type ImageUploadPurpose = 'expense' | 'announcement' | 'chat';
+export type ImageUploadPurpose = 'expense' | 'announcement';
 
 /** The IndexedDB blob behind a pending-image token is gone (cleared storage, other member). */
 export class PendingImageMissingError extends Error {

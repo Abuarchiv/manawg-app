@@ -16,7 +16,15 @@ mock.module('@/core/db', {
 					where: async () =>
 						table === wgMembers
 							? [member('m-de', 'de'), member('m-en', 'en'), member('m-old', undefined)]
-							: [{ id: 's', endpoint: 'https://push.test', p256dh: 'p', authKey: 'a' }],
+							: [
+									{
+										id: 's',
+										endpoint: 'https://push.test',
+										p256dh: 'p',
+										authKey: 'a',
+										createdAt: new Date(0),
+									},
+								],
 				}),
 			}),
 		},

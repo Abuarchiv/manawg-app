@@ -5,15 +5,15 @@ import { WgRouteErrorBoundary } from '@/components/wg/WgRouteErrorBoundary';
 
 interface PinboardErrorProps {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }
 
-export default function PinboardError({ error, reset }: PinboardErrorProps) {
+export default function PinboardError({ error, retry }: PinboardErrorProps) {
 	const t = useTranslations('pinboard.errorPage');
 	return (
 		<WgRouteErrorBoundary
 			error={error}
-			reset={reset}
+			retry={retry}
 			boundary="wg-pinboard"
 			title={t('title')}
 			body={t('body')}

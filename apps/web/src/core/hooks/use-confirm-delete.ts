@@ -8,7 +8,7 @@ interface ConfirmDelete {
 	cancel: () => void;
 }
 
-/** After this long an armed "Entfernen" falls back, so it never lingers in the list. */
+/** After this long an armed remove button falls back, so it never lingers in the list. */
 const ARMED_TIMEOUT_MS = 4000;
 
 // One armed row per page: arming a second row disarms the first, so two red

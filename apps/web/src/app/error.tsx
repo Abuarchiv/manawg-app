@@ -18,10 +18,10 @@ import { SUPPORT_MAILTO } from '@/shared/lib/support-mailto';
 
 export default function ErrorBoundary({
 	error,
-	reset,
+	retry,
 }: {
 	error: Error & { digest?: string };
-	reset: () => void;
+	retry: () => void;
 }) {
 	const t = useTranslations('shell.errorPage');
 	const mainRef = useRef<HTMLElement>(null);
@@ -72,7 +72,7 @@ export default function ErrorBoundary({
 					<Button
 						type="button"
 						size="lg"
-						onClick={() => (isChunkLoadError(error) ? window.location.reload() : reset())}
+						onClick={() => (isChunkLoadError(error) ? window.location.reload() : retry())}
 					>
 						{t('tryAgain')}
 					</Button>

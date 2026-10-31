@@ -5,7 +5,7 @@ const SPLASH_STORAGE_KEY = 'manawg:splash-shown';
 const SPLASH_DEMO_KEY = 'manawg:splash-demo';
 
 /**
- * Runs before first paint: the splash shows once per PWA window ("Kaltstart"), never in a
+ * Runs before first paint: the splash shows once per PWA window (a cold start), never in a
  * plain browser tab and never under automation (navigator.webdriver), unless the demo key is set.
  */
 export const SPLASH_BOOTSTRAP_SCRIPT = `(function(){try{var s=sessionStorage;var demo=s.getItem('${SPLASH_DEMO_KEY}');var app=matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;var skip=s.getItem('${SPLASH_STORAGE_KEY}')||(!demo&&(navigator.webdriver||!app));s.setItem('${SPLASH_STORAGE_KEY}','1');if(skip)document.documentElement.dataset.splash='off';}catch(e){document.documentElement.dataset.splash='off';}})();`;
