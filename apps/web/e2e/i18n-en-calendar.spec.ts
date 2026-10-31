@@ -223,7 +223,7 @@ test.describe('English calendar', () => {
 				await expect(drawer.getByLabel('Repeats')).toHaveValue('WEEKLY');
 				await drawer.getByLabel('Title', { exact: true }).fill('');
 				await drawer.getByRole('button', { name: 'Save event' }).click();
-				await expect(drawer.getByText('The title is missing.')).toBeVisible();
+				await expect(drawer.getByText('The title is missing.')).toBeInViewport();
 				await expectNoGermanChrome(page);
 				await expectNoSidewaysScroll(page, width);
 				await drawer.getByRole('button', { name: 'Cancel' }).click();
@@ -239,6 +239,42 @@ test.describe('English calendar', () => {
 			});
 		}
 	}
+
+	test('the end-before-start error stays above the create footer', async ({
+		page,
+		context,
+		baseURL,
+	}) => {
+		await prepare(page, context, baseURL, 390, 'light');
+		await page.setViewportSize({ width: 390, height: 844 });
+		await navigateToFeature(page, CALENDAR);
+		await dismissOnboarding(page);
+		await page.getByRole('button', { name: 'Add event' }).click();
+		const drawer = page.getByRole('dialog');
+		await drawer.getByLabel('Title', { exact: true }).fill('Plant swap');
+		await drawer.getByLabel('Starts').fill('2030-01-10T10:00');
+		await drawer.getByLabel('Ends (optional)').fill('2030-01-10T09:00');
+		await drawer.getByRole('button', { name: 'Save event' }).click();
+		await expect(drawer.getByText('The end time is before the start time.')).toBeInViewport();
+	});
+
+	test('the end-before-start error stays above the edit footer', async ({
+		page,
+		context,
+		baseURL,
+	}) => {
+		await prepare(page, context, baseURL, 390, 'light');
+		await page.setViewportSize({ width: 390, height: 640 });
+		await navigateToFeature(page, CALENDAR);
+		await dismissOnboarding(page);
+		await page.getByRole('tab', { name: 'Agenda' }).click();
+		await page.getByRole('button', { name: 'Flat meeting' }).first().click();
+		const edit = page.getByRole('dialog');
+		await edit.getByLabel('Starts').fill('2030-01-10T10:00');
+		await edit.getByLabel('Ends (optional)').fill('2030-01-10T09:00');
+		await edit.getByRole('button', { name: 'Save', exact: true }).click();
+		await expect(edit.getByText('The end time is before the start time.')).toBeInViewport();
+	});
 
 	test('a failed save names the event in English', async ({ page, context, baseURL }) => {
 		await prepare(page, context, baseURL, 390, 'light');

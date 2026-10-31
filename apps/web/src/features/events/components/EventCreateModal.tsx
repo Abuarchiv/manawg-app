@@ -100,12 +100,6 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 	const [submitting, setSubmitting] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [errorField, setErrorField] = useState<'title' | 'startsAt' | 'endsAt' | null>(null);
-	// The message sits below the fields, the save button is pinned.
-	useEffect(() => {
-		// On field errors the focused field stays in view, the message is announced.
-		if (error && !errorField)
-			document.getElementById('event-create-error')?.scrollIntoView({ block: 'nearest' });
-	}, [error, errorField]);
 	// Most recently tapped template; while set, another template may replace the title.
 	const [activeTemplate, setActiveTemplate] = useState<string | null>(null);
 	function clearErrorFor(...fields: Array<'title' | 'startsAt' | 'endsAt'>): void {
@@ -277,12 +271,14 @@ export function EventCreateModal({ open, onClose, onSubmit, defaultDate }: Event
 								</Field>
 							}
 						/>
-						{error && (
+					</div>
+					{error && (
+						<div className="max-h-[35dvh] shrink-0 overflow-y-auto px-4 pb-3">
 							<Alert variant="destructive" id="event-create-error">
 								<AlertDescription>{error}</AlertDescription>
 							</Alert>
-						)}
-					</div>
+						</div>
+					)}
 					<DrawerFooter className="border-t pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
 						<Button type="submit" disabled={submitting}>
 							{submitting && <Spinner data-icon="inline-start" aria-hidden />}

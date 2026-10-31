@@ -107,13 +107,7 @@ export function EventEditModal({
 			setError(null);
 		}
 	}
-	// The message sits below the fields, the save button is pinned. On field errors
-	// the focused field stays in view, the message is announced.
 	const shownError = error || actionError;
-	useEffect(() => {
-		if (shownError && !errorField)
-			document.getElementById('event-edit-error')?.scrollIntoView({ block: 'nearest' });
-	}, [shownError, errorField]);
 
 	const showValues = useCallback((source: EditableEvent | EventOccurrence, rule: string | null) => {
 		setTitle(source.title);
@@ -340,12 +334,14 @@ export function EventEditModal({
 									)
 								}
 							/>
-							{shownError && (
+						</div>
+						{shownError && (
+							<div className="max-h-[35dvh] shrink-0 overflow-y-auto px-4 pb-3">
 								<Alert variant="destructive">
 									<AlertDescription id="event-edit-error">{shownError}</AlertDescription>
 								</Alert>
-							)}
-						</div>
+							</div>
+						)}
 						<EventEditFooter
 							readOnly={readOnly}
 							busy={busy}
